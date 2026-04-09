@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* { -webkit-tap-highlight-color: transparent; }
+
+body {
+  min-height: 100dvh;
+  overscroll-behavior: none;
+}
+
+/* Scrollbar hide */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Bottom nav safe area */
+.pb-safe { padding-bottom: calc(72px + var(--safe-bottom)); }
+.bottom-safe { bottom: var(--safe-bottom); }
+
+@layer components {
+  .card {
+    @apply bg-dark-800 border border-dark-border rounded-2xl p-5;
+  }
+  .card-sm {
+    @apply bg-dark-800 border border-dark-border rounded-xl p-4;
+  }
+  .btn-primary {
+    @apply flex items-center justify-center gap-2 w-full py-3.5 px-5 rounded-xl
+           bg-brand-400 text-black font-bold text-base active:brightness-90
+           disabled:opacity-40 disabled:cursor-not-allowed transition-all;
+  }
+  .btn-danger {
+    @apply flex items-center justify-center gap-2 w-full py-3.5 px-5 rounded-xl
+           bg-red-500 text-white font-bold text-base active:brightness-90
+           disabled:opacity-40 transition-all;
+  }
+  .btn-ghost {
+    @apply flex items-center justify-center gap-2 py-3.5 px-5 rounded-xl
+           bg-dark-700 text-white font-semibold text-sm border border-dark-border
+           active:bg-dark-600 transition-all;
+  }
+  .btn-sm {
+    @apply py-2 px-3 text-xs rounded-lg;
+  }
+  .input {
+    @apply w-full bg-dark-700 border border-dark-500 rounded-xl text-white text-base
+           px-4 py-3 outline-none focus:border-brand-400 transition-colors
+           placeholder:text-dark-500;
+  }
+  .label {
+    @apply block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 font-mono;
+  }
+  .badge-green  { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-brand-400/10 text-brand-400; }
+  .badge-red    { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-red-500/10 text-red-400; }
+  .badge-orange { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-orange-500/10 text-orange-400; }
+  .badge-blue   { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-blue-500/10 text-blue-400; }
+  .badge-gray   { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-dark-600 text-gray-500; }
+}
