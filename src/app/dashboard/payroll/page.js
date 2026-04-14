@@ -2,13 +2,14 @@
 // src/app/dashboard/payroll/page.js
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
-import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime } from '@/lib/utils'
+import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, salaryPeriodLabel } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 function buildReportHTML(cut, weekShifts, employees, branchName) {
   const active = employees.filter(e => e.has_shift)
   const rows = active.map(emp => {
     const s = empWeekSummary(emp, weekShifts, employees)
+    const period = salaryPeriodLabel(emp)
     const shiftRows = s.shifts.filter(sh => sh.status !== 'open').map(sh => {
       const cov = sh.covering_employee_id ? employees.find(e=>e.id===sh.covering_employee_id) : null
       const pay = (sh.duration_hours||0) * monthlyToHourly(cov||emp) * (sh.is_holiday?3:1)
@@ -23,7 +24,7 @@ function buildReportHTML(cut, weekShifts, employees, branchName) {
     }).join('')
     return `<div style="margin-bottom:28px;page-break-inside:avoid">
       <div style="font-size:13pt;font-weight:bold;margin-bottom:3px">${emp.name}</div>
-      <div style="font-size:9pt;color:#555;margin-bottom:8px">${emp.department||''} | Salario mensual: $${(emp.monthly_salary||0).toLocaleString()} | Tarifa/h: $${monthlyToHourly(emp).toFixed(2)}</div>
+      <div style="font-size:9pt;color:#555;margin-bottom:8px">${emp.department||''} | Salario: $${(emp.monthly_salary||0).toLocaleString()}/${period} | Tarifa/h: $${monthlyToHourly(emp).toFixed(2)}</div>
       <table style="width:100%;border-collapse:collapse;font-size:8.5pt;margin-bottom:6px">
         <thead><tr style="background:#f4f4f4">
           <th style="border:1px solid #ccc;padding:4px 6px">Fecha</th><th style="border:1px solid #ccc;padding:4px 6px">Entrada</th>
@@ -110,7 +111,6 @@ export default function PayrollPage() {
     await supabase.from('audit_log').insert({ tenant_id: tenantId, action: 'WEEK_CUT', employee_name: 'Gerente', detail: `${startStr}→${endStr}`, success: true })
     toast.success('Semana cerrada exitosamente')
     await load()
-    // Auto show report
     const { data: fresh } = await supabase.from('week_cuts').select('*').eq('id',cut.id).single()
     setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName))
     setClosing(false)
@@ -136,16 +136,18 @@ export default function PayrollPage() {
         </div>
       )}
 
-      {/* Week summary */}
       <div className="space-y-3 mb-6">
         {emps.map(emp => {
           const s = empWeekSummary(emp, weekShifts, emps)
+          const period = salaryPeriodLabel(emp)
           return (
             <div key={emp.id} className="card">
               <div className="flex items-start justify-between mb-3">
                 <div>
                   <div className="font-bold text-white">{emp.name}</div>
-                  <div className="text-xs text-gray-500">{emp.department} · ${monthlyToHourly(emp).toFixed(2)}/h</div>
+                  <div className="text-xs text-gray-500">
+                    {emp.department} · ${(emp.monthly_salary||0).toLocaleString()}/{period} · ${monthlyToHourly(emp).toFixed(2)}/h
+                  </div>
                 </div>
                 <div className="text-right">
                   <div className="text-xl font-extrabold text-brand-400 font-mono">${s.netPay.toFixed(0)}</div>
@@ -168,7 +170,6 @@ export default function PayrollPage() {
         })}
       </div>
 
-      {/* Close week */}
       <div className="card mb-4">
         <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Corte semanal</p>
         <div className="mb-3"><label className="label">Notas del corte (opcional)</label>
@@ -179,7 +180,6 @@ export default function PayrollPage() {
         </button>
       </div>
 
-      {/* Previous cuts */}
       {cuts.length > 0 && (
         <div>
           <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Cortes anteriores</p>
@@ -200,7 +200,6 @@ export default function PayrollPage() {
         </div>
       )}
 
-      {/* Print modal */}
       {printHTML && (
         <div className="fixed inset-0 z-[500] bg-white flex flex-col">
           <div className="flex gap-3 items-center p-3 bg-dark-900 border-b border-dark-border shrink-0 no-print">
