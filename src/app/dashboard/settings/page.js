@@ -61,7 +61,7 @@ export default function SettingsPage() {
 
   const qrUrl = typeof window !== 'undefined'
     ? `${window.location.origin}/check?tenant=${tenantSlug}`
-    : `https://checkpro.vercel.app/check?tenant=${tenantSlug}`
+    : `https://checkpro-self.vercel.app/check?tenant=${tenantSlug}`
 
   const qrImgSrc = tenantSlug
     ? `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrUrl)}&size=240x240&bgcolor=0d0d0d&color=3DFFA0&qzone=2&margin=0`
