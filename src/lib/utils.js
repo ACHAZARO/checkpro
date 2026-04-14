@@ -24,10 +24,33 @@ export function hoursInSchedule(schedule, dk) {
   return (h2*60+m2-h1*60-m1)/60
 }
 
+/**
+ * Calcula la tarifa por hora del empleado.
+ * Soporta salario mensual (period='monthly') y semanal (period='weekly').
+ * El periodo se guarda en employee.schedule.salary_period.
+ */
 export function monthlyToHourly(employee) {
   const wkH = DAYS.reduce((a,d) => a + hoursInSchedule(employee.schedule||{}, d), 0)
-  const moH = wkH * 4.33
-  return moH > 0 ? employee.monthly_salary / moH : 0
+  if (wkH <= 0) return 0
+  const period = employee.schedule?.salary_period || 'monthly'
+  if (period === 'weekly') {
+    // monthly_salary aquí guarda el monto semanal
+    return employee.monthly_salary / wkH
+  }
+  // Mensual por defecto: distribuir entre semanas del mes (4.33 semanas promedio)
+  return employee.monthly_salary / (wkH * 4.33)
+}
+
+/** Convierte el salario almacenado a su equivalente mensual (para reportes) */
+export function toMonthlySalary(employee) {
+  const period = employee.schedule?.salary_period || 'monthly'
+  if (period === 'weekly') return (employee.monthly_salary || 0) * 4.33
+  return employee.monthly_salary || 0
+}
+
+/** Etiqueta del periodo de salario */
+export function salaryPeriodLabel(employee) {
+  return (employee.schedule?.salary_period || 'monthly') === 'weekly' ? 'sem' : 'mes'
 }
 
 export function classifyEntry(schedule, entryTime, toleranceMinutes) {
