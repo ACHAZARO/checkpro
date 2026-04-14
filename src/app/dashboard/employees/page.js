@@ -5,9 +5,27 @@ import { createClient } from '@/lib/supabase'
 import { DAYS, DAY_L, monthlyToHourly, generateEmployeeCode } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
-const DEF_SCHED = DAYS.reduce((a, d) => ({
-  ...a, [d]: { work: !['sab', 'dom'].includes(d), start: '09:00', end: '18:00' }
-}), {})
+const DEF_BASE = { start: '09:00', end: '18:00' }
+
+function buildSchedule(base, overrides = {}) {
+  return DAYS.reduce((a, d) => ({
+    ...a, [d]: {
+      work: overrides[d]?.work ?? !['sab', 'dom'].includes(d),
+      start: overrides[d]?.custom ? overrides[d].start : base.start,
+      end: overrides[d]?.custom ? overrides[d].end : base.end,
+      custom: overrides[d]?.custom || false,
+    }
+  }), {})
+}
+
+function deriveBase(schedule) {
+  const firstWork = DAYS.find(d => schedule?.[d]?.work)
+  return firstWork
+    ? { start: schedule[firstWork].start || '09:00', end: schedule[firstWork].end || '18:00' }
+    : { ...DEF_BASE }
+}
+
+const DEF_SCHED = buildSchedule(DEF_BASE)
 
 export default function EmployeesPage() {
   const [emps, setEmps] = useState([])
@@ -17,9 +35,53 @@ export default function EmployeesPage() {
   const [sheet, setSheet] = useState(null)
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
+  const [base, setBase] = useState({ ...DEF_BASE })
 
   const F = (k, v) => setForm(f => ({ ...f, [k]: v }))
-  const FS = (day, k, v) => setForm(f => ({ ...f, schedule: { ...f.schedule, [day]: { ...f.schedule?.[day], [k]: v } } }))
+
+  // Apply base schedule to all non-custom working days
+  function applyBase(newBase) {
+    setBase(newBase)
+    setForm(f => ({
+      ...f,
+      schedule: DAYS.reduce((a, d) => ({
+        ...a, [d]: {
+          ...f.schedule?.[d],
+          start: f.schedule?.[d]?.custom ? f.schedule[d].start : newBase.start,
+          end:   f.schedule?.[d]?.custom ? f.schedule[d].end   : newBase.end,
+        }
+      }), { ...f.schedule })
+    }))
+  }
+
+  // Toggle a single day's work flag
+  function toggleDay(day) {
+    setForm(f => ({ ...f, schedule: { ...f.schedule, [day]: { ...f.schedule?.[day], work: !f.schedule?.[day]?.work } } }))
+  }
+
+  // Toggle custom override for a day
+  function toggleCustom(day) {
+    setForm(f => {
+      const wasCustom = f.schedule?.[day]?.custom
+      return {
+        ...f,
+        schedule: {
+          ...f.schedule,
+          [day]: {
+            ...f.schedule?.[day],
+            custom: !wasCustom,
+            // Reset to base times when turning off custom
+            start: wasCustom ? base.start : f.schedule?.[day]?.start || base.start,
+            end:   wasCustom ? base.end   : f.schedule?.[day]?.end   || base.end,
+          }
+        }
+      }
+    })
+  }
+
+  function setDayTime(day, field, val) {
+    setForm(f => ({ ...f, schedule: { ...f.schedule, [day]: { ...f.schedule?.[day], [field]: val, custom: true } } }))
+  }
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -40,7 +102,9 @@ export default function EmployeesPage() {
   useEffect(() => { load() }, [load])
 
   function openAdd() {
-    setForm({ schedule: { ...DEF_SCHED }, has_shift: true, can_manage: false, role_label: 'Empleado' })
+    const b = { ...DEF_BASE }
+    setBase(b)
+    setForm({ schedule: buildSchedule(b), has_shift: true, can_manage: false, role_label: 'Empleado' })
     setSheet('add')
   }
 
@@ -90,7 +154,15 @@ export default function EmployeesPage() {
   }
 
   function openEdit(emp) {
-    setForm({ ...emp, branch_id: emp.schedule?.branch?.id || '' })
+    const b = deriveBase(emp.schedule)
+    setBase(b)
+    // Mark days as custom if their times differ from derived base
+    const schedule = DAYS.reduce((a, d) => {
+      const s = emp.schedule?.[d] || { work: false, start: b.start, end: b.end }
+      const custom = s.work && (s.start !== b.start || s.end !== b.end)
+      return { ...a, [d]: { ...s, custom } }
+    }, {})
+    setForm({ ...emp, schedule, branch_id: emp.schedule?.branch?.id || '' })
     setSheet('edit')
   }
 
@@ -248,23 +320,75 @@ export default function EmployeesPage() {
                   </div>
                 )}
 
-                {/* Horario semanal */}
+                {/* Horario semanal — base + excepciones */}
                 <div className="border-t border-dark-border pt-3">
-                  <p className="label mb-3">Horario semanal</p>
+                  <p className="label mb-2">Horario semanal</p>
+
+                  {/* Base schedule row */}
+                  <div className="p-3 bg-dark-700 border border-dark-border rounded-xl mb-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs text-gray-400 font-semibold flex-1">Horario base (aplica a todos)</span>
+                      <button
+                        onClick={() => applyBase(base)}
+                        className="px-2.5 py-1 bg-brand-400/15 border border-brand-400/30 rounded-lg text-brand-400 text-[10px] font-bold active:bg-brand-400/25">
+                        ↻ Aplicar a todos
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-[10px] text-gray-500 w-12">Entrada</label>
+                      <input type="time" className="input py-1.5 px-2 text-sm flex-1 font-mono"
+                        value={base.start}
+                        onChange={e => setBase(b => ({ ...b, start: e.target.value }))} />
+                      <span className="text-gray-600 text-xs">–</span>
+                      <label className="text-[10px] text-gray-500 w-10">Salida</label>
+                      <input type="time" className="input py-1.5 px-2 text-sm flex-1 font-mono"
+                        value={base.end}
+                        onChange={e => setBase(b => ({ ...b, end: e.target.value }))} />
+                    </div>
+                  </div>
+
+                  {/* Per-day rows */}
                   {DAYS.map(day => {
-                    const s = form.schedule?.[day] || { work: false, start: '09:00', end: '18:00' }
+                    const s = form.schedule?.[day] || { work: false, start: base.start, end: base.end, custom: false }
                     return (
-                      <div key={day} className="flex items-center gap-2 mb-2">
-                        <span className={`font-mono text-xs w-7 font-bold ${s.work ? 'text-white' : 'text-gray-600'}`}>{DAY_L[day]}</span>
-                        <button onClick={() => FS(day, 'work', !s.work)}
-                          className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${s.work ? 'bg-brand-400' : 'bg-dark-600'}`}>
-                          <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${s.work ? 'left-5' : 'left-0.5'}`} />
-                        </button>
-                        {s.work ? <>
-                          <input type="time" className="input py-1.5 px-2 text-xs flex-1" value={s.start} onChange={e => FS(day, 'start', e.target.value)} />
-                          <span className="text-gray-600 text-xs">–</span>
-                          <input type="time" className="input py-1.5 px-2 text-xs flex-1" value={s.end} onChange={e => FS(day, 'end', e.target.value)} />
-                        </> : <span className="text-xs text-gray-600 font-mono flex-1">Descanso</span>}
+                      <div key={day} className="mb-2">
+                        <div className="flex items-center gap-2">
+                          {/* Day toggle */}
+                          <button onClick={() => toggleDay(day)}
+                            className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${s.work ? 'bg-brand-400' : 'bg-dark-600'}`}>
+                            <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${s.work ? 'left-5' : 'left-0.5'}`} />
+                          </button>
+                          <span className={`font-mono text-xs w-7 font-bold ${s.work ? 'text-white' : 'text-gray-600'}`}>{DAY_L[day]}</span>
+
+                          {s.work ? (
+                            <>
+                              {s.custom ? (
+                                // Custom time inputs
+                                <>
+                                  <input type="time" className="input py-1 px-2 text-xs flex-1 font-mono"
+                                    value={s.start} onChange={e => setDayTime(day, 'start', e.target.value)} />
+                                  <span className="text-gray-600 text-[10px]">–</span>
+                                  <input type="time" className="input py-1 px-2 text-xs flex-1 font-mono"
+                                    value={s.end} onChange={e => setDayTime(day, 'end', e.target.value)} />
+                                </>
+                              ) : (
+                                // Show base time (read-only hint)
+                                <span className="text-[11px] text-gray-500 font-mono flex-1">
+                                  {base.start} – {base.end}
+                                </span>
+                              )}
+                              {/* "Diferente" checkbox */}
+                              <label className="flex items-center gap-1 shrink-0 cursor-pointer">
+                                <input type="checkbox" className="accent-brand-400 w-3.5 h-3.5"
+                                  checked={s.custom || false}
+                                  onChange={() => toggleCustom(day)} />
+                                <span className="text-[10px] text-gray-500">Diferente</span>
+                              </label>
+                            </>
+                          ) : (
+                            <span className="text-xs text-gray-600 font-mono flex-1">Descanso</span>
+                          )}
+                        </div>
                       </div>
                     )
                   })}
