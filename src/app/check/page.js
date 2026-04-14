@@ -1,7 +1,7 @@
 'use client'
 // src/app/check/page.js
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { haversineMeters, fmtTime, fmtDate, classifyEntry, isoDate } from 'A/lib/utils'
+import { haversineMeters, fmtTime, fmtDate, classifyEntry, isoDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import Link from 'next/link'
 
