@@ -1,5 +1,5 @@
 // src/app/api/check/punch/route.js
-import { createServiceClient } from '@/lib/supabase'
+import { createServiceClient } from '@/lib/supabase-server'
 import { NextResponse } from 'next/server'
 import { classifyEntry, isoDate, diffHrs } from '@/lib/utils'
 
@@ -10,7 +10,7 @@ export async function POST(req) {
     const { data: authResult } = await supabase.rpc('validate_employee_pin', { p_tenant_id: tenantId, p_code: employeeCode.toUpperCase(), p_pin: pin })
     if (!authResult?.valid) return NextResponse.json({ ok: false, msg: 'PIN incorrecto' })
     const emp = authResult.employee
-    if (!geo?.valid) return NextResponse.json({ ok: false, msg: `Fuera del área (${geo?.dist}m)` })
+    if (!geo?.valid) return NextResponse.json({ ok: false, msg: `Fuera del Ã¡rea (${geo?.dist}m)` })
     const { data: tenant } = await supabase.from('tenants').select('config').eq('id', tenantId).single()
     const cfg = tenant?.config || {}
     const now = new Date().toISOString()
@@ -22,7 +22,7 @@ export async function POST(req) {
       const holiday = holidays.find(h => h.date === isoDate(now))
       await supabase.from('shifts').insert({ tenant_id: tenantId, employee_id: emp.id, date_str: isoDate(now), entry_time: now, status: 'open', classification, is_holiday: !!holiday, holiday_name: holiday?.name||null, covering_employee_id: coveringEmployeeId||null, geo_entry: geo })
       await supabase.from('audit_log').insert({ tenant_id: tenantId, action: 'CHK_IN', employee_id: emp.id, employee_name: emp.name, detail: classification.label, success: true })
-      return NextResponse.json({ ok: true, msg: `Entrada registrada. ${classification.label}${holiday ? ' — FERIADO ×3!' : ''}` })
+      return NextResponse.json({ ok: true, msg: `Entrada registrada. ${classification.label}${holiday ? ' â FERIADO Ã3!' : ''}` })
     } else {
       const { data: openShift } = await supabase.from('shifts').select('*').eq('tenant_id', tenantId).eq('employee_id', emp.id).eq('status', 'open').single()
       if (!openShift) return NextResponse.json({ ok: false, msg: 'Sin entrada registrada' })
