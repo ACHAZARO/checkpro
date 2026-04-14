@@ -16,23 +16,23 @@ export const diffMin = (a,b) => Math.round((new Date(b)-new Date(a))/60000)
 export const diffHrs = (a,b) => (new Date(b)-new Date(a))/3600000
 export const dayKey = d => { const i = new Date(d).getDay(); return DAYS[i===0?6:i-1] }
 
-export function hoursInSchedule(s, dk) {
-  const sd = s?.[dd]
-  if (!sd?.work) return 0
-  const [h1,m1] = sd.start.split(':').map(Number)
-  const [h2,m2] = sd.end.split(':').map(Number)
+export function hoursInSchedule(schedule, dk) {
+  const s = schedule?.[dk]
+  if (!s?.work) return 0
+  const [h1,m1] = s.start.split(':').map(Number)
+  const [h2,m2] = s.end.split(':').map(Number)
   return (h2*60+m2-h1*60-m1)/60
 }
 
-export function monthlyToHourly(emp) {
-  const wkH = DAYS.reduce((a,d) => a + hoursInSchedule(emp.schedule||{}, d), 0)
+export function monthlyToHourly(employee) {
+  const wkH = DAYS.reduce((a,d) => a + hoursInSchedule(employee.schedule||{}, d), 0)
   const moH = wkH * 4.33
-  return moH > 0 ? emp.monthly_salary / moH : 0
+  return moH > 0 ? employee.monthly_salary / moH : 0
 }
 
 export function classifyEntry(schedule, entryTime, toleranceMinutes) {
   const dk = dayKey(entryTime)
-  const s = schedule?.[df]
+  const s = schedule?.[dk]
   if (!s?.work) return { type:'no_laboral', label:'D√≠a no laboral' }
   const [h,m] = s.start.split(':').map(Number)
   const ref = new Date(entryTime)
@@ -64,26 +64,26 @@ export function weekRange(refDate, closingDay) {
   return { start, end }
 }
 
-export function calcShiftPay(shift, emp, cov) {
+export function calcShiftPay(shift, employee, coveringEmployee) {
   if (!shift.duration_hours) return 0
-  const rate = monthlyToHourly(cov||emp)
+  const rate = monthlyToHourly(coveringEmployee || employee)
   let pay = shift.duration_hours * rate
   if (shift.is_holiday) pay *= 3
   return pay
 }
 
-export function empWeekSummary(emp, weekShifts, allEmps) {
-  const mine = weekShifts.filter(s => s.employee_id === emp.id)
+export function empWeekSummary(employee, weekShifts, allEmployees) {
+  const mine = weekShifts.filter(s => s.employee_id === employee.id)
   const closed = mine.filter(s => ['closed','incident'].includes(s.status))
   const totalH = closed.reduce((a,s) => a + (s.duration_hours||0), 0)
   const retardos = closed.filter(s => s.classification?.type === 'retardo').length
   const incidents = mine.filter(s => s.status === 'incident').length
   let grossPay = 0
   closed.forEach(s => {
-    const cov = s.covering_employee_id ? allEmps.find(e=>e.id===s.covering_employee_id) : null
-    grossPay += calcShiftPay(s, emp, cov)
+    const cov = s.covering_employee_id ? allEmployees.find(e=>e.id===s.covering_employee_id) : null
+    grossPay += calcShiftPay(s, employee, cov)
   })
-  const hr = monthlyToHourly(emp)
+  const hr = monthlyToHourly(employee)
   const retardoDesc = retardos * (hr * 0.5)
   const incidentDesc = incidents * (hr * 8)
   return {
@@ -96,9 +96,9 @@ export function empWeekSummary(emp, weekShifts, allEmps) {
 }
 
 export function generateEmployeeCode(existing) {
-  const nums = existing.map(e => parseInt(e.employee_code?.replace(/\D/g,'')||'0')).filter(Boolean)
+  const nums = existing.map(e => parseInt(e.employee_code?.replace(/\D/g,'') || '0')).filter(Boolean)
   const next = nums.length > 0 ? Math.max(...nums) + 1 : 1
-  return `EMP$t”String(next).padStart(3,'0')}`
+  return `EMP${String(next).padStart(3,'0')}`
 }
 
 export function slugify(text) {
