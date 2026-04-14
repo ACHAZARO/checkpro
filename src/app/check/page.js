@@ -1,6 +1,7 @@
 'use client'
 // src/app/check/page.js
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { haversineMeters, fmtTime, fmtDate, classifyEntry, isoDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import Link from 'next/link'
@@ -108,8 +109,9 @@ function PinPad({ length, onComplete, onClear }) {
   )
 }
 
-// ── main ──────────────────────────────────────────────────────────────────
-export default function CheckPage() {
+// ── inner component (needs searchParams) ─────────────────────────────────
+function CheckPageInner() {
+  const searchParams = useSearchParams()
   const [cfg, setCfg] = useState(null)
   const [tenantId, setTenantId] = useState(null)
   const [step, setStep] = useState('id') // id | pin
@@ -125,18 +127,37 @@ export default function CheckPage() {
   const [simMode, setSimMode] = useState(false)
   const [slug, setSlug] = useState('')
 
-  // Load tenant from URL or localStorage
+  // Load tenant from URL param → localStorage fallback
   useEffect(() => {
-    const stored = localStorage.getItem('checkpro_tenant')
-    if (stored) {
+    async function init() {
+      const urlSlug = searchParams.get('tenant')
+      if (urlSlug) {
+        try {
+          const res = await fetch(`/api/check/tenant?slug=${encodeURIComponent(urlSlug)}`)
+          if (res.ok) {
+            const data = await res.json()
+            setTenantId(data.id)
+            setCfg(data.config)
+            setSlug(data.slug)
+            // Cache locally so it works even if URL changes
+            localStorage.setItem('checkpro_tenant', JSON.stringify({ id: data.id, config: data.config, slug: data.slug }))
+            return
+          }
+        } catch {}
+      }
+      // Fallback: localStorage (for devices previously configured)
       try {
-        const data = JSON.parse(stored)
-        setTenantId(data.id)
-        setCfg(data.config)
-        setSlug(data.slug)
+        const stored = localStorage.getItem('checkpro_tenant')
+        if (stored) {
+          const data = JSON.parse(stored)
+          setTenantId(data.id)
+          setCfg(data.config)
+          setSlug(data.slug)
+        }
       } catch {}
     }
-  }, [])
+    init()
+  }, [searchParams])
 
   const verifyGps = useCallback(() => {
     if (simMode && cfg) {
@@ -163,7 +184,7 @@ export default function CheckPage() {
   const reset = () => { setStep('id'); setEmpCode(''); setFoundEmp(null); setOpenShift(null); setMsg(null); setCoverMode(false); setCoverTarget('') }
 
   async function submitId() {
-    if (!tenantId) { setMsg({ type: 'err', text: 'Sistema no configurado. Contacta al administrador.' }); return }
+    if (!tenantId) { setMsg({ type: 'err', text: 'Sistema no configurado. Escanea el QR de tu empresa.' }); return }
     setBusy(true)
     try {
       const res = await fetch('/api/check/identify', {
@@ -215,25 +236,22 @@ export default function CheckPage() {
 
   if (!tenantId) return (
     <main className="min-h-dvh bg-dark-900 flex flex-col items-center justify-center px-5 text-center">
-      <div className="text-4xl mb-4">⚙️</div>
-      <h2 className="text-xl font-bold text-white mb-2">Checador no configurado</h2>
-      <p className="text-gray-500 text-sm mb-6">Este dispositivo no tiene una empresa asignada.</p>
-      <Link href="/dashboard/settings" className="btn-primary max-w-xs">Ir a configuración →</Link>
-      <p className="text-xs text-gray-600 mt-4 font-mono">El administrador debe abrir Settings → Kiosk para configurar este dispositivo.</p>
+      <div className="text-5xl mb-4">📷</div>
+      <h2 className="text-xl font-bold text-white mb-2">Escanea el QR de tu empresa</h2>
+      <p className="text-gray-500 text-sm mb-4">Pide al administrador el código QR de la sucursal y escanéalo con tu cámara.</p>
+      <p className="text-xs text-gray-600 font-mono">O si eres el administrador:</p>
+      <Link href="/dashboard/settings" className="mt-2 text-brand-400 text-sm font-semibold underline">Ir a configuración → Generar QR</Link>
     </main>
   )
 
   return (
     <main className="min-h-dvh bg-dark-900 flex flex-col max-w-[430px] mx-auto">
       <div className="flex-1 overflow-y-auto no-scrollbar pb-safe">
-        {/* Hero / clock */}
         <div className="mx-3.5 mt-3.5 bg-gradient-to-br from-brand-400/7 to-blue-500/5 border border-brand-400/15 rounded-2xl">
           <LiveClock locationName={cfg?.location?.name} />
         </div>
-
         <div className="px-4 pt-3">
           <GpsStatus gps={gps} onVerify={verifyGps} simMode={simMode} setSimMode={setSimMode} />
-
           {step === 'id' ? (
             <div className="card">
               <p className="text-xs font-mono text-gray-500 uppercase tracking-widest mb-3">Identificación</p>
@@ -243,16 +261,15 @@ export default function CheckPage() {
                 onChange={e => setEmpCode(e.target.value.toUpperCase())}
                 onKeyDown={e => e.key === 'Enter' && submitId()} />
               <button onClick={submitId} disabled={busy || !empCode} className="btn-primary">
-                {busy ? '⏳ Buscando...' : 'Continuar ↓'}
+                {busy ? '⏳ Buscando...' : 'Continuar →'}
               </button>
-              { msg && <div className={`mt-3 px-4 py-3 rounded-xl text-sm font-semibold
-                 ${msg.type === 'err' ? 'bg-red-500/10 border border-red-500/20 text-red-400' : 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-400'}`}>
-                  {msg.text}
-                </div>}
+              {msg && <div className={`mt-3 px-4 py-3 rounded-xl text-sm font-semibold
+                ${msg.type === 'err' ? 'bg-red-500/10 border border-red-500/20 text-red-400' : 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-400'}`}>
+                {msg.text}
+              </div>}
             </div>
           ) : (
             <div className="card">
-              {/* Employee header */}
               <div className="text-center mb-5">
                 <div className={`w-14 h-14 rounded-full flex items-center justify-center text-lg font-bold font-mono mx-auto mb-2.5
                   ${foundEmp?.can_manage ? 'bg-orange-500/10 border-2 border-orange-400/30 text-orange-400' : 'bg-brand-400/10 border-2 border-brand-400/20 text-brand-400'}`}>
@@ -267,8 +284,6 @@ export default function CheckPage() {
                   </div>
                 )}
               </div>
-
-              {/* Cover mode */}
               {!openShift && (
                 <div className="mb-4">
                   <div className="flex items-center justify-between mb-2">
@@ -289,10 +304,7 @@ export default function CheckPage() {
                   )}
                 </div>
               )}
-              {!openShift && (
-                <PinPad onComplete={handlePinComplete} onClear={() => setMsg(null)} />
-              )}
-
+              <PinPad onComplete={handlePinComplete} onClear={() => setMsg(null)} />
               {!gpsOk && (
                 <div className="mt-4 px-4 py-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl text-yellow-400 text-xs font-semibold">
                   ⚠ Activa simulación GPS o verifica tu ubicación real antes de checar.
@@ -309,12 +321,24 @@ export default function CheckPage() {
               )}
             </div>
           )}
-
           <p className="text-center font-mono text-xs text-gray-600 mt-3 pb-4">
             TOLERANCIA {cfg?.toleranceMinutes || 10} MIN · RADIO {cfg?.location?.radius || 300} M
           </p>
         </div>
       </div>
     </main>
+  )
+}
+
+// ── default export with Suspense ─────────────────────────────────────────
+export default function CheckPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-dvh bg-dark-900 flex items-center justify-center">
+        <p className="text-gray-500 font-mono text-sm">Cargando checador...</p>
+      </div>
+    }>
+      <CheckPageInner />
+    </Suspense>
   )
 }
