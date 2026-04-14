@@ -7,8 +7,8 @@ const outfit = Outfit({ subsets: ['latin'], variable: '--font-outfit' })
 const jetbrains = JetBrains_Mono({ subsets: ['latin'], variable: '--font-jetbrains', weight: ['400','500','600'] })
 
 export const metadata = {
-  title: 'CheckPro — Control de Asistencia',
-  description: 'Sistem profesional de reloj �hecador ú GPS, ílmina y reportes.',
+  title: 'CheckPro â€” Control de Asistencia',
+  description: 'Sistem profesional de reloj £hecador Ãº GPS, Ã­lmina y reportes.',
   manifest: '/manifest.json',
   themeColor: '#090b11',
   viewport: 'width=device-width, initial-scale=1, maximum-scale=1',
