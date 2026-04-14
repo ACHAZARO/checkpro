@@ -41,13 +41,6 @@ export default function SettingsPage() {
     setSaving(false)
   }
 
-  function setupKiosk() {
-    if (!tenantId || !cfg) { toast.error('Guarda la configuración primero'); return }
-    const data = { id: tenantId, config: cfg, slug: tenantSlug }
-    localStorage.setItem('checkpro_tenant', JSON.stringify(data))
-    toast.success('Este dispositivo configurado como checador ✓')
-  }
-
   function addHoliday() {
     if (!newHol.name || !newHol.date) { toast.error('Ingresa nombre y fecha'); return }
     const holidays = [...(cfg.holidays || []), { id: crypto.randomUUID(), name: newHol.name, date: newHol.date }]
@@ -65,6 +58,14 @@ export default function SettingsPage() {
   }
 
   function removeRestDay(id) { setCfg(c => ({ ...c, restDays: c.restDays.filter(r => r.id !== id) })) }
+
+  const qrUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}/check?tenant=${tenantSlug}`
+    : `https://checkpro.vercel.app/check?tenant=${tenantSlug}`
+
+  const qrImgSrc = tenantSlug
+    ? `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrUrl)}&size=240x240&bgcolor=0d0d0d&color=3DFFA0&qzone=2&margin=0`
+    : null
 
   if (loading || !cfg) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando...</div>
 
@@ -164,18 +165,45 @@ export default function SettingsPage() {
         <button onClick={addRestDay} className="mt-2 w-full py-2 bg-dark-700 border border-dark-border rounded-xl text-xs font-bold text-white active:bg-dark-600">+ Agregar día</button>
       </div>
 
-      {/* Kiosk setup */}
-      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Configurar checador (kiosk)</p>
+      {/* QR del Checador */}
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Código QR del checador</p>
       <div className="card mb-6">
-        <p className="text-sm text-gray-400 mb-3">Abre esta pantalla en el dispositivo que usarán los empleados para checar, y toca el botón para configurarlo.</p>
-        <button onClick={setupKiosk} className="btn-primary">
-          📍 Usar este dispositivo como checador
-        </button>
-        <p className="text-xs text-gray-600 font-mono mt-2">El dispositivo recordará la configuración aunque se cierre el navegador.</p>
-        <div className="mt-3 p-3 bg-dark-700 border border-dark-border rounded-xl">
-          <p className="text-xs font-mono text-gray-500 mb-1">URL del checador:</p>
-          <p className="text-xs text-brand-400 font-mono break-all">{typeof window !== 'undefined' ? window.location.origin : ''}/check</p>
-        </div>
+        <p className="text-sm text-gray-400 mb-4">
+          Imprime este QR y colócalo en la sucursal. Los empleados lo escanean con su celular para abrir el checador directamente.
+        </p>
+        {tenantSlug ? (
+          <>
+            <div className="flex justify-center mb-4">
+              <div className="bg-dark-900 border-2 border-brand-400/30 p-3 rounded-2xl">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={qrImgSrc} alt="QR Checador" width={180} height={180} className="rounded-xl" />
+              </div>
+            </div>
+            <div className="p-3 bg-dark-700 border border-dark-border rounded-xl mb-3">
+              <p className="text-xs font-mono text-gray-500 mb-1">URL del checador:</p>
+              <p className="text-xs text-brand-400 font-mono break-all">{qrUrl}</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => window.open(
+                  `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrUrl)}&size=600x600&bgcolor=ffffff&color=000000&qzone=3`,
+                  '_blank'
+                )}
+                className="btn-primary flex-1">
+                🖨️ Descargar / Imprimir QR
+              </button>
+              <button
+                onClick={() => { navigator.clipboard.writeText(qrUrl); toast.success('URL copiada'); }}
+                className="px-4 py-2.5 bg-dark-700 border border-dark-border rounded-xl text-sm font-bold text-white active:bg-dark-600">
+                📋
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="py-6 text-center">
+            <p className="text-sm text-yellow-400 font-mono">⚠ Guarda la configuración primero para generar el QR.</p>
+          </div>
+        )}
       </div>
 
       <p className="text-center text-xs font-mono text-gray-600 mb-4">CheckPro v1.0 · SaaS · Todos los derechos reservados</p>
