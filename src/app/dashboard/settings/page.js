@@ -17,6 +17,7 @@ export default function SettingsPage() {
   const [newRest, setNewRest] = useState({ name: '', date: '' })
   const [newBranch, setNewBranch] = useState('')
   const [origin, setOrigin] = useState(FALLBACK_URL)
+  const [detectingIp, setDetectingIp] = useState(null) // branchId being detected
 
   useEffect(() => { setOrigin(window.location.origin) }, [])
 
@@ -59,6 +60,23 @@ export default function SettingsPage() {
   function removeBranch(id) {
     if (!confirm('¿Eliminar esta sucursal? Los empleados asignados quedarán sin sucursal.')) return
     setCfg(c => ({ ...c, branches: (c.branches || []).filter(b => b.id !== id) }))
+  }
+
+  async function detectBranchIp(branchId) {
+    setDetectingIp(branchId)
+    try {
+      const res = await fetch('/api/check/ip')
+      const { ip } = await res.json()
+      setCfg(c => ({
+        ...c,
+        branches: (c.branches || []).map(b =>
+          b.id === branchId ? { ...b, ip, ipDetectedAt: new Date().toISOString() } : b
+        )
+      }))
+      toast.success(`IP registrada: ${ip}`)
+      toast('Guarda la configuración para que persista', { icon: '💾' })
+    } catch { toast.error('No se pudo detectar la IP') }
+    finally { setDetectingIp(null) }
   }
 
   function branchCheckUrl(branchId) {
@@ -170,6 +188,27 @@ export default function SettingsPage() {
                     className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600">
                     🖨️ Imprimir QR
                   </button>
+                </div>
+                {/* WiFi / IP candado */}
+                <div className="mt-2 p-2.5 bg-dark-800 border border-dark-border rounded-xl">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">Red WiFi (2do candado)</p>
+                      {b.ip
+                        ? <p className="text-xs text-brand-400 font-mono mt-0.5">🌐 {b.ip} <span className="text-gray-600 text-[9px]">· {b.ipDetectedAt ? new Date(b.ipDetectedAt).toLocaleDateString('es-MX') : ''}</span></p>
+                        : <p className="text-[10px] text-gray-600 mt-0.5">Sin IP registrada — solo GPS activo</p>
+                      }
+                    </div>
+                    <button
+                      onClick={() => detectBranchIp(b.id)}
+                      disabled={detectingIp === b.id}
+                      className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600 disabled:opacity-40 shrink-0">
+                      {detectingIp === b.id ? '...' : b.ip ? '↻ Actualizar' : '📡 Detectar IP'}
+                    </button>
+                  </div>
+                  <p className="text-[9px] text-gray-600 font-mono mt-1.5">
+                    Toca "Detectar IP" mientras estés conectado al WiFi de esta sucursal.
+                  </p>
                 </div>
               </div>
             </div>
