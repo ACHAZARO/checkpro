@@ -34,7 +34,7 @@ function GpsStatus({ gps, onVerify, simMode, setSimMode }) {
         ${gps.simulated ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' :
           ok ? 'bg-brand-400/10 border-brand-400/20 text-brand-400' :
           out || gps.status === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
-          'bg-dark-700 border-dark-border text-gray-500"}`}>
+          'bg-dark-700 border-dark-border text-gray-500'}`}>
         <span className="text-base">{ok || gps.simulated ? '✓' : out || gps.status === 'error' ? '✗' : gps.status === 'loading' ? '⏳' : '📍'}</span>
         <span className="flex-1 text-xs">
           {gps.simulated ? 'Simulado — dentro del área (modo prueba)' :
@@ -246,7 +246,7 @@ export default function CheckPage() {
                 {busy ? '⏳ Buscando...' : 'Continuar ↓'}
               </button>
               { msg && <div className={`mt-3 px-4 py-3 rounded-xl text-sm font-semibold
-                 ${msg.type === 'err' ? 'bg-red-500/10 border border-red-500/20 text-red-400' : 'bg-yellow-500/10 border border-yellow-500.20 text-yellow-400'}`}>
+                 ${msg.type === 'err' ? 'bg-red-500/10 border border-red-500/20 text-red-400' : 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-400'}`}>
                   {msg.text}
                 </div>}
             </div>
@@ -294,7 +294,7 @@ export default function CheckPage() {
               )}
 
               {!gpsOk && (
-                <div className="mt-4 px-4 py-3 bg-yellow-500/10 border border-yellow-500.20 rounded-xl text-yellow-400 text-xs font-semibold">
+                <div className="mt-4 px-4 py-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl text-yellow-400 text-xs font-semibold">
                   ⚠ Activa simulación GPS o verifica tu ubicación real antes de checar.
                 </div>
               )}
