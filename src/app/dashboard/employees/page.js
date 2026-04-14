@@ -2,7 +2,7 @@
 // src/app/dashboard/employees/page.js
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
-import { DAYS, DAY_L, monthlyToHourly, generateEmployeeCode } from '@/lib/utils'
+import { DAYS, DAY_L, monthlyToHourly, generateEmployeeCode, salaryPeriodLabel } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 const DEF_SCHED = DAYS.reduce((a,d) => ({...a, [d]: { work: !['sab','dom'].includes(d), start: '09:00', end: '18:00' }}), {})
@@ -17,6 +17,8 @@ export default function EmployeesPage() {
 
   const F = (k,v) => setForm(f => ({...f,[k]:v}))
   const FS = (day,k,v) => setForm(f => ({...f, schedule: {...f.schedule,[day]:{...f.schedule?.[day],[k]:v}}}))
+  const salaryPeriod = form.schedule?.salary_period || 'monthly'
+  const setSalaryPeriod = (p) => setForm(f => ({...f, schedule: {...f.schedule, salary_period: p}}))
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -99,7 +101,9 @@ export default function EmployeesPage() {
                   {emp.can_manage && <span className="badge-orange text-[9px]">Gerente</span>}
                   {emp.status === 'inactive' && <span className="badge-gray text-[9px]">Inactivo</span>}
                 </div>
-                <div className="text-xs text-gray-500 mt-0.5">{emp.department} · ${(emp.monthly_salary||0).toLocaleString()}/mes · ${monthlyToHourly(emp).toFixed(2)}/h</div>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  {emp.department} · ${(emp.monthly_salary||0).toLocaleString()}/{salaryPeriodLabel(emp)} · ${monthlyToHourly(emp).toFixed(2)}/h
+                </div>
                 <div className="text-xs text-gray-600 font-mono mt-0.5">{DAYS.filter(d=>emp.schedule?.[d]?.work).map(d=>DAY_L[d]).join(' ')}</div>
               </div>
               <div className="flex gap-1.5 shrink-0">
@@ -125,7 +129,30 @@ export default function EmployeesPage() {
                 <div><label className="label">Nombre completo</label><input className="input" value={form.name||''} onChange={e=>F('name',e.target.value)} placeholder="Juan Pérez"/></div>
                 <div><label className="label">Departamento</label><input className="input" value={form.department||''} onChange={e=>F('department',e.target.value)} placeholder="Cocina, Caja..."/></div>
                 <div><label className="label">PIN (4 dígitos)</label><input className="input" inputMode="numeric" maxLength={4} value={form.pin||''} onChange={e=>F('pin',e.target.value)} placeholder="1234"/></div>
-                <div><label className="label">Salario mensual ($)</label><input className="input" type="number" inputMode="decimal" value={form.monthly_salary||''} onChange={e=>F('monthly_salary',e.target.value)} placeholder="15000"/></div>
+
+                {/* Salary with period selector */}
+                <div>
+                  <label className="label">Salario</label>
+                  <div className="flex gap-2">
+                    <input className="input flex-1" type="number" inputMode="decimal"
+                      value={form.monthly_salary||''} onChange={e=>F('monthly_salary',e.target.value)}
+                      placeholder={salaryPeriod === 'weekly' ? '3500' : '15000'}/>
+                    <select
+                      className="input w-32 shrink-0 text-sm"
+                      value={salaryPeriod}
+                      onChange={e => setSalaryPeriod(e.target.value)}>
+                      <option value="monthly">/ Mes</option>
+                      <option value="weekly">/ Semana</option>
+                    </select>
+                  </div>
+                  {form.monthly_salary && (
+                    <p className="text-xs text-gray-500 font-mono mt-1.5">
+                      ≈ ${monthlyToHourly({...form, schedule: form.schedule || DEF_SCHED}).toFixed(2)}/hora
+                      {salaryPeriod === 'weekly' && <span className="text-gray-600"> · ${((parseFloat(form.monthly_salary)||0)*4.33).toLocaleString('es-MX',{maximumFractionDigits:0})}/mes est.</span>}
+                    </p>
+                  )}
+                </div>
+
                 <div><label className="label">Etiqueta de rol</label><input className="input" value={form.role_label||''} onChange={e=>F('role_label',e.target.value)} placeholder="Empleado, Cajero, Chef..."/></div>
                 <div className="flex items-center justify-between py-2">
                   <div><p className="text-sm font-semibold text-white">Puede gestionar</p><p className="text-xs text-gray-500">Acceso al panel de administración</p></div>
