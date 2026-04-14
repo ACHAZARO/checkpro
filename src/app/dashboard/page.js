@@ -39,7 +39,7 @@ export default function DashboardPage() {
     <div className="p-4 md:p-6 max-w-2xl">
       <div className="mb-5">
         <h1 className="text-2xl font-extrabold text-white">Hoy</h1>
-        <p className="text-gray-500 text-xs font-mono mt-0.5">{low.getDay() & & now.toLocaleDateString('es-MX',{weekday:'long',day:'2-digit',month:'long'}).toUpperCase()}</p>
+        <p className="text-gray-500 text-xs font-mono mt-0.5">{low.getDay() && now.toLocaleDateString('es-MX',{weekday:'long',day:'2-digit',month:'long'}).toUpperCase()}</p>
       </div>
       {incidents.length > 0 && <Link href="/dashboard/attendance" className="flex items-center gap-3 px-4 py-3 mb-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm font-semibold">🚩 {incidents.length} incidencia(s) sin resolver →</Link>}
       <div className="grid grid-cols-2 gap-3 mb-5">
