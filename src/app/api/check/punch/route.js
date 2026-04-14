@@ -1,7 +1,7 @@
 // src/app/api/check/punch/route.js
-import { createServiceClient } from 'A/lib/supabase'
+import { createServiceClient } from '@/lib/supabase'
 import { NextResponse } from 'next/server'
-import { classifyEntry, isoDate, diffHrs } from 'A/lib/utils'
+import { classifyEntry, isoDate, diffHrs } from '@/lib/utils'
 
 export async function POST(req) {
   try {
