@@ -1,13 +1,16 @@
 'use client'
 // src/app/check/page.js
-import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { haversineMeters, fmtTime, fmtDate, classifyEntry, isoDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import Link from 'next/link'
 
-// ── components ──────────────────────────────────────────────────────────
-function LiveClock({ locationName }) {
+const ABANDON_MINUTES = 20        // minutes outside zone before auto-close
+const GPS_INTERVAL_MS = 60_000    // check GPS every 60s while shift is open
+const IP_INTERVAL_MS = 5 * 60_000 // check IP every 5 min
+
+// ── LiveClock ─────────────────────────────────────────────────────────────────
+function LiveClock({ locationName, branchName }) {
   const [t, setT] = useState(new Date())
   useEffect(() => { const id = setInterval(() => setT(new Date()), 1000); return () => clearInterval(id) }, [])
   return (
@@ -17,15 +20,16 @@ function LiveClock({ locationName }) {
         {t.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
       </div>
       <div className="font-mono text-xs text-gray-500 mt-2 tracking-widest uppercase">{fmtDate(t)}</div>
-      {locationName && (
+      {(branchName || locationName) && (
         <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 bg-dark-700 border border-dark-border rounded-full text-xs text-gray-500 font-mono">
-          📍 {locationName}
+          🏢 {branchName || locationName}
         </div>
       )}
     </div>
   )
 }
 
+// ── GpsStatus ─────────────────────────────────────────────────────────────────
 function GpsStatus({ gps, onVerify, simMode, setSimMode }) {
   const ok = gps.status === 'ok' && gps.valid
   const out = gps.status === 'ok' && !gps.valid
@@ -36,13 +40,15 @@ function GpsStatus({ gps, onVerify, simMode, setSimMode }) {
           ok ? 'bg-brand-400/10 border-brand-400/20 text-brand-400' :
           out || gps.status === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
           'bg-dark-700 border-dark-border text-gray-500'}`}>
-        <span className="text-base">{ok || gps.simulated ? '✓' : out || gps.status === 'error' ? '✗' : gps.status === 'loading' ? '⏳' : '📍'}</span>
+        <span className="text-base">
+          {ok || gps.simulated ? '✓' : out || gps.status === 'error' ? '✗' : gps.status === 'loading' ? '⏳' : '📍'}
+        </span>
         <span className="flex-1 text-xs">
           {gps.simulated ? 'Simulado — dentro del área (modo prueba)' :
            gps.status === 'idle' ? 'Verifica tu ubicación antes de checar' :
            gps.status === 'loading' ? 'Obteniendo GPS...' :
            gps.status === 'error' ? gps.error :
-           ok ? `Dentro del área · ${gps.dist}m · ±${gps.accuracy}m precisión` :
+           ok ? `Dentro del área · ${gps.dist}m · ±${gps.accuracy}m` :
            `Fuera del área (${gps.dist}m)`}
         </span>
         <button onClick={onVerify} disabled={gps.status === 'loading'}
@@ -61,23 +67,16 @@ function GpsStatus({ gps, onVerify, simMode, setSimMode }) {
   )
 }
 
-function PinPad({ length, onComplete, onClear }) {
+// ── PinPad ────────────────────────────────────────────────────────────────────
+function PinPad({ onComplete, onClear }) {
   const [pin, setPin] = useState('')
-  const pinRef = useRef(null)
-
-  useEffect(() => {
-    pinRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }, [])
-
-  useEffect(() => {
-    if (pin.length === 4) { onComplete(pin); setTimeout(() => setPin(''), 200) }
-  }, [pin, onComplete])
-
+  const ref = useRef(null)
+  useEffect(() => { ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }, [])
+  useEffect(() => { if (pin.length === 4) { onComplete(pin); setTimeout(() => setPin(''), 200) } }, [pin, onComplete])
   const num = d => { if (pin.length < 4) setPin(p => p + d) }
   const del = () => setPin(p => p.slice(0, -1))
-
   return (
-    <div ref={pinRef} className="text-center">
+    <div ref={ref} className="text-center">
       <p className="text-xs font-mono text-gray-500 uppercase tracking-widest mb-3">PIN de acceso</p>
       <div className="flex gap-3 justify-center mb-5">
         {[0,1,2,3].map(i => (
@@ -109,82 +108,242 @@ function PinPad({ length, onComplete, onClear }) {
   )
 }
 
-// ── inner component (needs searchParams) ─────────────────────────────────
-function CheckPageInner() {
-  const searchParams = useSearchParams()
-  const [cfg, setCfg] = useState(null)
+// ── AbandonBanner ─────────────────────────────────────────────────────────────
+function AbandonBanner({ monitor, onAbandon }) {
+  const { outsideSince, outsideReason, minsLeft } = monitor
+  if (!outsideSince) return null
+  return (
+    <div className="mx-4 mb-3 px-4 py-3 bg-orange-500/10 border border-orange-500/30 rounded-xl">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-orange-400 text-sm font-bold">
+            ⚠ Fuera de la sucursal · {minsLeft}min restante{minsLeft !== 1 ? 's' : ''}
+          </p>
+          <p className="text-orange-400/70 text-xs mt-0.5">
+            {outsideReason === 'ip' ? 'Saliste de la red WiFi de la sucursal' :
+             outsideReason === 'gps' ? 'Saliste del perímetro GPS' :
+             'Saliste del GPS y de la red WiFi'}
+          </p>
+        </div>
+        <div className="text-orange-400 text-2xl font-mono font-bold">{minsLeft}</div>
+      </div>
+      {minsLeft <= 0 && (
+        <button onClick={onAbandon}
+          className="mt-2 w-full py-2 bg-red-500/20 border border-red-500/30 rounded-lg text-red-400 text-xs font-bold">
+          Cerrar turno ahora (abandonado)
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+export default function CheckPage() {
+  const [cfg, setCfg]           = useState(null)
   const [tenantId, setTenantId] = useState(null)
-  const [step, setStep] = useState('id') // id | pin
-  const [empCode, setEmpCode] = useState('')
+  const [branchId, setBranchId] = useState(null)
+  const [branchName, setBranchName] = useState('')
+  const [slug, setSlug]         = useState('')
+
+  // Session (QR-bound, IP-tied)
+  const [session, setSession]   = useState(null)   // { token, ip }
+  const [sessionLoading, setSessionLoading] = useState(true)
+
+  // UI
+  const [step, setStep]         = useState('id')   // id | pin | done
+  const [empCode, setEmpCode]   = useState('')
   const [foundEmp, setFoundEmp] = useState(null)
   const [openShift, setOpenShift] = useState(null)
   const [coverMode, setCoverMode] = useState(false)
   const [coverTarget, setCoverTarget] = useState('')
-  const [allEmps, setAllEmps] = useState([])
-  const [msg, setMsg] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const [gps, setGps] = useState({ status: 'idle', valid: false, simulated: false })
-  const [simMode, setSimMode] = useState(false)
-  const [slug, setSlug] = useState('')
+  const [allEmps, setAllEmps]   = useState([])
+  const [msg, setMsg]           = useState(null)
+  const [busy, setBusy]         = useState(false)
 
-  // Load tenant from URL param → localStorage fallback
+  // GPS
+  const [gps, setGps]           = useState({ status: 'idle', valid: false, simulated: false })
+  const [simMode, setSimMode]   = useState(false)
+
+  // Dual monitoring (active when shift is open)
+  const [currentIp, setCurrentIp] = useState(null)
+  const [monitor, setMonitor]   = useState({ outsideSince: null, outsideReason: null, minsLeft: ABANDON_MINUTES })
+  const monitorRef              = useRef(monitor)
+  monitorRef.current            = monitor
+  const abandonCalledRef        = useRef(false)
+
+  // ── Load tenant from URL/localStorage ──────────────────────────────────────
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const urlSlug = params.get('tenant')
+    const urlBranch = params.get('branch')
+
     async function init() {
-      const urlSlug = searchParams.get('tenant')
+      // Try URL params first (fresh QR scan)
       if (urlSlug) {
         try {
           const res = await fetch(`/api/check/tenant?slug=${encodeURIComponent(urlSlug)}`)
           if (res.ok) {
             const data = await res.json()
-            setTenantId(data.id)
-            setCfg(data.config)
-            setSlug(data.slug)
-            // Cache locally so it works even if URL changes
+            setTenantId(data.id); setCfg(data.config); setSlug(data.slug)
+            // Find branch name
+            if (urlBranch && data.config?.branches) {
+              const b = data.config.branches.find(b => b.id === urlBranch)
+              setBranchName(b?.name || '')
+              setBranchId(urlBranch)
+            }
             localStorage.setItem('checkpro_tenant', JSON.stringify({ id: data.id, config: data.config, slug: data.slug }))
             return
           }
         } catch {}
       }
-      // Fallback: localStorage (for devices previously configured)
-      try {
-        const stored = localStorage.getItem('checkpro_tenant')
-        if (stored) {
+      // Fallback to localStorage
+      const stored = localStorage.getItem('checkpro_tenant')
+      if (stored) {
+        try {
           const data = JSON.parse(stored)
-          setTenantId(data.id)
-          setCfg(data.config)
-          setSlug(data.slug)
-        }
-      } catch {}
+          setTenantId(data.id); setCfg(data.config); setSlug(data.slug)
+          if (urlBranch && data.config?.branches) {
+            const b = data.config.branches.find(b => b.id === urlBranch)
+            setBranchName(b?.name || ''); setBranchId(urlBranch)
+          }
+        } catch {}
+      }
     }
     init()
-  }, [searchParams])
+  }, [])
 
+  // ── Create IP-bound session when tenant is ready ───────────────────────────
+  useEffect(() => {
+    if (!tenantId) return
+    setSessionLoading(true)
+    fetch('/api/check/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenantId, branchId })
+    })
+      .then(r => r.json())
+      .then(data => { setSession({ token: data.token, ip: data.ip }); setCurrentIp(data.ip) })
+      .catch(() => {}) // non-fatal: can still punch without token (will be flagged)
+      .finally(() => setSessionLoading(false))
+  }, [tenantId, branchId])
+
+  // ── GPS one-shot verify ───────────────────────────────────────────────────
   const verifyGps = useCallback(() => {
     if (simMode && cfg) {
-      setGps({ status: 'ok', lat: cfg.location.lat, lng: cfg.location.lng, accuracy: 5, dist: 0, valid: true, simulated: true })
+      setGps({ status: 'ok', lat: cfg.location?.lat, lng: cfg.location?.lng, accuracy: 5, dist: 0, valid: true, simulated: true })
       return
     }
     if (!navigator.geolocation) { setGps(g => ({ ...g, status: 'error', error: 'GPS no disponible.' })); return }
-    setGps(g => ({ ...g, status: 'loading', error: null }))
+    setGps(g => ({ ...g, status: 'loading' }))
     navigator.geolocation.getCurrentPosition(
       pos => {
-        if (!cfg) { setGps(g => ({ ...g, status: 'error', error: 'No hay configuración cargada.' })); return }
+        if (!cfg?.location) { setGps(g => ({ ...g, status: 'error', error: 'Sin ubicación configurada.' })); return }
         const { latitude: lat, longitude: lng, accuracy } = pos.coords
         const dist = Math.round(haversineMeters(lat, lng, cfg.location.lat, cfg.location.lng))
-        setGps({ status: 'ok', lat, lng, accuracy: Math.round(accuracy), dist, valid: dist <= cfg.location.radius, simulated: false })
+        setGps({ status: 'ok', lat, lng, accuracy: Math.round(accuracy), dist, valid: dist <= (cfg.location.radius || 300), simulated: false })
       },
       err => {
-        const m = { 1: 'Permiso denegado. Habilita ubicación en tu navegador.', 2: 'No se obtuvo posición.', 3: 'Tiempo agotado.' }
+        const m = { 1: 'Permiso denegado.', 2: 'No se obtuvo posición.', 3: 'Tiempo agotado.' }
         setGps(g => ({ ...g, status: 'error', error: m[err.code] || 'Error GPS.' }))
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     )
   }, [simMode, cfg])
 
-  const reset = () => { setStep('id'); setEmpCode(''); setFoundEmp(null); setOpenShift(null); setMsg(null); setCoverMode(false); setCoverTarget('') }
+  // ── Dual monitoring while shift is open (step=done + openShift) ───────────
+  useEffect(() => {
+    if (step !== 'done' || !openShift || !tenantId) return
+    let gpsWatchId = null
+    let ipTimer = null
+    let countdownTimer = null
+    const abandonCalledLocal = { v: false }
 
+    // ── Trigger abandon
+    async function triggerAbandon(reason, leftAt) {
+      if (abandonCalledLocal.v) return
+      abandonCalledLocal.v = true
+      toast.error('Turno cerrado automáticamente — fuera de sucursal')
+      await fetch('/api/check/abandon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenantId, employeeId: openShift.employee_id, reason, leftAt })
+      })
+      setOpenShift(null)
+      setMsg({ type: 'warn', text: 'Tu turno fue cerrado automáticamente por salir de la sucursal. El gerente revisará la incidencia.' })
+    }
+
+    // ── Evaluate combined outside status
+    function evaluate(gpsOutside, ipOutside) {
+      const outside = gpsOutside || ipOutside
+      const reason = gpsOutside && ipOutside ? 'both' : gpsOutside ? 'gps' : 'ip'
+      setMonitor(prev => {
+        if (!outside) return { outsideSince: null, outsideReason: null, minsLeft: ABANDON_MINUTES }
+        const since = prev.outsideSince || new Date()
+        const elapsed = (Date.now() - since.getTime()) / 60000
+        const left = Math.max(0, Math.ceil(ABANDON_MINUTES - elapsed))
+        if (left <= 0 && !abandonCalledLocal.v) {
+          triggerAbandon(reason, since.toISOString())
+        }
+        return { outsideSince: since, outsideReason: reason, minsLeft: left }
+      })
+    }
+
+    let lastGpsOutside = false
+    let lastIpOutside = false
+
+    // ── GPS watch
+    if (!simMode && navigator.geolocation && cfg?.location) {
+      gpsWatchId = navigator.geolocation.watchPosition(
+        pos => {
+          const { latitude: lat, longitude: lng } = pos.coords
+          const dist = Math.round(haversineMeters(lat, lng, cfg.location.lat, cfg.location.lng))
+          lastGpsOutside = dist > (cfg.location.radius || 300)
+          setGps(g => ({ ...g, status: 'ok', lat, lng, dist, valid: !lastGpsOutside, accuracy: Math.round(pos.coords.accuracy) }))
+          evaluate(lastGpsOutside, lastIpOutside)
+        },
+        () => {},
+        { enableHighAccuracy: true, maximumAge: 30000 }
+      )
+    }
+
+    // ── IP watch
+    const branchIp = branchId ? (cfg?.branches || []).find(b => b.id === branchId)?.ip : null
+    async function checkIp() {
+      try {
+        const r = await fetch('/api/check/ip')
+        const { ip } = await r.json()
+        setCurrentIp(ip)
+        lastIpOutside = branchIp ? (ip !== branchIp) : false
+        evaluate(lastGpsOutside, lastIpOutside)
+      } catch {}
+    }
+    checkIp()
+    ipTimer = setInterval(checkIp, IP_INTERVAL_MS)
+    countdownTimer = setInterval(() => {
+      setMonitor(prev => {
+        if (!prev.outsideSince) return prev
+        const elapsed = (Date.now() - prev.outsideSince.getTime()) / 60000
+        const left = Math.max(0, Math.ceil(ABANDON_MINUTES - elapsed))
+        return { ...prev, minsLeft: left }
+      })
+    }, 10000) // update countdown every 10s
+
+    return () => {
+      if (gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId)
+      clearInterval(ipTimer)
+      clearInterval(countdownTimer)
+    }
+  }, [step, openShift, tenantId, cfg, simMode, branchId])
+
+  // ── Reset ─────────────────────────────────────────────────────────────────
+  const reset = () => {
+    setStep('id'); setEmpCode(''); setFoundEmp(null); setOpenShift(null)
+    setMsg(null); setCoverMode(false); setCoverTarget('')
+  }
+
+  // ── Identify employee ─────────────────────────────────────────────────────
   async function submitId() {
-    if (!tenantId) { setMsg({ type: 'err', text: 'Sistema no configurado. Escanea el QR de tu empresa.' }); return }
+    if (!tenantId) { setMsg({ type: 'err', text: 'Sistema no configurado.' }); return }
     setBusy(true)
     try {
       const res = await fetch('/api/check/identify', {
@@ -194,15 +353,13 @@ function CheckPageInner() {
       })
       const data = await res.json()
       if (!data.found) { setMsg({ type: 'err', text: 'ID no encontrado.' }); setBusy(false); return }
-      setFoundEmp(data.employee)
-      setOpenShift(data.openShift)
-      setAllEmps(data.allEmployees || [])
-      setStep('pin')
-      setMsg(null)
+      setFoundEmp(data.employee); setOpenShift(data.openShift); setAllEmps(data.allEmployees || [])
+      setStep('pin'); setMsg(null)
     } catch { setMsg({ type: 'err', text: 'Error de conexión.' }) }
     finally { setBusy(false) }
   }
 
+  // ── PIN complete → punch ──────────────────────────────────────────────────
   async function handlePinComplete(pin) {
     if (!gps.valid) { setMsg({ type: 'warn', text: 'Verifica tu ubicación GPS primero.' }); return }
     setBusy(true)
@@ -214,46 +371,129 @@ function CheckPageInner() {
         body: JSON.stringify({
           tenantId, employeeCode: empCode.trim().toUpperCase(), pin, action,
           coveringEmployeeId: coverMode && coverTarget ? coverTarget : null,
-          geo: { lat: gps.lat, lng: gps.lng, dist: gps.dist, accuracy: gps.accuracy, simulated: gps.simulated }
+          geo: { lat: gps.lat, lng: gps.lng, dist: gps.dist, accuracy: gps.accuracy, simulated: gps.simulated, valid: gps.valid },
+          sessionToken: session?.token || null,
         })
       })
       const data = await res.json()
       if (data.ok) {
         setMsg({ type: 'ok', text: data.msg })
         toast.success(data.msg)
-        setTimeout(reset, 3000)
+        if (action === 'in') {
+          // Keep shift open state for monitoring; go to "done" screen
+          setStep('done')
+          setOpenShift({ employee_id: foundEmp?.id, entry_time: new Date().toISOString() })
+        } else {
+          setStep('done')
+          setOpenShift(null)
+          setTimeout(reset, 4000)
+        }
       } else {
-        setMsg({ type: 'err', text: data.msg })
-        toast.error(data.msg)
+        setMsg({ type: 'err', text: data.msg }); toast.error(data.msg)
       }
     } catch { setMsg({ type: 'err', text: 'Error de conexión.' }); toast.error('Error de conexión') }
     finally { setBusy(false) }
   }
 
-  const gpsOk = gps.valid
-  const initials = foundEmp?.name?.split(' ').slice(0,2).map(w=>w[0]).join('') || ''
-  const otherEmps = allEmps.filter(e => e.id !== foundEmp?.id)
+  // ── Manual abandon ────────────────────────────────────────────────────────
+  async function manualAbandon() {
+    if (!openShift) return
+    await fetch('/api/check/abandon', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenantId, employeeId: foundEmp?.id || openShift.employee_id, reason: monitor.outsideReason || 'both', leftAt: monitor.outsideSince?.toISOString() })
+    })
+    setOpenShift(null)
+    setMsg({ type: 'warn', text: 'Turno cerrado. El gerente revisará la incidencia.' })
+    setTimeout(reset, 4000)
+  }
 
+  // ── Not configured ────────────────────────────────────────────────────────
   if (!tenantId) return (
     <main className="min-h-dvh bg-dark-900 flex flex-col items-center justify-center px-5 text-center">
-      <div className="text-5xl mb-4">📷</div>
-      <h2 className="text-xl font-bold text-white mb-2">Escanea el QR de tu empresa</h2>
-      <p className="text-gray-500 text-sm mb-4">Pide al administrador el código QR de la sucursal y escanéalo con tu cámara.</p>
-      <p className="text-xs text-gray-600 font-mono">O si eres el administrador:</p>
-      <Link href="/dashboard/settings" className="mt-2 text-brand-400 text-sm font-semibold underline">Ir a configuración → Generar QR</Link>
+      <div className="text-4xl mb-4">⚙️</div>
+      <h2 className="text-xl font-bold text-white mb-2">Checador no configurado</h2>
+      <p className="text-gray-500 text-sm mb-6">Escanea el código QR de tu sucursal para comenzar.</p>
+      <Link href="/dashboard/settings" className="btn-primary max-w-xs">Ir a configuración →</Link>
     </main>
   )
+
+  const initials = foundEmp?.name?.split(' ').slice(0, 2).map(w => w[0]).join('') || ''
+  const otherEmps = allEmps.filter(e => e.id !== foundEmp?.id)
 
   return (
     <main className="min-h-dvh bg-dark-900 flex flex-col max-w-[430px] mx-auto">
       <div className="flex-1 overflow-y-auto no-scrollbar pb-safe">
+
+        {/* Hero / clock */}
         <div className="mx-3.5 mt-3.5 bg-gradient-to-br from-brand-400/7 to-blue-500/5 border border-brand-400/15 rounded-2xl">
-          <LiveClock locationName={cfg?.location?.name} />
+          <LiveClock locationName={cfg?.location?.name} branchName={branchName} />
         </div>
+
+        {/* Abandon banner (shown when monitoring detects outside) */}
+        {step === 'done' && openShift && (
+          <div className="mt-3">
+            <AbandonBanner monitor={monitor} onAbandon={manualAbandon} />
+          </div>
+        )}
+
         <div className="px-4 pt-3">
           <GpsStatus gps={gps} onVerify={verifyGps} simMode={simMode} setSimMode={setSimMode} />
-          {step === 'id' ? (
+
+          {/* ── DONE screen (after clock-in, waiting for QR rescan to clock-out) ── */}
+          {step === 'done' && openShift && (
+            <div className="card text-center">
+              <div className="w-14 h-14 rounded-full bg-brand-400/10 border-2 border-brand-400/20 text-brand-400 text-xl font-bold font-mono flex items-center justify-center mx-auto mb-3">
+                {initials || '✓'}
+              </div>
+              <div className="font-bold text-lg text-white mb-1">{foundEmp?.name || 'Jornada activa'}</div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-brand-400/10 border border-brand-400/20 rounded-full text-brand-400 text-xs font-semibold mb-4">
+                <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
+                Jornada desde {fmtTime(openShift.entry_time)}
+              </div>
+              {/* Network status pill */}
+              {currentIp && (
+                <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-mono mb-4 ml-2
+                  ${monitor.outsideSince ? 'bg-orange-500/10 border border-orange-500/20 text-orange-400' : 'bg-dark-700 border border-dark-border text-gray-600'}`}>
+                  {monitor.outsideSince ? '⚠ Fuera de red' : '🌐 En red de sucursal'}
+                </div>
+              )}
+              <div className="mt-2 p-4 bg-dark-700 border border-dark-border rounded-xl">
+                <p className="text-2xl mb-2">📱</p>
+                <p className="text-white font-bold text-sm mb-1">Para registrar tu salida:</p>
+                <p className="text-gray-400 text-xs">Escanea de nuevo el código QR de la sucursal con tu celular.</p>
+              </div>
+              {msg && (
+                <div className={`mt-3 px-4 py-3 rounded-xl text-sm font-semibold
+                  ${msg.type === 'ok' ? 'bg-brand-400/10 border border-brand-400/20 text-brand-400' :
+                    msg.type === 'warn' ? 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-400' :
+                    'bg-red-500/10 border border-red-500/20 text-red-400'}`}>
+                  {msg.text}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── DONE screen (after clock-out) ── */}
+          {step === 'done' && !openShift && (
+            <div className="card text-center py-8">
+              <div className="text-5xl mb-3">✅</div>
+              <p className="text-white font-bold text-lg">¡Hasta pronto!</p>
+              {msg && <p className="text-brand-400 text-sm mt-2">{msg.text}</p>}
+            </div>
+          )}
+
+          {/* ── ID step ── */}
+          {step === 'id' && (
             <div className="card">
+              {sessionLoading && (
+                <div className="text-xs text-gray-600 font-mono text-center mb-3">🔐 Verificando sesión...</div>
+              )}
+              {session && !sessionLoading && (
+                <div className="text-[10px] text-gray-600 font-mono text-center mb-3">
+                  🔒 Sesión activa · {session.ip}
+                </div>
+              )}
               <p className="text-xs font-mono text-gray-500 uppercase tracking-widest mb-3">Identificación</p>
               <label className="label">ID de Empleado</label>
               <input className="input text-center text-xl tracking-widest font-mono mb-3"
@@ -263,13 +503,19 @@ function CheckPageInner() {
               <button onClick={submitId} disabled={busy || !empCode} className="btn-primary">
                 {busy ? '⏳ Buscando...' : 'Continuar →'}
               </button>
-              {msg && <div className={`mt-3 px-4 py-3 rounded-xl text-sm font-semibold
-                ${msg.type === 'err' ? 'bg-red-500/10 border border-red-500/20 text-red-400' : 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-400'}`}>
-                {msg.text}
-              </div>}
+              {msg && (
+                <div className={`mt-3 px-4 py-3 rounded-xl text-sm font-semibold
+                  ${msg.type === 'err' ? 'bg-red-500/10 border border-red-500/20 text-red-400' : 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-400'}`}>
+                  {msg.text}
+                </div>
+              )}
             </div>
-          ) : (
+          )}
+
+          {/* ── PIN step ── */}
+          {step === 'pin' && (
             <div className="card">
+              {/* Employee header */}
               <div className="text-center mb-5">
                 <div className={`w-14 h-14 rounded-full flex items-center justify-center text-lg font-bold font-mono mx-auto mb-2.5
                   ${foundEmp?.can_manage ? 'bg-orange-500/10 border-2 border-orange-400/30 text-orange-400' : 'bg-brand-400/10 border-2 border-brand-400/20 text-brand-400'}`}>
@@ -277,13 +523,19 @@ function CheckPageInner() {
                 </div>
                 <div className="font-bold text-lg text-white">{foundEmp?.name}</div>
                 <div className="text-gray-500 text-xs mt-0.5">{foundEmp?.department} · {foundEmp?.role_label}</div>
-                {openShift && (
+                {openShift ? (
                   <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 bg-brand-400/10 border border-brand-400/20 rounded-full text-brand-400 text-xs font-semibold">
                     <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
                     Jornada desde {fmtTime(openShift.entry_time)}
                   </div>
+                ) : (
+                  <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 bg-dark-700 border border-dark-border rounded-full text-gray-400 text-xs">
+                    ⏱ Registrar entrada
+                  </div>
                 )}
               </div>
+
+              {/* Cover mode */}
               {!openShift && (
                 <div className="mb-4">
                   <div className="flex items-center justify-between mb-2">
@@ -299,15 +551,17 @@ function CheckPageInner() {
                         <option value="">— Selecciona al compañero —</option>
                         {otherEmps.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                       </select>
-                      <p className="text-xs text-blue-400 font-mono">💡 Tarifa aplicada: la del compañero cubierto</p>
+                      <p className="text-xs text-blue-400 font-mono">💡 Tarifa: la del compañero cubierto</p>
                     </>
                   )}
                 </div>
               )}
+
               <PinPad onComplete={handlePinComplete} onClear={() => setMsg(null)} />
-              {!gpsOk && (
+
+              {!gps.valid && (
                 <div className="mt-4 px-4 py-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl text-yellow-400 text-xs font-semibold">
-                  ⚠ Activa simulación GPS o verifica tu ubicación real antes de checar.
+                  ⚠ Verifica tu ubicación GPS antes de checar.
                 </div>
               )}
               {busy && <div className="mt-3 text-center text-blue-400 text-sm font-mono">⏳ Procesando...</div>}
@@ -321,24 +575,12 @@ function CheckPageInner() {
               )}
             </div>
           )}
+
           <p className="text-center font-mono text-xs text-gray-600 mt-3 pb-4">
-            TOLERANCIA {cfg?.toleranceMinutes || 10} MIN · RADIO {cfg?.location?.radius || 300} M
+            RADIO {cfg?.location?.radius || 300}M · TOLERANCIA {cfg?.toleranceMinutes || 10}MIN
           </p>
         </div>
       </div>
     </main>
-  )
-}
-
-// ── default export with Suspense ─────────────────────────────────────────
-export default function CheckPage() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-dvh bg-dark-900 flex items-center justify-center">
-        <p className="text-gray-500 font-mono text-sm">Cargando checador...</p>
-      </div>
-    }>
-      <CheckPageInner />
-    </Suspense>
   )
 }
