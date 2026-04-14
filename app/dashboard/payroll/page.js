@@ -1,0 +1,366 @@
+'use client'
+// src/app/dashboard/payroll/page.js
+import { useState, useEffect, useCallback } from 'react'
+import { createClient } from '@/lib/supabase'
+import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate } from '@/lib/utils'
+import toast from 'react-hot-toast'
+
+// ── Compact single-page report ───────────────────────────────────────────────
+function buildReportHTML(cut, weekShifts, employees, branchName) {
+  const active = employees.filter(e => e.has_shift)
+  let totalNet = 0
+  let totalGross = 0
+
+  const rows = active.map(emp => {
+    const s = empWeekSummary(emp, weekShifts, employees)
+    totalGross += s.grossPay
+    totalNet += s.netPay
+    const daysWorked = s.shifts.filter(sh => ['closed', 'incident'].includes(sh.status)).length
+    const deductions = s.retardoDesc + s.incidentDesc
+
+    const badges = []
+    if (s.retardos > 0) badges.push(`<span style="background:#fff3cd;color:#856404;padding:1px 5px;border-radius:3px;font-size:7pt">${s.retardos} ret.</span>`)
+    if (s.incidents > 0) badges.push(`<span style="background:#f8d7da;color:#842029;padding:1px 5px;border-radius:3px;font-size:7pt">${s.incidents} inc.</span>`)
+    if (s.otHours > 0) badges.push(`<span style="background:#d1ecf1;color:#0c5460;padding:1px 5px;border-radius:3px;font-size:7pt">${s.otHours}h HE</span>`)
+
+    return `<tr>
+      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;font-weight:600">${emp.name}</td>
+      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;color:#555">${emp.department || '—'}</td>
+      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;text-align:center">${daysWorked}d / ${s.totalH}h${s.otHours > 0 ? `<br/><span style="font-size:7pt;color:#0c5460">+${s.otHours}h HE</span>` : ''}</td>
+      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;text-align:center">${badges.join(' ') || '<span style="color:#198754">✓</span>'}</td>
+      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;text-align:right">$${s.grossPay.toFixed(2)}</td>
+      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;text-align:right;color:${deductions > 0 ? '#c60' : '#aaa'}">${deductions > 0 ? '-$' + deductions.toFixed(2) : '—'}</td>
+      <td style="border:1px solid #ddd;padding:5px 7px;font-size:9pt;text-align:right;font-weight:700">$${s.netPay.toFixed(2)}</td>
+      <td style="border:1px solid #ddd;padding:5px 7px;width:80px"></td>
+    </tr>`
+  }).join('')
+
+  // Signature grid: 3 columns
+  const sigCols = active.map(emp => {
+    const s = empWeekSummary(emp, weekShifts, employees)
+    return `<div style="padding:8px 4px">
+      <div style="border-top:1px solid #000;padding-top:4px">
+        <div style="font-size:8pt;font-weight:600">${emp.name}</div>
+        <div style="font-size:7.5pt;color:#555">${emp.employee_code} · Neto: $${s.netPay.toFixed(2)}</div>
+        <div style="font-size:7pt;color:#999;margin-top:2px">Firma de conformidad</div>
+      </div>
+    </div>`
+  }).join('')
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+    <title>Nómina ${cut.start_date}</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; font-size: 9pt; color: #000; }
+      .page { padding: 12mm 14mm; }
+      table { width: 100%; border-collapse: collapse; }
+      thead tr { background: #f0f0f0; }
+      th { border: 1px solid #ccc; padding: 5px 7px; font-size: 8pt; text-align: left; }
+      tfoot tr { background: #f9f9f9; font-weight: bold; }
+      .sig-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 20px; margin-top: 20px; }
+      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+    </style>
+  </head><body><div class="page">
+
+    <!-- Header -->
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+      <div>
+        <div style="font-size:16pt;font-weight:bold">${branchName || 'Nómina Semanal'}</div>
+        <div style="font-size:9pt;color:#555;margin-top:2px">Reporte de Asistencia y Pago</div>
+      </div>
+      <div style="text-align:right;font-size:8pt;color:#666">
+        <div><b>Período:</b> ${cut.start_date} al ${cut.end_date}</div>
+        <div><b>Emitido:</b> ${new Date(cut.created_at).toLocaleDateString('es-MX')}</div>
+        <div><b>Por:</b> ${cut.closed_by_name}</div>
+        ${cut.notes ? `<div style="color:#888"><i>${cut.notes}</i></div>` : ''}
+      </div>
+    </div>
+
+    <!-- Summary table -->
+    <table>
+      <thead>
+        <tr>
+          <th>Empleado</th>
+          <th>Dept.</th>
+          <th style="text-align:center">Días / Hrs</th>
+          <th style="text-align:center">Incid.</th>
+          <th style="text-align:right">Bruto</th>
+          <th style="text-align:right">Desc.</th>
+          <th style="text-align:right">NETO</th>
+          <th style="text-align:center">Firma</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr>
+          <td colspan="4" style="border:1px solid #ccc;padding:5px 7px;font-size:8.5pt">
+            <b>TOTALES</b> · ${active.length} empleado${active.length !== 1 ? 's' : ''}
+          </td>
+          <td style="border:1px solid #ccc;padding:5px 7px;text-align:right;font-size:9pt">$${totalGross.toFixed(2)}</td>
+          <td style="border:1px solid #ccc;padding:5px 7px;text-align:right;font-size:9pt;color:#c60">—</td>
+          <td style="border:1px solid #ccc;padding:5px 7px;text-align:right;font-size:10pt;color:#1a7f3c"><b>$${totalNet.toFixed(2)}</b></td>
+          <td style="border:1px solid #ccc"></td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <!-- Signatures -->
+    <div class="sig-grid">${sigCols}</div>
+
+    <div style="margin-top:14px;font-size:7pt;color:#bbb;border-top:1px solid #eee;padding-top:6px">
+      CheckPro · ${branchName} · Semana ${cut.start_date} / ${cut.end_date} · Documento interno confidencial
+    </div>
+
+  </div></body></html>`
+}
+
+// ── Component ────────────────────────────────────────────────────────────────
+export default function PayrollPage() {
+  const [emps, setEmps] = useState([])
+  const [shifts, setShifts] = useState([])
+  const [cuts, setCuts] = useState([])
+  const [cfg, setCfg] = useState(null)
+  const [tenantId, setTenantId] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [cutNote, setCutNote] = useState('')
+  const [closing, setClosing] = useState(false)
+  const [printHTML, setPrintHTML] = useState(null)
+  const [resolvingId, setResolvingId] = useState(null)
+
+  const load = useCallback(async () => {
+    const supabase = createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return
+    const { data: prof } = await supabase.from('profiles').select('tenant_id').eq('id', session.user.id).single()
+    if (!prof?.tenant_id) return
+    setTenantId(prof.tenant_id)
+    const { data: tenant } = await supabase.from('tenants').select('config').eq('id', prof.tenant_id).single()
+    setCfg(tenant?.config)
+    const [{ data: empData }, { data: shiftData }, { data: cutData }] = await Promise.all([
+      supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).eq('status', 'active').eq('has_shift', true),
+      supabase.from('shifts').select('*').eq('tenant_id', prof.tenant_id).order('date_str', { ascending: false }),
+      supabase.from('week_cuts').select('*').eq('tenant_id', prof.tenant_id).order('created_at', { ascending: false }),
+    ])
+    setEmps(empData || [])
+    setShifts(shiftData || [])
+    setCuts(cutData || [])
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const range = cfg ? weekRange(new Date(), cfg.weekClosingDay || 'dom') : weekRange(new Date(), 'dom')
+  const weekShifts = shifts.filter(s => s.date_str >= isoDate(range.start) && s.date_str <= isoDate(range.end))
+  const incidentShifts = weekShifts.filter(s => s.status === 'incident')
+  const hasUnresolved = incidentShifts.length > 0
+
+  // ── Resolve an incident shift ─────────────────────────────────────────────
+  async function resolveIncident(shiftId, action) {
+    setResolvingId(shiftId)
+    const supabase = createClient()
+    const note = action === 'approve' ? 'Aprobado por gerente' : 'Descuento aplicado por gerente'
+    await supabase.from('shifts').update({
+      status: 'closed',
+      incidents: [{ resolved: true, action, note, resolvedAt: new Date().toISOString() }]
+    }).eq('id', shiftId)
+    toast.success(action === 'approve' ? 'Incidencia aprobada ✓' : 'Descuento aplicado')
+    setResolvingId(null)
+    await load()
+  }
+
+  // ── Close week ────────────────────────────────────────────────────────────
+  async function closeWeek() {
+    if (hasUnresolved) {
+      toast.error(`Resuelve las ${incidentShifts.length} incidencia(s) antes de cerrar la semana`)
+      return
+    }
+    setClosing(true)
+    const supabase = createClient()
+    const startStr = isoDate(range.start), endStr = isoDate(range.end)
+    const uncutShifts = weekShifts.filter(s => !s.week_cut_id)
+    const { data: cut, error } = await supabase.from('week_cuts').insert({
+      tenant_id: tenantId, start_date: startStr, end_date: endStr,
+      closed_by_name: 'Gerente', notes: cutNote, paid: true,
+      shift_ids: uncutShifts.map(s => s.id)
+    }).select().single()
+    if (error) { toast.error('Error al cerrar semana'); setClosing(false); return }
+    await supabase.from('shifts').update({ week_cut_id: cut.id }).in('id', uncutShifts.map(s => s.id))
+    await supabase.from('audit_log').insert({
+      tenant_id: tenantId, action: 'WEEK_CUT', employee_name: 'Gerente',
+      detail: `${startStr}→${endStr}`, success: true
+    })
+    toast.success('Semana cerrada exitosamente')
+    await load()
+    const { data: fresh } = await supabase.from('week_cuts').select('*').eq('id', cut.id).single()
+    setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName))
+    setClosing(false)
+  }
+
+  function openReport(cut) {
+    const ws = shifts.filter(s => cut.shift_ids?.includes(s.id))
+    setPrintHTML(buildReportHTML(cut, ws, emps, cfg?.branchName))
+  }
+
+  if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando...</div>
+
+  return (
+    <div className="p-4 md:p-6 max-w-2xl">
+      <div className="mb-5">
+        <h1 className="text-2xl font-extrabold text-white">Nómina</h1>
+        <p className="text-gray-500 text-xs font-mono mt-0.5">
+          SEMANA: {isoDate(range.start)} → {isoDate(range.end)}
+        </p>
+      </div>
+
+      {/* ── Revisión de incidencias (requerida antes del corte) ─────────────── */}
+      {incidentShifts.length > 0 && (
+        <div className="mb-6">
+          <div className="px-4 py-3 mb-3 bg-red-500/10 border border-red-500/30 rounded-xl">
+            <p className="text-red-400 text-sm font-bold">
+              🚩 {incidentShifts.length} incidencia{incidentShifts.length > 1 ? 's' : ''} pendiente{incidentShifts.length > 1 ? 's' : ''} de revisión
+            </p>
+            <p className="text-red-400/70 text-xs mt-0.5">
+              El gerente debe resolver todas las incidencias antes de generar el corte de nómina.
+            </p>
+          </div>
+
+          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Revisar Incidencias</p>
+          <div className="space-y-2">
+            {incidentShifts.map(sh => {
+              const emp = emps.find(e => e.id === sh.employee_id)
+              if (!emp) return null
+              const isResolving = resolvingId === sh.id
+              return (
+                <div key={sh.id} className="card border-l-4 border-l-red-400">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-white text-sm">{emp.name}</div>
+                      <div className="text-xs text-gray-400 font-mono mt-0.5">
+                        {sh.date_str} · Entrada: {fmtTime(sh.entry_time)}
+                        {sh.exit_time ? ` · Salida: ${fmtTime(sh.exit_time)}` : ' · ⚠ Sin salida'}
+                        {sh.duration_hours ? ` · ${sh.duration_hours}h` : ''}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {sh.classification?.label || 'Sin clasificación'}
+                        {sh.incidents?.map((inc, i) => (
+                          <span key={i} className="ml-2 text-orange-400">{inc.note || inc.type || ''}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-1.5 shrink-0">
+                      <button
+                        onClick={() => resolveIncident(sh.id, 'approve')}
+                        disabled={isResolving}
+                        className="px-3 py-1.5 bg-green-500/15 border border-green-500/30 rounded-lg text-green-400 text-xs font-semibold active:bg-green-500/25 disabled:opacity-40">
+                        ✓ Aprobar
+                      </button>
+                      <button
+                        onClick={() => resolveIncident(sh.id, 'deduct')}
+                        disabled={isResolving}
+                        className="px-3 py-1.5 bg-orange-500/15 border border-orange-500/30 rounded-lg text-orange-400 text-xs font-semibold active:bg-orange-500/25 disabled:opacity-40">
+                        − Descontar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Resumen de la semana por empleado ─────────────────────────────── */}
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Resumen semanal</p>
+      <div className="space-y-2 mb-6">
+        {emps.map(emp => {
+          const s = empWeekSummary(emp, weekShifts, emps)
+          return (
+            <div key={emp.id} className="card">
+              <div className="flex items-start justify-between mb-2">
+                <div>
+                  <div className="font-bold text-white text-sm">{emp.name}</div>
+                  <div className="text-xs text-gray-500">{emp.department} · ${monthlyToHourly(emp).toFixed(2)}/h</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xl font-extrabold text-brand-400 font-mono">${s.netPay.toFixed(0)}</div>
+                  <div className="text-[9px] text-gray-600 font-mono">NETO EST.</div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-3 text-xs text-gray-500 font-mono mb-2">
+                <span>{s.totalH}h trabajadas</span>
+                {s.otHours > 0 && <span className="text-blue-400">+{s.otHours}h extra (×2)</span>}
+                <span>Bruto: ${s.grossPay.toFixed(2)}</span>
+                {s.retardoDesc > 0 && <span className="text-orange-400">-${s.retardoDesc.toFixed(2)} retardos</span>}
+                {s.incidentDesc > 0 && <span className="text-red-400">-${s.incidentDesc.toFixed(2)} incid.</span>}
+              </div>
+              <div className="flex gap-1.5 flex-wrap">
+                {s.retardos > 0 && <span className="badge-orange">{s.retardos} retardo{s.retardos > 1 ? 's' : ''}</span>}
+                {s.incidents > 0 && <span className="badge-red">{s.incidents} incidencia{s.incidents > 1 ? 's' : ''}</span>}
+                {s.otHours > 0 && <span className="px-2 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-400 text-[10px] font-semibold">{s.otHours}h extra</span>}
+                {s.retardos === 0 && s.incidents === 0 && s.otHours === 0 && <span className="badge-green">Sin incidencias ✓</span>}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* ── Corte semanal ─────────────────────────────────────────────────── */}
+      <div className={`card mb-4 ${hasUnresolved ? 'opacity-60' : ''}`}>
+        <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Corte semanal</p>
+        {hasUnresolved && (
+          <div className="px-3 py-2 mb-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-xs font-semibold">
+            🔒 Resuelve todas las incidencias para habilitar el corte
+          </div>
+        )}
+        <div className="mb-3">
+          <label className="label">Notas del corte (opcional)</label>
+          <input className="input text-sm" placeholder="Observaciones de la semana..."
+            value={cutNote} onChange={e => setCutNote(e.target.value)} disabled={hasUnresolved} />
+        </div>
+        <button onClick={closeWeek} disabled={closing || hasUnresolved}
+          className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed">
+          {closing ? '⏳ Cerrando...' : '🖨️ Cerrar semana e imprimir reporte'}
+        </button>
+      </div>
+
+      {/* ── Cortes anteriores ─────────────────────────────────────────────── */}
+      {cuts.length > 0 && (
+        <div>
+          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Cortes anteriores</p>
+          <div className="space-y-2">
+            {cuts.map(c => (
+              <div key={c.id} className="card-sm flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold text-sm text-white">{c.start_date} → {c.end_date}</div>
+                  <div className="text-xs text-gray-500">{c.closed_by_name} · {c.notes || 'Sin notas'}</div>
+                </div>
+                <button onClick={() => openReport(c)}
+                  className="px-3 py-2 bg-dark-700 border border-dark-border rounded-xl text-xs font-bold text-white active:bg-dark-600 shrink-0">
+                  🖨️
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Print modal ────────────────────────────────────────────────────── */}
+      {printHTML && (
+        <div className="fixed inset-0 z-[500] bg-white flex flex-col">
+          <div className="flex gap-3 items-center p-3 bg-dark-900 border-b border-dark-border shrink-0 no-print">
+            <button onClick={() => window.print()}
+              className="flex items-center gap-2 px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl">
+              🖨️ Imprimir / Guardar PDF
+            </button>
+            <button onClick={() => setPrintHTML(null)}
+              className="flex items-center gap-2 px-4 py-2 bg-dark-700 border border-dark-border text-white text-sm font-semibold rounded-xl">
+              ✕ Cerrar
+            </button>
+            <span className="text-xs text-gray-500 font-mono hidden md:block">Todos los empleados en una sola hoja</span>
+          </div>
+          <iframe srcDoc={printHTML} className="flex-1 border-0 w-full" title="Reporte semanal" />
+        </div>
+      )}
+    </div>
+  )
+}
