@@ -1,14 +1,20 @@
-# CheckPro - Sistema de Control de Asistencia
+# CheckPro
 
-Stack: Next.js 14 + Supabase + Vercel
+SaaS de reloj checador con GPS para PyMES mexicanas.
 
-## Deploy
+## Stack
+- Next.js 14 App Router (src/ directory)
+- Supabase (PostgreSQL + Auth)
+- Vercel deployment
+- Tailwind CSS dark theme
 
-1. Supabase: crear proyecto, ejecutar supabase/schema.sql
-2. Vercel: importar repo, agregar variables de entorno
-3. NEXT_PUBLIC_SUPABASE_URL
-4. NEXT_PUBLIC_SUPABASE_ANON_KEY
-5. SUPABASE_SERVICE_ROLE_KEY
-6. NEXT_PUBLIC_APP_URL
+## URLs
+- Landing: /
+- Checador empleados: /check
+- Dashboard admin: /dashboard
 
-v1.1 - jsconfig path alias fix applied
+## Fix log
+- jsconfig.json: @/* → ./src/*
+- supabase.js: browser client only (no next/headers)
+- supabase-server.js: server/service clients
+- API routes: use supabase-server
