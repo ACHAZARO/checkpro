@@ -288,7 +288,9 @@ export default function CheckPage() {
                     </>
                   )}
                 </div>
-              {!openShift && (\n                <PinPad onComplete={handlePinComplete} onClear={() => setMsg(null)} />
+              )}
+              {!openShift && (
+                <PinPad onComplete={handlePinComplete} onClear={() => setMsg(null)} />
               )}
 
               {!gpsOk && (
