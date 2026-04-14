@@ -69,7 +69,7 @@ export default function DashboardLayout({ children }) {
                 ${pathname === n.href ? 'text-brand-400 bg-brand-400/5 border-l-2 border-brand-400' : 'text-gray-400 hover:text-white hover:bg-dark-700 border-l-2 border-transparent'}`}>
               <span>{n.icon}</span>{n.label}
             </Link>
-          )]}
+          ))}
         </nav>
         <div className="p-4 border-t border-dark-border space-y-2">
           <Link href="/check" target="_blank"
