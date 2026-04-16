@@ -198,6 +198,26 @@ export default function PayrollPage() {
       detail: `${startStr}→${endStr}`, success: true
     })
     toast.success('Semana cerrada exitosamente')
+
+    // Fanout: generar archivo semanal en paralelo con el corte.
+    // Llama /api/archive/generate-week con cookie de admin (no bloquea el UI del corte).
+    const archiveToast = toast.loading('Generando archivo semanal…')
+    try {
+      const res = await fetch('/api/archive/generate-week', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weekStart: startStr, weekEnd: endStr }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (res.ok && json?.ok) {
+        toast.success(`Archivo generado (${json.filesGenerated} archivos)`, { id: archiveToast, duration: 5000 })
+      } else {
+        toast.error(`Archivo: ${json?.error || 'error'}`, { id: archiveToast, duration: 6000 })
+      }
+    } catch (e) {
+      toast.error('Archivo: error de red', { id: archiveToast, duration: 6000 })
+    }
+
     await load()
     const { data: fresh } = await supabase.from('week_cuts').select('*').eq('id', cut.id).single()
     setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend))
