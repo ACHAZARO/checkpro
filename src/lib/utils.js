@@ -24,33 +24,21 @@ export function hoursInSchedule(schedule, dk) {
   return (h2*60+m2-h1*60-m1)/60
 }
 
-/**
- * Calcula la tarifa por hora del empleado.
- * Soporta salario mensual (period='monthly') y semanal (period='weekly').
- * El periodo se guarda en employee.schedule.salary_period.
- */
 export function monthlyToHourly(employee) {
+  const period = employee.schedule?.salary_period || 'monthly'
   const wkH = DAYS.reduce((a,d) => a + hoursInSchedule(employee.schedule||{}, d), 0)
   if (wkH <= 0) return 0
-  const period = employee.schedule?.salary_period || 'monthly'
-  if (period === 'weekly') {
-    // monthly_salary aquí guarda el monto semanal
-    return employee.monthly_salary / wkH
-  }
-  // Mensual por defecto: distribuir entre semanas del mes (4.33 semanas promedio)
+  if (period === 'weekly') return employee.monthly_salary / wkH
   return employee.monthly_salary / (wkH * 4.33)
 }
 
-/** Convierte el salario almacenado a su equivalente mensual (para reportes) */
-export function toMonthlySalary(employee) {
-  const period = employee.schedule?.salary_period || 'monthly'
-  if (period === 'weekly') return (employee.monthly_salary || 0) * 4.33
-  return employee.monthly_salary || 0
+export function salaryPeriodLabel(employee) {
+  return employee.schedule?.salary_period === 'weekly' ? 'sem' : 'mes'
 }
 
-/** Etiqueta del periodo de salario */
-export function salaryPeriodLabel(employee) {
-  return (employee.schedule?.salary_period || 'monthly') === 'weekly' ? 'sem' : 'mes'
+export function toMonthlySalary(employee) {
+  if (employee.schedule?.salary_period === 'weekly') return employee.monthly_salary * 4.33
+  return employee.monthly_salary
 }
 
 export function classifyEntry(schedule, entryTime, toleranceMinutes) {
@@ -87,35 +75,160 @@ export function weekRange(refDate, closingDay) {
   return { start, end }
 }
 
-export function calcShiftPay(shift, employee, coveringEmployee) {
-  if (!shift.duration_hours) return 0
-  const rate = monthlyToHourly(coveringEmployee || employee)
-  let pay = shift.duration_hours * rate
-  if (shift.is_holiday) pay *= 3
-  return pay
+// ── Horas extra ──────────────────────────────────────────────────────────────
+// 30 min de gracia; después, cada 60 min completos = 1 HE (redondeado hacia arriba
+// a partir del primer minuto que excede la gracia).
+// Ejemplos: ≤30min=0HE | 31-90=1HE | 91-150=2HE | 151-210=3HE
+export function calcOvertimeHours(minutesOver) {
+  if (minutesOver <= 30) return 0
+  return Math.ceil((minutesOver - 30) / 60)
 }
 
-export function empWeekSummary(employee, weekShifts, allEmployees) {
+// Devuelve la hora de salida programada como Date para la fecha dada
+export function scheduledExitDate(dateStr, employee) {
+  const d = new Date(dateStr + 'T00:00:00')
+  const dk = dayKey(d)
+  const s = employee.schedule?.[dk]
+  if (!s?.work || !s.end) return null
+  const [h, m] = s.end.split(':').map(Number)
+  const exit = new Date(d)
+  exit.setHours(h, m, 0, 0)
+  return exit
+}
+
+// ── Vacaciones (LFT 2023) ─────────────────────────────────────────────────────
+// Tabla por defecto conforme a la reforma de 2022 vigente desde 2023.
+// Configurable por empresa en cfg.vacationTable.
+export const LFT_VACATION_TABLE = [
+  { fromYear: 1, toYear: 1, days: 12 },
+  { fromYear: 2, toYear: 2, days: 14 },
+  { fromYear: 3, toYear: 3, days: 16 },
+  { fromYear: 4, toYear: 4, days: 18 },
+  { fromYear: 5, toYear: 9, days: 20 },
+  { fromYear: 10, toYear: 14, days: 22 },
+  { fromYear: 15, toYear: 19, days: 24 },
+  { fromYear: 20, toYear: 24, days: 26 },
+  { fromYear: 25, toYear: 999, days: 28 },
+]
+
+// Años completos trabajados desde la fecha de contratación
+export function calcYearsWorked(hireDate) {
+  if (!hireDate) return 0
+  const hire = new Date(hireDate)
+  const now = new Date()
+  let years = now.getFullYear() - hire.getFullYear()
+  const m = now.getMonth() - hire.getMonth()
+  if (m < 0 || (m === 0 && now.getDate() < hire.getDate())) years--
+  return Math.max(0, years)
+}
+
+// Días de vacaciones que corresponden según años trabajados y tabla
+export function calcVacationDays(hireDate, customTable = null) {
+  const table = customTable || LFT_VACATION_TABLE
+  const years = calcYearsWorked(hireDate)
+  if (years < 1) return 0
+  const entry = table.find(r => years >= r.fromYear && years <= r.toYear)
+  return entry?.days || 28
+}
+
+// El "año de aniversario actual" = año del último cumpleaños de trabajo.
+// Si el aniversario de este año ya pasó, retorna este año. Si no, el año pasado.
+export function currentAnniversaryYear(hireDate) {
+  if (!hireDate) return null
+  const hire = new Date(hireDate)
+  const now = new Date()
+  const thisYearAnniv = new Date(now.getFullYear(), hire.getMonth(), hire.getDate())
+  return thisYearAnniv <= now ? now.getFullYear() : now.getFullYear() - 1
+}
+
+// ¿Tiene vacaciones pendientes? (el aniversario actual no aparece en schedule.vacationYearsTaken)
+export function hasVacationPending(employee) {
+  const hireDate = employee.schedule?.hireDate
+  if (!hireDate) return false
+  const years = calcYearsWorked(hireDate)
+  if (years < 1) return false
+  const annivYear = currentAnniversaryYear(hireDate)
+  const taken = employee.schedule?.vacationYearsTaken || []
+  return !taken.includes(annivYear)
+}
+
+// ── Pago por cobertura ────────────────────────────────────────────────────────
+// coveragePayMode: 'own' | 'covered' | 'lower'
+// 'own'     → siempre cobra con su propio sueldo
+// 'covered' → cobra con el sueldo del empleado cubierto (default histórico)
+// 'lower'   → cobra el sueldo más bajo entre ambos
+function resolvePayEmployee(employee, coveringEmployee, coveragePayMode) {
+  if (!coveringEmployee) return employee
+  const mode = coveragePayMode || 'covered'
+  if (mode === 'own') return employee
+  if (mode === 'covered') return coveringEmployee
+  if (mode === 'lower') {
+    const salA = toMonthlySalary(employee)
+    const salB = toMonthlySalary(coveringEmployee)
+    return salA <= salB ? employee : coveringEmployee
+  }
+  return coveringEmployee
+}
+
+// ── Cálculo de pago por turno ─────────────────────────────────────────────────
+// - Días festivos: ×3 sobre todas las horas
+// - Horas extra (en corrections.overtime.hours): prima adicional ×1 (total ×2)
+// - Faltas injustificadas: no se pagan (duration_hours es 0 y tipo es falta_injustificada)
+// - coveragePayMode: regla de la sucursal ('own' | 'covered' | 'lower')
+export function calcShiftPay(shift, employee, coveringEmployee, coveragePayMode) {
+  // Absences never pay
+  if (shift.classification?.type === 'falta_injustificada') return 0
+  if (!shift.duration_hours) return 0
+
+  const payEmp = resolvePayEmployee(employee, coveringEmployee, coveragePayMode)
+  const rate = monthlyToHourly(payEmp)
+  const otHours = shift.corrections?.overtime?.hours || 0
+
+  if (shift.is_holiday) {
+    return shift.duration_hours * rate * 3
+  }
+  // Regular pay + OT premium (OT hours already counted in duration, +1× more for 2× total)
+  return shift.duration_hours * rate + otHours * rate
+}
+
+// ── Resumen semanal por empleado ──────────────────────────────────────────────
+export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMode) {
   const mine = weekShifts.filter(s => s.employee_id === employee.id)
   const closed = mine.filter(s => ['closed','incident'].includes(s.status))
   const totalH = closed.reduce((a,s) => a + (s.duration_hours||0), 0)
+  const otHours = closed.reduce((a,s) => a + (s.corrections?.overtime?.hours || 0), 0)
   const retardos = closed.filter(s => s.classification?.type === 'retardo').length
   const incidents = mine.filter(s => s.status === 'incident').length
+  const faltasInjustificadas = mine.filter(s => s.classification?.type === 'falta_injustificada').length
+  const faltasJustificadas = mine.filter(s =>
+    s.classification?.type === 'falta_justificada_pagada' ||
+    s.classification?.type === 'falta_justificada_no_pagada'
+  ).length
+
   let grossPay = 0
   closed.forEach(s => {
     const cov = s.covering_employee_id ? allEmployees.find(e=>e.id===s.covering_employee_id) : null
-    grossPay += calcShiftPay(s, employee, cov)
+    grossPay += calcShiftPay(s, employee, cov, coveragePayMode)
   })
   const hr = monthlyToHourly(employee)
   const retardoDesc = retardos * (hr * 0.5)
   const incidentDesc = incidents * (hr * 8)
   return {
     totalH: parseFloat(totalH.toFixed(2)),
-    retardos, incidents, grossPay,
+    otHours: parseFloat(otHours.toFixed(2)),
+    retardos, incidents, faltasInjustificadas, faltasJustificadas, grossPay,
     retardoDesc, incidentDesc,
     netPay: Math.max(0, grossPay - retardoDesc - incidentDesc),
     shifts: mine
   }
+}
+
+// ── Contar faltas graves (injustificadas) históricas de un empleado ───────────
+export function countGraveIncidents(allShifts, employeeId) {
+  return allShifts.filter(s =>
+    s.employee_id === employeeId &&
+    s.classification?.type === 'falta_injustificada'
+  ).length
 }
 
 export function generateEmployeeCode(existing) {
