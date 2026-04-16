@@ -1,7 +1,7 @@
 // src/app/api/check/punch/route.js
 import { createServiceClient } from '@/lib/supabase'
 import { NextResponse } from 'next/server'
-import { classifyEntry, isoDate, diffHrs } from '@/lib/utils'
+import { classifyEntry, isoDate, diffHrs, calcOvertimeHours, scheduledExitDate } from '@/lib/utils'
 import crypto from 'crypto'
 
 function getClientIp(req) {
@@ -9,6 +9,8 @@ function getClientIp(req) {
   if (xff) return xff.split(',')[0].trim()
   return req.headers.get('x-real-ip') || req.headers.get('cf-connecting-ip') || 'unknown'
 }
+
+const TTL_MS = 12 * 60 * 60 * 1000
 
 function verifyToken(token) {
   try {
@@ -19,24 +21,28 @@ function verifyToken(token) {
       .update(JSON.stringify(payload))
       .digest('hex')
     if (sig !== expected) return null
-    if (Date.now() - payload.ts > 10 * 60 * 1000) return null // expired
+    if (Date.now() - payload.ts > TTL_MS) return null // expired (12h)
     return payload
   } catch { return null }
 }
 
 export async function POST(req) {
   try {
-    const { tenantId, employeeCode, pin, action, coveringEmployeeId, geo, sessionToken } = await req.json()
+    const { tenantId, employeeCode, pin, action, coveringEmployeeId, geo, sessionToken, deviceId } = await req.json()
     const supabase = createServiceClient()
     const currentIp = getClientIp(req)
 
-    // 1. Verify session token (IP-bound QR session)
+    // 1. Verify session token (IP-bound + device-bound QR session)
     let sessionIp = null
     let sessionValid = false
+    let sessionDeviceId = null
+    let branchId = null
     if (sessionToken) {
       const sess = verifyToken(sessionToken)
       if (sess && sess.tenantId === tenantId) {
         sessionIp = sess.ip
+        sessionDeviceId = sess.deviceId || null
+        branchId = sess.branchId || null
         sessionValid = true
       }
     }
@@ -68,15 +74,14 @@ export async function POST(req) {
       return NextResponse.json({ ok: false, msg: `Fuera del área autorizada (${geo?.dist}m). Acércate a la sucursal.` })
     }
 
-    // 4. Get tenant config (branch IP check)
+    // 4. Get tenant config
     const { data: tenant } = await supabase.from('tenants').select('config').eq('id', tenantId).single()
     const cfg = tenant?.config || {}
 
-    // Check if IP matches branch registered IP
-    const branchId = sessionToken ? verifyToken(sessionToken)?.branchId : null
     const branch = branchId ? (cfg.branches || []).find(b => b.id === branchId) : null
     const branchIp = branch?.ip || null
-    const ipMatchesBranch = branchIp ? (currentIp === branchIp) : true // if no IP registered, skip check
+    const ipMatchesBranch = branchIp ? (currentIp === branchIp) : true
+    const coveragePayMode = branch?.coveragePayMode || 'covered'
 
     const now = new Date().toISOString()
     const dateStr = isoDate(now)
@@ -88,6 +93,10 @@ export async function POST(req) {
       if (existing) {
         return NextResponse.json({ ok: false, msg: 'Ya tienes una jornada abierta. Registra tu salida primero.' })
       }
+
+      // Device binding check on entry: warn if session deviceId doesn't match submitted deviceId
+      // (On entry we just record; strict block is on exit)
+      const deviceMismatchOnEntry = sessionDeviceId && deviceId && sessionDeviceId !== deviceId
 
       const classification = classifyEntry(emp.schedule || {}, now, cfg.toleranceMinutes || 10)
       const holidays = cfg.holidays || []
@@ -107,9 +116,17 @@ export async function POST(req) {
         holiday_name: holiday?.name || null,
         covering_employee_id: coveringEmployeeId || null,
         geo_entry: geo,
-        // Store session context for audit
         incidents: [],
-        corrections: { entryIp: currentIp, sessionValid, branchId: branchId || null, ipMatchesBranch },
+        corrections: {
+          entryIp: currentIp,
+          sessionValid,
+          branchId: branchId || null,
+          ipMatchesBranch,
+          entryDeviceId: deviceId || null,
+          sessionDeviceId: sessionDeviceId || null,
+          deviceMismatchOnEntry,
+          coveragePayMode,    // store so payroll can use it
+        },
       })
 
       if (error) throw error
@@ -117,7 +134,7 @@ export async function POST(req) {
       await supabase.from('audit_log').insert({
         tenant_id: tenantId, action: 'CHK_IN',
         employee_id: emp.id, employee_name: emp.name,
-        detail: `${classification.label}${coverName ? ' · Cubriendo: ' + coverName : ''}${holiday ? ' 🎉 FERIADO' : ''} · IP: ${currentIp}`,
+        detail: `${classification.label}${coverName ? ' · Cubriendo: ' + coverName : ''}${holiday ? ' 🎉 FERIADO' : ''} · IP: ${currentIp}${deviceMismatchOnEntry ? ' ⚠ Dispositivo diferente al QR' : ''}`,
         success: true
       })
 
@@ -136,10 +153,53 @@ export async function POST(req) {
         return NextResponse.json({ ok: false, msg: 'No tienes entrada registrada. Contacta a tu supervisor.' })
       }
 
+      // ── Device binding check ──────────────────────────────────────────────
+      const entryDeviceId = openShift.corrections?.entryDeviceId || null
+      const deviceMismatch = entryDeviceId && deviceId && entryDeviceId !== deviceId
+
+      if (deviceMismatch) {
+        // Record incident but block the clock-out
+        const incidentNote = `Intento de salida desde dispositivo diferente. Dispositivo entrada: ${entryDeviceId}, dispositivo actual: ${deviceId}`
+        await supabase.from('shifts').update({
+          incidents: [...(openShift.incidents || []), {
+            type: 'device_mismatch',
+            note: incidentNote,
+            detectedAt: now,
+          }]
+        }).eq('id', openShift.id)
+
+        await supabase.from('audit_log').insert({
+          tenant_id: tenantId, action: 'CHK_OUT_REJ',
+          employee_id: emp.id, employee_name: emp.name,
+          detail: `⚠ Dispositivo diferente al de entrada — salida bloqueada`,
+          success: false
+        })
+
+        return NextResponse.json({
+          ok: false,
+          msg: 'Salida bloqueada: dispositivo diferente al que registró la entrada. Contacta a tu supervisor.',
+          deviceMismatch: true,
+        })
+      }
+
+      // ── Duration & overtime ────────────────────────────────────────────────
       const duration = parseFloat(diffHrs(openShift.entry_time, now).toFixed(2))
       const entryIp = openShift.corrections?.entryIp || null
 
-      // Detect IP mismatch on exit (left branch WiFi)
+      // Calculate overtime
+      let overtimeHours = 0
+      let overtimeMinutes = 0
+      const scheduledExit = scheduledExitDate(openShift.date_str, emp)
+      if (scheduledExit) {
+        const exitNow = new Date(now)
+        const minutesOver = Math.round((exitNow - scheduledExit) / 60000)
+        if (minutesOver > 0) {
+          overtimeMinutes = minutesOver
+          overtimeHours = calcOvertimeHours(minutesOver)
+        }
+      }
+
+      // ── IP mismatch incident ───────────────────────────────────────────────
       const exitIpMismatch = entryIp && currentIp !== entryIp && !ipMatchesBranch
       const newStatus = exitIpMismatch ? 'incident' : 'closed'
       const incidents = exitIpMismatch ? [{
@@ -148,18 +208,32 @@ export async function POST(req) {
         detectedAt: now,
       }] : []
 
+      // Build overtime corrections
+      const overtimeCorrections = overtimeHours > 0 ? {
+        overtime: {
+          hours: overtimeHours,
+          minutes: overtimeMinutes,
+          calculatedAt: now,
+        }
+      } : {}
+
       await supabase.from('shifts').update({
         exit_time: now,
         duration_hours: duration,
         status: newStatus,
         geo_exit: geo,
         incidents: incidents.length > 0 ? incidents : openShift.incidents || [],
+        corrections: {
+          ...(openShift.corrections || {}),
+          exitIp: currentIp,
+          ...overtimeCorrections,
+        },
       }).eq('id', openShift.id)
 
       await supabase.from('audit_log').insert({
         tenant_id: tenantId, action: 'CHK_OUT',
         employee_id: emp.id, employee_name: emp.name,
-        detail: `Duración: ${duration}h · IP: ${currentIp}${exitIpMismatch ? ' ⚠ IP diferente a entrada' : ''}`,
+        detail: `Duración: ${duration}h${overtimeHours > 0 ? ` · HE: ${overtimeHours}h` : ''} · IP: ${currentIp}${exitIpMismatch ? ' ⚠ IP diferente a entrada' : ''}`,
         success: true
       })
 
@@ -168,10 +242,12 @@ export async function POST(req) {
           ok: true,
           msg: `Salida registrada (${duration}h). ⚠ Red diferente — incidencia creada para revisión del gerente.`,
           incident: true,
+          overtimeHours,
         })
       }
 
-      return NextResponse.json({ ok: true, msg: `Salida registrada. Jornada: ${duration} horas.` })
+      const otMsg = overtimeHours > 0 ? ` · ${overtimeHours} hora(s) extra registrada(s).` : ''
+      return NextResponse.json({ ok: true, msg: `Salida registrada. Jornada: ${duration} horas.${otMsg}`, overtimeHours })
     }
 
   } catch (err) {
