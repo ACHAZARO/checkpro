@@ -21,20 +21,20 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 async function getAdminTenantId() {
   const cookieStore = await cookies()
+  // El repo tiene @supabase/ssr ^0.3.0 (API vieja: get/set/remove).
+  // La API nueva (getAll/setAll) existe desde 0.5+ y el middleware ya usa
+  // get/set/remove — mantenemos consistencia.
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     {
       cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll: () => {},
+        get: (name) => cookieStore.get(name)?.value,
+        set: () => {},
+        remove: () => {},
       },
     },
   )
-  // getSession() lee la cookie directamente sin intentar refresh (setAll es noop
-  // porque route handlers de Next 14 no pueden escribir cookies). Para admin
-  // routes esto es suficiente: validamos el user.id contra la tabla profiles
-  // con service-role, que es lo que determina el tenant_id y permisos.
   const { data: { session } } = await supabase.auth.getSession()
   if (!session?.user) return null
   const userId = session.user.id

@@ -10,18 +10,18 @@ export const dynamic = 'force-dynamic'
 
 async function getAdminTenantId() {
   const cookieStore = await cookies()
+  // @supabase/ssr ^0.3.0 usa API vieja get/set/remove (no getAll/setAll).
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     {
       cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll: () => {},
+        get: (name) => cookieStore.get(name)?.value,
+        set: () => {},
+        remove: () => {},
       },
     },
   )
-  // getSession() lee la cookie sin intentar refresh (setAll noop en route
-  // handlers). Validamos contra profiles con service-role.
   const { data: { session } } = await supabase.auth.getSession()
   if (!session?.user) return null
   const svc = createServiceClient()
