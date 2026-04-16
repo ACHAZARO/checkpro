@@ -1,12 +1,34 @@
 'use client'
+// src/app/dashboard/page.js
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
-import { fmtTime, isoDate, diffMin } from '@/lib/utils'
+import { fmtTime, weekRange, isoDate, diffMin, DAYS, countGraveIncidents, hasVacationPending, calcVacationDays } from '@/lib/utils'
 import Link from 'next/link'
+
+function StatCard({ label, value, color = 'text-white', sub }) {
+  return (
+    <div className="card-sm">
+      <div className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-1">{label}</div>
+      <div className={`text-3xl font-extrabold ${color}`}>{value}</div>
+      {sub && <div className="text-xs text-gray-600 mt-0.5">{sub}</div>}
+    </div>
+  )
+}
+
+function ShiftBadge({ status, classification }) {
+  if (status === 'open') return <span className="badge-blue">Activo</span>
+  if (status === 'incident') return <span className="badge-red">Incidencia</span>
+  const t = classification?.type
+  if (t === 'retardo') return <span className="badge-orange">Retardo</span>
+  if (t === 'tolerancia') return <span className="badge-orange">Tolerancia</span>
+  if (t === 'no_laboral') return <span className="badge-gray">No laboral</span>
+  return <span className="badge-green">Completa</span>
+}
 
 export default function DashboardPage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [tenantId, setTenantId] = useState(null)
   const now = new Date()
 
   useEffect(() => {
@@ -16,12 +38,41 @@ export default function DashboardPage() {
       if (!session) return
       const { data: profile } = await supabase.from('profiles').select('tenant_id').eq('id', session.user.id).single()
       if (!profile?.tenant_id) return
-      const [{ data: emps }, { data: shifts }, { data: incs }] = await Promise.all([
-        supabase.from('employees').select('*').eq('tenant_id', profile.tenant_id).eq('status', 'active').eq('has_shift', true),
-        supabase.from('shifts').select('*').eq('tenant_id', profile.tenant_id).eq('date_str', isoDate(now)),
-        supabase.from('shifts').select('id,employee_id').eq('tenant_id', profile.tenant_id).eq('status', 'incident'),
-      ])
-      setData({ employees: emps||[], todayShifts: shifts||[], incidents: incs||[] })
+      setTenantId(profile.tenant_id)
+
+      const today = isoDate(now)
+
+      // Employees with shift
+      const { data: employees } = await supabase
+        .from('employees').select('*').eq('tenant_id', profile.tenant_id).eq('status', 'active').eq('has_shift', true)
+
+      // Today's shifts
+      const { data: todayShifts } = await supabase
+        .from('shifts').select('*').eq('tenant_id', profile.tenant_id).eq('date_str', today)
+
+      // Open incidents
+      const { data: incidents } = await supabase
+        .from('shifts').select('id,employee_id').eq('tenant_id', profile.tenant_id).eq('status', 'incident')
+
+      // Grave incidents (last 12 months) for alert
+      const cutoff12m = isoDate(new Date(Date.now() - 365 * 24 * 3600 * 1000))
+      const { data: graveShifts } = await supabase.from('shifts')
+        .select('employee_id,classification')
+        .eq('tenant_id', profile.tenant_id)
+        .eq('status', 'absent')
+        .gte('date_str', cutoff12m)
+
+      // Tenant config for vacation table
+      const { data: tenantData } = await supabase.from('tenants').select('config').eq('id', profile.tenant_id).single()
+      const vacTable = tenantData?.config?.vacationTable || null
+
+      setData({
+        employees: employees || [],
+        todayShifts: todayShifts || [],
+        incidents: incidents || [],
+        graveShifts: graveShifts || [],
+        vacTable,
+      })
       setLoading(false)
     }
     load()
@@ -29,25 +80,142 @@ export default function DashboardPage() {
 
   if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando...</div>
   if (!data) return null
-  const { employees, todayShifts, incidents } = data
+
+  const { employees, todayShifts, incidents, graveShifts, vacTable } = data
   const checkedIn = employees.filter(e => todayShifts.some(s => s.employee_id === e.id))
+
+  // Employees with 3+ grave incidents
+  const graveAlerts = employees.filter(e => countGraveIncidents(graveShifts, e.id) >= 3)
+  // Employees with vacation pending
+  const vacationPending = employees.filter(e => hasVacationPending(e))
   const notYet = employees.filter(e => !todayShifts.some(s => s.employee_id === e.id))
+  const retardos = todayShifts.filter(s => s.classification?.type === 'retardo')
   const activeNow = todayShifts.filter(s => s.status === 'open')
-  const getN = id => employees.find(e=>e.id===id)?.name || id
+  const getEmpName = id => employees.find(e => e.id === id)?.name || id
 
   return (
     <div className="p-4 md:p-6 max-w-2xl">
       <div className="mb-5">
         <h1 className="text-2xl font-extrabold text-white">Hoy</h1>
-        <p className="text-gray-500 text-xs font-mono mt-0.5">{now.toLocaleDateString('es-MX',{weekday:'long',day:'2-digit',month:'long'}).toUpperCase()}</p>
+        <p className="text-gray-500 text-xs font-mono mt-0.5">
+          {now.toLocaleDateString('es-MX', { weekday: 'long', day: '2-digit', month: 'long' }).toUpperCase()}
+        </p>
       </div>
-      {incidents.length > 0 && <Link href="/dashboard/attendance" className="flex items-center gap-3 px-4 py-3 mb-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm font-semibold">🚩 {incidents.length} incidencia(s) sin resolver →</Link>}
+
+      {incidents.length > 0 && (
+        <Link href="/dashboard/attendance?filter=incident" className="flex items-center gap-3 px-4 py-3 mb-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm font-semibold">
+          🚩 {incidents.length} incidencia(s) sin resolver — toca para revisar →
+        </Link>
+      )}
+
+      {graveAlerts.length > 0 && (
+        <div className="px-4 py-3 mb-3 bg-red-600/15 border border-red-600/30 rounded-xl">
+          <p className="text-red-400 text-sm font-bold mb-1">
+            🚨 ALERTA: {graveAlerts.length} empleado{graveAlerts.length > 1 ? 's' : ''} con 3+ faltas graves
+          </p>
+          {graveAlerts.map(e => {
+            const n = countGraveIncidents(graveShifts, e.id)
+            return (
+              <div key={e.id} className="text-red-400/80 text-xs font-mono">
+                {e.name} — {n} faltas injustificadas (posible causal de despido)
+              </div>
+            )
+          })}
+          <Link href="/dashboard/attendance" className="inline-block mt-2 text-red-400 text-xs font-bold underline">
+            Ver historial →
+          </Link>
+        </div>
+      )}
+
+      {vacationPending.length > 0 && (
+        <div className="px-4 py-3 mb-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
+          <p className="text-yellow-400 text-sm font-bold mb-1">
+            🏖 {vacationPending.length} empleado{vacationPending.length > 1 ? 's' : ''} con vacaciones pendientes
+          </p>
+          <div className="flex flex-wrap gap-1 mt-1">
+            {vacationPending.map(e => (
+              <span key={e.id} className="text-[10px] font-mono bg-yellow-500/10 border border-yellow-500/20 px-2 py-0.5 rounded-full text-yellow-400">
+                {e.name} · {calcVacationDays(e.schedule?.hireDate, vacTable)}d
+              </span>
+            ))}
+          </div>
+          <Link href="/dashboard/employees" className="inline-block mt-2 text-yellow-400 text-xs font-bold underline">
+            Gestionar empleados →
+          </Link>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3 mb-5">
-        {[['Con entrada',checkedIn.length,'text-brand-400'],['Sin checar',notYet.length,'text-orange-400'],['Activos ahora',activeNow.length,'text-blue-400'],['Incidencias',incidents.length,'text-red-400']].map(([label,val,col])=><div key={label} className="card-sm"><div className="text-xs font-mono text-gray-500 uppercase mb-1">{label}</div><div className={`text-3xl font-extrabold ${col}`}>{val}</div></div>)}
+        <StatCard label="Con entrada" value={checkedIn.length} color="text-brand-400" sub={`de ${employees.length}`} />
+        <StatCard label="Sin checar" value={notYet.length} color="text-orange-400" />
+        <StatCard label="Retardos" value={retardos.length} color={retardos.length > 0 ? 'text-orange-400' : 'text-white'} />
+        <StatCard label="Activos ahora" value={activeNow.length} color="text-blue-400" />
       </div>
-      {activeNow.length > 0 && <div className="card mb-4"><div className="flex items-center gap-2 mb-3"><span className="w-2 h-2 rounded-full bg-brand-400 animate-pulse"/><span className="text-xs font-mono text-gray-500 uppercase">Jornadas activas</span></div>{activeNow.map(s=><div key={s.id} className="flex items-center justify-between py-2.5 border-b border-dark-border last:border-0"><div><div className="font-semibold text-sm text-white">{getN(s.employee_id)}</div><div className="text-xs text-gray-500 font-mono">{fmtTime(s.entry_time)} · {diffMin(s.entry_time, now.toISOString())} min</div></div><span className="badge-blue">Activo</span></div>)}</div>}
-      {notYet.length > 0 && <div className="card"><div className="text-xs font-mono text-gray-500 uppercase mb-3">Sin registro hoy</div>{notYet.map(e=><div key={e.id} className="flex items-center justify-between py-2 border-b border-dark-border last:border-0"><div className="font-semibold text-sm text-white">{e.name}</div><span className="badge-gray">Sin registro</span></div>)}</div>}
-      {employees.length === 0 && <div className="text-center py-12 text-gray-600"><div className="text-4xl mb-3">📍</div><p className="font-mono text-sm">Agrega empleados para empezar</p><Link href="/dashboard/employees" className="text-brand-400 text-sm font-semibold mt-2 inline-block">+ Agregar empleados →</Link></div>}
+
+      {/* Active shifts */}
+      {activeNow.length > 0 && (
+        <div className="card mb-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-2 h-2 rounded-full bg-brand-400 animate-pulse" />
+            <span className="text-xs font-mono text-gray-500 uppercase tracking-wider">Jornadas activas</span>
+          </div>
+          {activeNow.map(s => (
+            <div key={s.id} className="flex items-center justify-between py-2.5 border-b border-dark-border last:border-0">
+              <div>
+                <div className="font-semibold text-sm text-white">{getEmpName(s.employee_id)}</div>
+                <div className="text-xs text-gray-500 font-mono">{fmtTime(s.entry_time)} · {diffMin(s.entry_time, now.toISOString())} min</div>
+              </div>
+              <span className="badge-blue">Activo</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Not checked in */}
+      {notYet.length > 0 && (
+        <div className="card mb-4">
+          <div className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Sin registro hoy</div>
+          {notYet.map(e => (
+            <div key={e.id} className="flex items-center justify-between py-2.5 border-b border-dark-border last:border-0">
+              <div>
+                <div className="font-semibold text-sm text-white">{e.name}</div>
+                <div className="text-xs text-gray-500">{e.department} · desde {e.schedule?.[DAYS[now.getDay()===0?6:now.getDay()-1]]?.start || '—'}</div>
+              </div>
+              <span className="badge-gray">Sin registro</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* All today */}
+      {todayShifts.length > 0 && (
+        <div className="card">
+          <div className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Todos los registros de hoy</div>
+          {todayShifts.map(s => (
+            <div key={s.id} className="flex items-center justify-between py-2.5 border-b border-dark-border last:border-0">
+              <div>
+                <div className="font-semibold text-sm text-white">{getEmpName(s.employee_id)}</div>
+                <div className="text-xs text-gray-500 font-mono">
+                  {fmtTime(s.entry_time)} – {s.exit_time ? fmtTime(s.exit_time) : '—'}
+                  {s.duration_hours ? ` · ${s.duration_hours}h` : ''}
+                </div>
+                {s.covering_employee_id && (
+                  <div className="text-xs text-blue-400 font-mono">Cubriendo: {getEmpName(s.covering_employee_id)}</div>
+                )}
+              </div>
+              <ShiftBadge status={s.status} classification={s.classification} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {checkedIn.length === 0 && notYet.length === 0 && (
+        <div className="text-center py-12 text-gray-600">
+          <div className="text-4xl mb-3">📋</div>
+          <p className="font-mono text-sm">Sin empleados registrados aún.</p>
+          <Link href="/dashboard/employees" className="text-brand-400 text-sm font-semibold mt-2 inline-block">+ Agregar empleados →</Link>
+        </div>
+      )}
     </div>
   )
 }
