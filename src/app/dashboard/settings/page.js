@@ -3,9 +3,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { DAYS, DAY_L, DAY_FL, LFT_VACATION_TABLE } from '@/lib/utils'
+import toast from 'react-hot-toast'
 
 const DEFAULT_LEYENDA = 'Al firmar el presente comprobante de nómina, el trabajador acepta que los montos, horas trabajadas e incidencias registradas son correctos y conformes a su contrato laboral. Cualquier aclaración deberá presentarse por escrito en un plazo máximo de 5 días hábiles. Documento confidencial de uso interno.'
-import toast from 'react-hot-toast'
 
 const FALLBACK_URL = 'https://checkpro-self.vercel.app'
 
