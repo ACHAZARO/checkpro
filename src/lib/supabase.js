@@ -1,4 +1,5 @@
 // src/lib/supabase.js
+// Browser client — safe to import in 'use client' components
 import { createBrowserClient } from '@supabase/ssr'
 
 export function createClient() {
@@ -8,26 +9,8 @@ export function createClient() {
   )
 }
 
-// Para server components / route handlers
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
-
-export function createServerSupabaseClient() {
-  const cookieStore = cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    {
-      cookies: {
-        get(name) { return cookieStore.get(name)?.value },
-        set(name, value, options) { try { cookieStore.set({ name, value, ...options }) } catch {} },
-        remove(name, options) { try { cookieStore.set({ name, value: '', ...options }) } catch {} },
-      },
-    }
-  )
-}
-
-// Service role client — solo en server, nunca en browser
+// Service role client — server-side only (API routes), never exposed to browser
+// Uses @supabase/supabase-js directly (no next/headers dependency)
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
 export function createServiceClient() {
