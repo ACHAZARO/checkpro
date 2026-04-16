@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
 import { createClient } from '@/lib/supabase'
-import { slugify } from '@/lib/utils'
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -20,32 +19,36 @@ export default function RegisterPage() {
     setLoading(true)
 
     try {
-      const supabase = createClient()
-
-      // 1. Crear usuario en auth
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: form.email,
-        password: form.password,
-        options: { data: { name: form.companyName } }
+      // 1. Create user + tenant + profile server-side (bypasses RLS, handles orphan recovery)
+      const res = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyName: form.companyName,
+          email: form.email,
+          password: form.password
+        })
       })
-      if (authError) throw authError
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.error || 'Error al crear la cuenta')
+      }
 
-      // 2. Crear tenant
-      const slug = slugify(form.companyName) + '-' + Math.random().toString(36).slice(2,6)
-      const { data: tenant, error: tenantError } = await supabase
-        .from('tenants')
-        .insert({ name: form.companyName, slug, owner_email: form.email })
-        .select().single()
-      if (tenantError) throw tenantError
+      // 2. Sign in on the client so the browser gets the auth cookies
+      const supabase = createClient()
+      const { error: signErr } = await supabase.auth.signInWithPassword({
+        email: form.email,
+        password: form.password
+      })
+      if (signErr) throw signErr
 
-      // 3. Crear perfil del owner
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert({ id: authData.user.id, tenant_id: tenant.id, name: form.companyName, role: 'owner' })
-      if (profileError) throw profileError
-
-      toast.success('¡Cuenta creada! Configurando tu empresa...')
+      if (data.recovered) {
+        toast.success('¡Cuenta recuperada! Entrando...')
+      } else {
+        toast.success('¡Cuenta creada! Configurando tu empresa...')
+      }
       router.push('/dashboard/settings?onboarding=true')
+      router.refresh()
     } catch (err) {
       toast.error(err.message || 'Error al crear la cuenta')
     } finally {
