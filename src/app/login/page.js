@@ -1,13 +1,19 @@
 'use client'
 // src/app/login/page.js
+// Important: after signInWithPassword succeeds we do a FULL page reload
+// (window.location.assign) instead of router.push. Reason: middleware.js
+// reads the session cookie on the next request; Next's client-side
+// navigation can race the cookie commit and bounce the user back to /login.
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
 import { createClient } from '@/lib/supabase'
 
 export default function LoginPage() {
   const router = useRouter()
+  const params = useSearchParams()
+  const next = params?.get('next') || '/dashboard'
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState({ email: '', password: '' })
   const F = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -17,13 +23,21 @@ export default function LoginPage() {
     setLoading(true)
     try {
       const supabase = createClient()
-      const { error } = await supabase.auth.signInWithPassword({ email: form.email, password: form.password })
+      const { data: signIn, error } = await supabase.auth.signInWithPassword({
+        email: form.email.trim().toLowerCase(),
+        password: form.password
+      })
       if (error) throw error
+      if (!signIn?.session) throw new Error('No se pudo iniciar sesión')
 
       // Safety net: if this account was orphaned by the old broken signup
-      // (auth user exists but no tenant/profile), bootstrap it now.
+      // (auth user exists but no tenant/profile), bootstrap it now. We wait
+      // for the response so the dashboard's profile query finds a row.
       try {
-        const r = await fetch('/api/bootstrap', { method: 'POST' })
+        const r = await fetch('/api/bootstrap', {
+          method: 'POST',
+          credentials: 'include'
+        })
         if (!r.ok) {
           const d = await r.json().catch(() => ({}))
           console.warn('[bootstrap] non-ok:', r.status, d)
@@ -32,12 +46,21 @@ export default function LoginPage() {
         console.warn('[bootstrap] failed:', bErr)
       }
 
+      // Check role to pick the right landing. Super_admins go to /superadmin.
+      let dest = next
+      try {
+        const { data: prof } = await supabase
+          .from('profiles').select('role').eq('id', signIn.session.user.id).maybeSingle()
+        if (prof?.role === 'super_admin') dest = '/superadmin'
+      } catch {}
+
       toast.success('¡Bienvenido!')
-      router.push('/dashboard')
-      router.refresh()
+
+      // Full page reload guarantees the middleware and server components
+      // see the freshly-committed Supabase session cookie.
+      window.location.assign(dest)
     } catch (err) {
       toast.error(err.message || 'Credenciales incorrectas')
-    } finally {
       setLoading(false)
     }
   }
@@ -65,12 +88,12 @@ export default function LoginPage() {
           <div>
             <label className="label">Correo electrónico</label>
             <input className="input" type="email" placeholder="tu@empresa.com"
-              value={form.email} onChange={e => F('email', e.target.value)} required />
+              value={form.email} onChange={e => F('email', e.target.value)} required autoComplete="email" />
           </div>
           <div>
             <label className="label">Contraseña</label>
             <input className="input" type="password" placeholder="Tu contraseña"
-              value={form.password} onChange={e => F('password', e.target.value)} required />
+              value={form.password} onChange={e => F('password', e.target.value)} required autoComplete="current-password" />
           </div>
           <button type="button" onClick={handleReset}
             className="text-xs text-gray-500 hover:text-brand-400 transition-colors text-right w-full">
