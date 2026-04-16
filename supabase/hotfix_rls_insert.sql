@@ -24,3 +24,8 @@ drop policy if exists "profiles_insert" on public.profiles;
 create policy "profiles_insert" on public.profiles
   for insert
   with check (id = auth.uid());
+
+-- ─── Cleanup: remove test users created during automated verification ────
+-- These were created by Claude's deploy-verification script. Safe to remove.
+delete from auth.users where email like 'claude-deploy-check-%@mailinator.com';
+delete from public.tenants where owner_email like 'claude-deploy-check-%@mailinator.com';
