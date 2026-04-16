@@ -11,6 +11,7 @@ const NAV = [
   { href: '/dashboard/employees',  label: 'Personal',   icon: '👥' },
   { href: '/dashboard/attendance', label: 'Asistencia', icon: '📅' },
   { href: '/dashboard/payroll',    label: 'Nómina',     icon: '💰' },
+  { href: '/dashboard/archivo',    label: 'Archivo',    icon: '📦' },
   { href: '/dashboard/settings',   label: 'Config',     icon: '♧️' },
 ]
 
