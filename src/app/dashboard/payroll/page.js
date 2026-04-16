@@ -6,7 +6,7 @@ import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate }
 import toast from 'react-hot-toast'
 
 // ── Compact single-page report ───────────────────────────────────────────────
-function buildReportHTML(cut, weekShifts, employees, branchName) {
+function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrollLegend) {
   const active = employees.filter(e => e.has_shift)
   let totalNet = 0
   let totalGross = 0
@@ -21,11 +21,13 @@ function buildReportHTML(cut, weekShifts, employees, branchName) {
     const badges = []
     if (s.retardos > 0) badges.push(`<span style="background:#fff3cd;color:#856404;padding:1px 5px;border-radius:3px;font-size:7pt">${s.retardos} ret.</span>`)
     if (s.incidents > 0) badges.push(`<span style="background:#f8d7da;color:#842029;padding:1px 5px;border-radius:3px;font-size:7pt">${s.incidents} inc.</span>`)
+    if (s.faltasInjustificadas > 0) badges.push(`<span style="background:#f8d7da;color:#842029;padding:1px 5px;border-radius:3px;font-size:7pt">${s.faltasInjustificadas} f.inj.</span>`)
+    if (s.otHours > 0) badges.push(`<span style="background:#d1ecf1;color:#0c5460;padding:1px 5px;border-radius:3px;font-size:7pt">${s.otHours}h HE</span>`)
 
     return `<tr>
       <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;font-weight:600">${emp.name}</td>
       <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;color:#555">${emp.department || '—'}</td>
-      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;text-align:center">${daysWorked}d / ${s.totalH}h</td>
+      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;text-align:center">${daysWorked}d / ${s.totalH}h${s.otHours > 0 ? `<br/><span style="font-size:7pt;color:#0c5460">+${s.otHours}h HE</span>` : ''}</td>
       <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;text-align:center">${badges.join(' ') || '<span style="color:#198754">✓</span>'}</td>
       <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;text-align:right">$${s.grossPay.toFixed(2)}</td>
       <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;text-align:right;color:${deductions > 0 ? '#c60' : '#aaa'}">${deductions > 0 ? '-$' + deductions.toFixed(2) : '—'}</td>
@@ -63,9 +65,12 @@ function buildReportHTML(cut, weekShifts, employees, branchName) {
 
     <!-- Header -->
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-      <div>
-        <div style="font-size:16pt;font-weight:bold">${branchName || 'Nómina Semanal'}</div>
-        <div style="font-size:9pt;color:#555;margin-top:2px">Reporte de Asistencia y Pago</div>
+      <div style="display:flex;align-items:flex-start;gap:12px">
+        ${logoUrl ? `<img src="${logoUrl}" alt="Logo" style="height:44px;width:auto;object-fit:contain;border-radius:4px"/>` : ''}
+        <div>
+          <div style="font-size:16pt;font-weight:bold">${branchName || 'Nómina Semanal'}</div>
+          <div style="font-size:9pt;color:#555;margin-top:2px">Reporte de Asistencia y Pago</div>
+        </div>
       </div>
       <div style="text-align:right;font-size:8pt;color:#666">
         <div><b>Período:</b> ${cut.start_date} al ${cut.end_date}</div>
@@ -106,7 +111,11 @@ function buildReportHTML(cut, weekShifts, employees, branchName) {
     <!-- Signatures -->
     <div class="sig-grid">${sigCols}</div>
 
-    <div style="margin-top:14px;font-size:7pt;color:#bbb;border-top:1px solid #eee;padding-top:6px">
+    ${payrollLegend ? `
+    <div style="margin-top:14px;padding:8px 10px;border:1px solid #e0e0e0;border-radius:4px;background:#fafafa">
+      <div style="font-size:6.5pt;color:#666;line-height:1.4">${payrollLegend}</div>
+    </div>` : ''}
+    <div style="margin-top:8px;font-size:7pt;color:#bbb;border-top:1px solid #eee;padding-top:6px">
       CheckPro · ${branchName} · Semana ${cut.start_date} / ${cut.end_date} · Documento interno confidencial
     </div>
 
@@ -133,7 +142,7 @@ export default function PayrollPage() {
     const { data: prof } = await supabase.from('profiles').select('tenant_id').eq('id', session.user.id).single()
     if (!prof?.tenant_id) return
     setTenantId(prof.tenant_id)
-    const { data: tenant } = await supabase.from('tenants').select('config').eq('id', prof.tenant_id).single()
+    const { data: tenant } = await supabase.from('tenants').select('config,name').eq('id', prof.tenant_id).single()
     setCfg(tenant?.config)
     const [{ data: empData }, { data: shiftData }, { data: cutData }] = await Promise.all([
       supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).eq('status', 'active').eq('has_shift', true),
@@ -191,13 +200,13 @@ export default function PayrollPage() {
     toast.success('Semana cerrada exitosamente')
     await load()
     const { data: fresh } = await supabase.from('week_cuts').select('*').eq('id', cut.id).single()
-    setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName))
+    setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend))
     setClosing(false)
   }
 
   function openReport(cut) {
     const ws = shifts.filter(s => cut.shift_ids?.includes(s.id))
-    setPrintHTML(buildReportHTML(cut, ws, emps, cfg?.branchName))
+    setPrintHTML(buildReportHTML(cut, ws, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend))
   }
 
   if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando...</div>
@@ -287,6 +296,7 @@ export default function PayrollPage() {
               </div>
               <div className="flex flex-wrap gap-3 text-xs text-gray-500 font-mono mb-2">
                 <span>{s.totalH}h trabajadas</span>
+                {s.otHours > 0 && <span className="text-blue-400">+{s.otHours}h extra (×2)</span>}
                 <span>Bruto: ${s.grossPay.toFixed(2)}</span>
                 {s.retardoDesc > 0 && <span className="text-orange-400">-${s.retardoDesc.toFixed(2)} retardos</span>}
                 {s.incidentDesc > 0 && <span className="text-red-400">-${s.incidentDesc.toFixed(2)} incid.</span>}
@@ -294,7 +304,8 @@ export default function PayrollPage() {
               <div className="flex gap-1.5 flex-wrap">
                 {s.retardos > 0 && <span className="badge-orange">{s.retardos} retardo{s.retardos > 1 ? 's' : ''}</span>}
                 {s.incidents > 0 && <span className="badge-red">{s.incidents} incidencia{s.incidents > 1 ? 's' : ''}</span>}
-                {s.retardos === 0 && s.incidents === 0 && <span className="badge-green">Sin incidencias ✓</span>}
+                {s.otHours > 0 && <span className="px-2 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-400 text-[10px] font-semibold">{s.otHours}h extra</span>}
+                {s.retardos === 0 && s.incidents === 0 && s.otHours === 0 && <span className="badge-green">Sin incidencias ✓</span>}
               </div>
             </div>
           )
