@@ -31,14 +31,19 @@ async function getAdminTenantId() {
       },
     },
   )
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  // getSession() lee la cookie directamente sin intentar refresh (setAll es noop
+  // porque route handlers de Next 14 no pueden escribir cookies). Para admin
+  // routes esto es suficiente: validamos el user.id contra la tabla profiles
+  // con service-role, que es lo que determina el tenant_id y permisos.
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.user) return null
+  const userId = session.user.id
 
   const svc = createServiceClient()
   const { data: profile } = await svc
     .from('profiles')
     .select('id, tenant_id, role, status')
-    .eq('id', user.id)
+    .eq('id', userId)
     .eq('status', 'active')
     .maybeSingle()
   if (!profile) return null

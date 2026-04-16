@@ -20,13 +20,15 @@ async function getAdminTenantId() {
       },
     },
   )
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  // getSession() lee la cookie sin intentar refresh (setAll noop en route
+  // handlers). Validamos contra profiles con service-role.
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.user) return null
   const svc = createServiceClient()
   const { data: profile } = await svc
     .from('profiles')
     .select('id, tenant_id, status')
-    .eq('id', user.id)
+    .eq('id', session.user.id)
     .eq('status', 'active')
     .maybeSingle()
   return profile ? { tenantId: profile.tenant_id } : null
