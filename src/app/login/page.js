@@ -19,6 +19,19 @@ export default function LoginPage() {
       const supabase = createClient()
       const { error } = await supabase.auth.signInWithPassword({ email: form.email, password: form.password })
       if (error) throw error
+
+      // Safety net: if this account was orphaned by the old broken signup
+      // (auth user exists but no tenant/profile), bootstrap it now.
+      try {
+        const r = await fetch('/api/bootstrap', { method: 'POST' })
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}))
+          console.warn('[bootstrap] non-ok:', r.status, d)
+        }
+      } catch (bErr) {
+        console.warn('[bootstrap] failed:', bErr)
+      }
+
       toast.success('¡Bienvenido!')
       router.push('/dashboard')
       router.refresh()
