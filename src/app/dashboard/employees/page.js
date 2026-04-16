@@ -2,7 +2,10 @@
 // src/app/dashboard/employees/page.js
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
-import { DAYS, DAY_L, monthlyToHourly, generateEmployeeCode } from '@/lib/utils'
+import {
+  DAYS, DAY_L, monthlyToHourly, generateEmployeeCode,
+  calcYearsWorked, calcVacationDays, hasVacationPending, currentAnniversaryYear
+} from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 const DEF_BASE = { start: '09:00', end: '18:00' }
@@ -30,6 +33,7 @@ const DEF_SCHED = buildSchedule(DEF_BASE)
 export default function EmployeesPage() {
   const [emps, setEmps] = useState([])
   const [branches, setBranches] = useState([])
+  const [vacTable, setVacTable] = useState(null) // custom vacation table from config
   const [loading, setLoading] = useState(true)
   const [tenantId, setTenantId] = useState(null)
   const [sheet, setSheet] = useState(null)
@@ -39,7 +43,6 @@ export default function EmployeesPage() {
 
   const F = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
-  // Apply base schedule to all non-custom working days
   function applyBase(newBase) {
     setBase(newBase)
     setForm(f => ({
@@ -54,12 +57,10 @@ export default function EmployeesPage() {
     }))
   }
 
-  // Toggle a single day's work flag
   function toggleDay(day) {
     setForm(f => ({ ...f, schedule: { ...f.schedule, [day]: { ...f.schedule?.[day], work: !f.schedule?.[day]?.work } } }))
   }
 
-  // Toggle custom override for a day
   function toggleCustom(day) {
     setForm(f => {
       const wasCustom = f.schedule?.[day]?.custom
@@ -70,7 +71,6 @@ export default function EmployeesPage() {
           [day]: {
             ...f.schedule?.[day],
             custom: !wasCustom,
-            // Reset to base times when turning off custom
             start: wasCustom ? base.start : f.schedule?.[day]?.start || base.start,
             end:   wasCustom ? base.end   : f.schedule?.[day]?.end   || base.end,
           }
@@ -96,6 +96,7 @@ export default function EmployeesPage() {
     ])
     setEmps(empData || [])
     setBranches(tenantData?.config?.branches || [])
+    setVacTable(tenantData?.config?.vacationTable || null)
     setLoading(false)
   }, [])
 
@@ -116,9 +117,14 @@ export default function EmployeesPage() {
     setSaving(true)
     const supabase = createClient()
 
-    // Embed branch info into schedule JSONB for portability
     const branchObj = branches.find(b => b.id === form.branch_id)
-    const schedule = { ...(form.schedule || DEF_SCHED), branch: branchObj || { id: form.branch_id, name: '' } }
+    // Preserve existing schedule extras (hireDate, vacationYearsTaken, etc.) + branch
+    const schedule = {
+      ...(form.schedule || DEF_SCHED),
+      branch: branchObj || { id: form.branch_id, name: '' },
+      hireDate: form.hireDate || form.schedule?.hireDate || null,
+      vacationYearsTaken: form.schedule?.vacationYearsTaken || [],
+    }
 
     const payload = {
       name: form.name,
@@ -156,14 +162,31 @@ export default function EmployeesPage() {
   function openEdit(emp) {
     const b = deriveBase(emp.schedule)
     setBase(b)
-    // Mark days as custom if their times differ from derived base
     const schedule = DAYS.reduce((a, d) => {
       const s = emp.schedule?.[d] || { work: false, start: b.start, end: b.end }
       const custom = s.work && (s.start !== b.start || s.end !== b.end)
       return { ...a, [d]: { ...s, custom } }
     }, {})
-    setForm({ ...emp, schedule, branch_id: emp.schedule?.branch?.id || '' })
+    setForm({
+      ...emp,
+      schedule,
+      branch_id: emp.schedule?.branch?.id || '',
+      hireDate: emp.schedule?.hireDate || '',
+    })
     setSheet('edit')
+  }
+
+  // ── Mark vacation as taken for current anniversary year ───────────────────
+  async function markVacationTaken(emp) {
+    const annivYear = currentAnniversaryYear(emp.schedule?.hireDate)
+    if (!annivYear) return
+    const supabase = createClient()
+    const taken = emp.schedule?.vacationYearsTaken || []
+    if (taken.includes(annivYear)) { toast('Ya marcado este año'); return }
+    const newSchedule = { ...emp.schedule, vacationYearsTaken: [...taken, annivYear] }
+    await supabase.from('employees').update({ schedule: newSchedule }).eq('id', emp.id)
+    toast.success(`Vacaciones ${annivYear} marcadas como tomadas ✓`)
+    await load()
   }
 
   const hasBranches = branches.length > 0
@@ -188,7 +211,7 @@ export default function EmployeesPage() {
       )}
 
       {loading ? <p className="text-gray-500 font-mono text-sm">Cargando...</p> : (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {emps.length === 0 && (
             <div className="card text-center py-10">
               <div className="text-4xl mb-3">👥</div>
@@ -198,34 +221,76 @@ export default function EmployeesPage() {
           )}
           {emps.map(emp => {
             const branchName = emp.schedule?.branch?.name || ''
+            const hireDate = emp.schedule?.hireDate
+            const years = calcYearsWorked(hireDate)
+            const vacDays = calcVacationDays(hireDate, vacTable)
+            const vacPending = hasVacationPending(emp)
+
             return (
-              <div key={emp.id} className="card-sm flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold font-mono shrink-0
-                  ${emp.can_manage ? 'bg-orange-500/10 text-orange-400 border border-orange-400/20' : 'bg-brand-400/10 text-brand-400 border border-brand-400/20'}`}>
-                  {emp.name.split(' ').slice(0, 2).map(w => w[0]).join('')}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-bold text-sm text-white">{emp.name}</span>
-                    <span className="text-xs font-mono text-gray-600">{emp.employee_code}</span>
-                    {emp.can_manage && <span className="badge-orange text-[9px]">Gerente</span>}
-                    {emp.status === 'inactive' && <span className="badge-gray text-[9px]">Inactivo</span>}
+              <div key={emp.id} className="card">
+                <div className="flex items-start gap-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold font-mono shrink-0
+                    ${emp.can_manage ? 'bg-orange-500/10 text-orange-400 border border-orange-400/20' : 'bg-brand-400/10 text-brand-400 border border-brand-400/20'}`}>
+                    {emp.name.split(' ').slice(0, 2).map(w => w[0]).join('')}
                   </div>
-                  <div className="text-xs text-gray-500 mt-0.5">
-                    {emp.department && `${emp.department} · `}
-                    {branchName && <span className="text-brand-400/80">🏢 {branchName} · </span>}
-                    ${(emp.monthly_salary || 0).toLocaleString()}/mes · ${monthlyToHourly(emp).toFixed(2)}/h
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-sm text-white">{emp.name}</span>
+                      <span className="text-xs font-mono text-gray-600">{emp.employee_code}</span>
+                      {emp.can_manage && <span className="badge-orange text-[9px]">Gerente</span>}
+                      {emp.status === 'inactive' && <span className="badge-gray text-[9px]">Inactivo</span>}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {emp.department && `${emp.department} · `}
+                      {branchName && <span className="text-brand-400/80">🏢 {branchName} · </span>}
+                      ${(emp.monthly_salary || 0).toLocaleString()}/mes · ${monthlyToHourly(emp).toFixed(2)}/h
+                    </div>
+                    <div className="text-xs text-gray-600 font-mono mt-0.5">
+                      {DAYS.filter(d => emp.schedule?.[d]?.work).map(d => DAY_L[d]).join(' ')}
+                    </div>
+                    {/* Antigüedad + vacaciones */}
+                    {hireDate && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] font-mono text-gray-500">
+                          📅 {new Date(hireDate + 'T12:00:00').toLocaleDateString('es-MX', { day:'2-digit', month:'short', year:'numeric' })}
+                          {years > 0 && ` · ${years} año${years !== 1 ? 's' : ''}`}
+                        </span>
+                        {years >= 1 && (
+                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                            vacPending
+                              ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
+                              : 'bg-dark-700 border-dark-border text-gray-600'
+                          }`}>
+                            🏖 {vacDays}d vacaciones{vacPending ? ' pendientes' : ' tomadas ✓'}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-xs text-gray-600 font-mono mt-0.5">
-                    {DAYS.filter(d => emp.schedule?.[d]?.work).map(d => DAY_L[d]).join(' ')}
+                  <div className="flex flex-col gap-1.5 shrink-0">
+                    <button onClick={() => openEdit(emp)}
+                      className="p-2 bg-dark-700 border border-dark-border rounded-lg text-gray-400 active:bg-dark-600 text-xs">✏️</button>
+                    <button onClick={() => deactivate(emp)}
+                      className="p-2 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 active:bg-red-500/20 text-xs">🗑</button>
                   </div>
                 </div>
-                <div className="flex gap-1.5 shrink-0">
-                  <button onClick={() => openEdit(emp)}
-                    className="p-2 bg-dark-700 border border-dark-border rounded-lg text-gray-400 active:bg-dark-600 text-xs">✏️</button>
-                  <button onClick={() => deactivate(emp)}
-                    className="p-2 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 active:bg-red-500/20 text-xs">🗑</button>
-                </div>
+
+                {/* Vacation pending action */}
+                {vacPending && (
+                  <div className="mt-3 flex items-center justify-between gap-3 px-3 py-2.5 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
+                    <div>
+                      <p className="text-yellow-400 text-xs font-bold">🏖 Vacaciones pendientes</p>
+                      <p className="text-yellow-400/70 text-[10px] mt-0.5">
+                        Corresponden {vacDays} días por {years} año{years !== 1 ? 's' : ''} de antigüedad (LFT 2023)
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => markVacationTaken(emp)}
+                      className="shrink-0 px-3 py-1.5 bg-yellow-500/20 border border-yellow-500/40 rounded-lg text-yellow-400 text-xs font-bold active:bg-yellow-500/30 whitespace-nowrap">
+                      ✓ Tomadas
+                    </button>
+                  </div>
+                )}
               </div>
             )
           })}
@@ -271,6 +336,17 @@ export default function EmployeesPage() {
                 <div>
                   <label className="label">Departamento</label>
                   <input className="input" value={form.department || ''} onChange={e => F('department', e.target.value)} placeholder="Cocina, Caja..." />
+                </div>
+
+                {/* Fecha de contratación */}
+                <div>
+                  <label className="label">Fecha de contratación</label>
+                  <input className="input" type="date"
+                    value={form.hireDate || form.schedule?.hireDate || ''}
+                    onChange={e => F('hireDate', e.target.value)} />
+                  <p className="text-[10px] text-gray-600 font-mono mt-1">
+                    Necesaria para calcular antigüedad y vacaciones (LFT)
+                  </p>
                 </div>
 
                 <div>
@@ -353,7 +429,6 @@ export default function EmployeesPage() {
                     return (
                       <div key={day} className="mb-2">
                         <div className="flex items-center gap-2">
-                          {/* Day toggle */}
                           <button onClick={() => toggleDay(day)}
                             className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${s.work ? 'bg-brand-400' : 'bg-dark-600'}`}>
                             <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${s.work ? 'left-5' : 'left-0.5'}`} />
@@ -363,7 +438,6 @@ export default function EmployeesPage() {
                           {s.work ? (
                             <>
                               {s.custom ? (
-                                // Custom time inputs
                                 <>
                                   <input type="time" className="input py-1 px-2 text-xs flex-1 font-mono"
                                     value={s.start} onChange={e => setDayTime(day, 'start', e.target.value)} />
@@ -372,12 +446,10 @@ export default function EmployeesPage() {
                                     value={s.end} onChange={e => setDayTime(day, 'end', e.target.value)} />
                                 </>
                               ) : (
-                                // Show base time (read-only hint)
                                 <span className="text-[11px] text-gray-500 font-mono flex-1">
                                   {base.start} – {base.end}
                                 </span>
                               )}
-                              {/* "Diferente" checkbox */}
                               <label className="flex items-center gap-1 shrink-0 cursor-pointer">
                                 <input type="checkbox" className="accent-brand-400 w-3.5 h-3.5"
                                   checked={s.custom || false}
