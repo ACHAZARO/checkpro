@@ -78,6 +78,33 @@ export async function POST() {
       tenantId = tenant.id
     }
 
+    // Ensure the tenant has at least one branch (migration may not have run yet for new tenants).
+    const { data: anyBranch } = await admin
+      .from('branches')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .limit(1)
+      .maybeSingle()
+    if (!anyBranch) {
+      const defaultBranchConfig = {
+        toleranceMinutes: 10,
+        alertHours: 8,
+        weekClosingDay: 'dom',
+        location: { lat: 19.4326, lng: -99.1332, radius: 300, name: 'Sucursal' },
+        businessHours: {},
+        holidays: [],
+        restDays: [],
+        printHeader: '',
+        printLegalText: '',
+        printFooter: ''
+      }
+      await admin.from('branches').insert({
+        tenant_id: tenantId,
+        name: 'Sucursal principal',
+        config: defaultBranchConfig
+      })
+    }
+
     if (!existingProfile) {
       const { error: insErr } = await admin
         .from('profiles')
