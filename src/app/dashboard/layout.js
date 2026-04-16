@@ -28,7 +28,20 @@ export default function DashboardLayout({ children }) {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) { router.push('/login'); return }
 
-      const { data: prof } = await supabase.from('profiles').select('*').eq('id', session.user.id).single()
+      let { data: prof } = await supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle()
+
+      // Orphan recovery: user has a valid session but no profile (from the old broken signup).
+      // Bootstrap the tenant + profile on the fly.
+      if (!prof) {
+        try {
+          const r = await fetch('/api/bootstrap', { method: 'POST' })
+          if (r.ok) {
+            const retry = await supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle()
+            prof = retry.data
+          }
+        } catch (e) { /* fall through */ }
+      }
+
       if (!prof) { router.push('/login'); return }
       setProfile(prof)
 
