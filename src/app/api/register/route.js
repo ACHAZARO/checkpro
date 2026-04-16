@@ -125,6 +125,32 @@ export async function POST(req) {
       tenantId = tenant.id
     }
 
+    // 3b) Seed a default branch if the tenant has none yet.
+    const { data: anyBranch } = await admin
+      .from('branches')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .limit(1)
+      .maybeSingle()
+    if (!anyBranch) {
+      await admin.from('branches').insert({
+        tenant_id: tenantId,
+        name: 'Sucursal principal',
+        config: {
+          toleranceMinutes: 10,
+          alertHours: 8,
+          weekClosingDay: 'dom',
+          location: { lat: 19.4326, lng: -99.1332, radius: 300, name: 'Sucursal' },
+          businessHours: {},
+          holidays: [],
+          restDays: [],
+          printHeader: '',
+          printLegalText: '',
+          printFooter: ''
+        }
+      })
+    }
+
     // 4) Create profile if missing.
     if (!existingProfile) {
       const { error: profileError } = await admin
