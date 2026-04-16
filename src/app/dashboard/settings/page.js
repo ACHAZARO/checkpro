@@ -2,7 +2,9 @@
 // src/app/dashboard/settings/page.js
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
-import { DAYS, DAY_L, DAY_FL } from '@/lib/utils'
+import { DAYS, DAY_L, DAY_FL, LFT_VACATION_TABLE } from '@/lib/utils'
+
+const DEFAULT_LEYENDA = 'Al firmar el presente comprobante de nómina, el trabajador acepta que los montos, horas trabajadas e incidencias registradas son correctos y conformes a su contrato laboral. Cualquier aclaración deberá presentarse por escrito en un plazo máximo de 5 días hábiles. Documento confidencial de uso interno.'
 import toast from 'react-hot-toast'
 
 const FALLBACK_URL = 'https://checkpro-self.vercel.app'
@@ -16,8 +18,10 @@ export default function SettingsPage() {
   const [newHol, setNewHol] = useState({ name: '', date: '' })
   const [newRest, setNewRest] = useState({ name: '', date: '' })
   const [newBranch, setNewBranch] = useState('')
+  const [editingBranch, setEditingBranch] = useState(null) // { id, name, ip } for inline edit
   const [origin, setOrigin] = useState(FALLBACK_URL)
   const [detectingIp, setDetectingIp] = useState(null) // branchId being detected
+  const [empCounts, setEmpCounts] = useState({}) // branchId → count
 
   useEffect(() => { setOrigin(window.location.origin) }, [])
 
@@ -31,6 +35,14 @@ export default function SettingsPage() {
     const { data: tenant } = await supabase.from('tenants').select('config,slug').eq('id', prof.tenant_id).single()
     setCfg(tenant?.config || {})
     setTenantSlug(tenant?.slug || '')
+    // Load employee counts per branch
+    const { data: emps } = await supabase.from('employees').select('id,schedule').eq('tenant_id', prof.tenant_id).eq('status', 'active')
+    const counts = {}
+    ;(emps || []).forEach(e => {
+      const bid = e.schedule?.branch?.id
+      if (bid) counts[bid] = (counts[bid] || 0) + 1
+    })
+    setEmpCounts(counts)
     setLoading(false)
   }, [])
 
@@ -60,6 +72,47 @@ export default function SettingsPage() {
   function removeBranch(id) {
     if (!confirm('¿Eliminar esta sucursal? Los empleados asignados quedarán sin sucursal.')) return
     setCfg(c => ({ ...c, branches: (c.branches || []).filter(b => b.id !== id) }))
+  }
+
+  function startEditBranch(b) {
+    setEditingBranch({ id: b.id, name: b.name })
+  }
+
+  function saveEditBranch() {
+    if (!editingBranch?.name?.trim()) { toast.error('El nombre no puede estar vacío'); return }
+    setCfg(c => ({
+      ...c,
+      branches: (c.branches || []).map(b =>
+        b.id === editingBranch.id ? { ...b, name: editingBranch.name.trim() } : b
+      )
+    }))
+    setEditingBranch(null)
+    toast('Nombre actualizado. Guarda para que persista.', { icon: '💾' })
+  }
+
+  function setBranchCoverage(branchId, mode) {
+    setCfg(c => ({
+      ...c,
+      branches: (c.branches || []).map(b =>
+        b.id === branchId ? { ...b, coveragePayMode: mode } : b
+      )
+    }))
+  }
+
+  // Vacation table — initialize from LFT or existing config
+  function getVacTable() {
+    return cfg.vacationTable || LFT_VACATION_TABLE
+  }
+
+  function setVacTableRow(idx, field, val) {
+    const table = [...getVacTable()]
+    table[idx] = { ...table[idx], [field]: parseInt(val) || 0 }
+    setCfg(c => ({ ...c, vacationTable: table }))
+  }
+
+  function resetVacTableToLFT() {
+    setCfg(c => ({ ...c, vacationTable: null })) // null = use LFT default
+    toast.success('Tabla reseteada a LFT 2023')
   }
 
   async function detectBranchIp(branchId) {
@@ -142,6 +195,62 @@ export default function SettingsPage() {
         </button>
       </div>
 
+      {/* ── Logo de empresa ──────────────────────────────────────────────── */}
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Identidad de empresa</p>
+      <div className="card mb-4 space-y-3">
+        <div>
+          <label className="label">Logo (URL de imagen)</label>
+          <input className="input text-sm" placeholder="https://tuempresa.com/logo.png"
+            value={cfg.logoUrl || ''}
+            onChange={e => F('logoUrl', e.target.value)} />
+          <p className="text-[10px] text-gray-600 font-mono mt-1">
+            PNG o JPG, fondo transparente recomendado. Máx. 400×400px, menos de 100KB.
+            Aparece en el checador y en el encabezado de las nóminas.
+          </p>
+        </div>
+        {cfg.logoUrl && (
+          <div className="flex items-center gap-3 p-3 bg-dark-700 border border-dark-border rounded-xl">
+            <img src={cfg.logoUrl} alt="Logo preview" className="h-12 w-auto object-contain rounded"
+              onError={e => { e.target.style.display='none' }} />
+            <p className="text-xs text-gray-500 font-mono">Vista previa del logo</p>
+          </div>
+        )}
+        <div>
+          <label className="label">Leyenda legal al pie de nóminas</label>
+          <textarea className="input text-xs leading-relaxed" rows={4}
+            value={cfg.payrollLegend ?? DEFAULT_LEYENDA}
+            onChange={e => F('payrollLegend', e.target.value)}
+            placeholder={DEFAULT_LEYENDA} />
+          <button onClick={() => F('payrollLegend', DEFAULT_LEYENDA)}
+            className="mt-1 text-[10px] text-gray-600 hover:text-gray-400 font-mono">
+            ↻ Restaurar texto por defecto
+          </button>
+        </div>
+      </div>
+
+      {/* ── Active branches overview ────────────────────────────────────── */}
+      {branches.length > 0 && (
+        <>
+          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Sucursales activas</p>
+          <div className="grid grid-cols-2 gap-2 mb-4">
+            {branches.map(b => (
+              <div key={b.id} className="card-sm flex flex-col gap-1">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="font-bold text-white text-sm truncate">{b.name}</span>
+                  <span className={`shrink-0 w-2 h-2 rounded-full ${b.ip ? 'bg-brand-400' : 'bg-gray-600'}`} title={b.ip ? 'WiFi configurado' : 'Solo GPS'} />
+                </div>
+                <div className="text-[10px] font-mono text-gray-500 space-y-0.5">
+                  <div>👥 {empCounts[b.id] || 0} empleado{(empCounts[b.id] || 0) !== 1 ? 's' : ''}</div>
+                  <div className={b.ip ? 'text-brand-400/70' : 'text-gray-600'}>
+                    {b.ip ? `🌐 ${b.ip}` : '🌐 Sin IP registrada'}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       {/* ── Sucursales + QR ─────────────────────────────────────────────── */}
       <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Sucursales y Códigos QR</p>
       <div className="card mb-4">
@@ -158,10 +267,38 @@ export default function SettingsPage() {
 
         {branches.map(b => (
           <div key={b.id} className="mb-5 pb-5 border-b border-dark-border last:border-0 last:mb-0 last:pb-0">
-            <div className="flex items-center justify-between mb-3">
-              <span className="font-bold text-white">{b.name}</span>
-              <button onClick={() => removeBranch(b.id)}
-                className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg">🗑</button>
+            {/* Branch name row — with inline edit */}
+            <div className="flex items-center justify-between mb-3 gap-2">
+              {editingBranch?.id === b.id ? (
+                <>
+                  <input
+                    className="input text-sm flex-1 py-1.5"
+                    value={editingBranch.name}
+                    autoFocus
+                    onChange={e => setEditingBranch(eb => ({ ...eb, name: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') saveEditBranch(); if (e.key === 'Escape') setEditingBranch(null) }}
+                  />
+                  <button onClick={saveEditBranch} className="px-3 py-1.5 bg-brand-400 text-black text-xs font-bold rounded-lg active:brightness-90">✓</button>
+                  <button onClick={() => setEditingBranch(null)} className="px-3 py-1.5 bg-dark-700 border border-dark-border text-gray-400 text-xs font-bold rounded-lg">✕</button>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-bold text-white truncate">{b.name}</span>
+                    {empCounts[b.id] > 0 && (
+                      <span className="shrink-0 px-1.5 py-0.5 bg-brand-400/10 border border-brand-400/20 rounded-full text-brand-400 text-[9px] font-mono">
+                        {empCounts[b.id]} emp.
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => startEditBranch(b)}
+                      className="p-1.5 text-gray-400 text-xs active:bg-dark-700 rounded-lg" title="Editar nombre">✏️</button>
+                    <button onClick={() => removeBranch(b.id)}
+                      className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg">🗑</button>
+                  </div>
+                </>
+              )}
             </div>
             <div className="flex gap-4 items-start">
               {/* QR inline */}
@@ -209,6 +346,29 @@ export default function SettingsPage() {
                   <p className="text-[9px] text-gray-600 font-mono mt-1.5">
                     Toca "Detectar IP" mientras estés conectado al WiFi de esta sucursal.
                   </p>
+                </div>
+
+                {/* Coverage pay mode */}
+                <div className="mt-2 p-2.5 bg-dark-800 border border-dark-border rounded-xl">
+                  <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider mb-2">Sueldo en coberturas</p>
+                  <div className="space-y-1.5">
+                    {[
+                      { value: 'covered', label: 'Sueldo del compañero cubierto', desc: 'El que cubre cobra la tarifa de quien está cubriendo' },
+                      { value: 'own', label: 'Sueldo propio siempre', desc: 'Cada quien cobra con su tarifa sin importar a quién cubre' },
+                      { value: 'lower', label: 'El más bajo de ambos', desc: 'Siempre la tarifa menor entre quien cubre y quien es cubierto' },
+                    ].map(opt => (
+                      <label key={opt.value} className="flex items-start gap-2.5 cursor-pointer">
+                        <input type="radio" name={`cov-${b.id}`} value={opt.value}
+                          checked={(b.coveragePayMode || 'covered') === opt.value}
+                          onChange={() => setBranchCoverage(b.id, opt.value)}
+                          className="mt-0.5 accent-brand-400 shrink-0" />
+                        <div>
+                          <p className="text-xs text-white font-semibold">{opt.label}</p>
+                          <p className="text-[9px] text-gray-500">{opt.desc}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -349,6 +509,47 @@ export default function SettingsPage() {
         <button onClick={addRestDay} className="mt-2 w-full py-2 bg-dark-700 border border-dark-border rounded-xl text-xs font-bold text-white active:bg-dark-600">
           + Agregar día
         </button>
+      </div>
+
+      {/* ── Tabla de vacaciones ────────────────────────────────────────────── */}
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">
+        Tabla de vacaciones <span className="normal-case text-gray-600">(días por año de antigüedad)</span>
+      </p>
+      <div className="card mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs text-gray-400">
+            Base LFT 2023. Puedes aumentar los días si tu empresa da más beneficios que la ley (nunca menos).
+          </p>
+          {cfg.vacationTable && (
+            <button onClick={resetVacTableToLFT}
+              className="shrink-0 ml-2 px-2.5 py-1 bg-dark-700 border border-dark-border rounded-lg text-[10px] font-bold text-gray-400 active:bg-dark-600">
+              ↻ LFT default
+            </button>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          <div className="grid grid-cols-3 gap-2 mb-1">
+            <span className="text-[10px] font-mono text-gray-500 uppercase">Desde año</span>
+            <span className="text-[10px] font-mono text-gray-500 uppercase">Hasta año</span>
+            <span className="text-[10px] font-mono text-gray-500 uppercase">Días</span>
+          </div>
+          {getVacTable().map((row, idx) => (
+            <div key={idx} className="grid grid-cols-3 gap-2 items-center">
+              <input type="number" min="1" max="50" className="input py-1.5 text-sm text-center"
+                value={row.fromYear}
+                onChange={e => setVacTableRow(idx, 'fromYear', e.target.value)} />
+              <input type="number" min="1" max="999" className="input py-1.5 text-sm text-center"
+                value={row.toYear === 999 ? '∞' : row.toYear}
+                onChange={e => setVacTableRow(idx, 'toYear', e.target.value === '∞' ? 999 : e.target.value)} />
+              <input type="number" min="1" max="365" className="input py-1.5 text-sm text-center text-brand-400 font-bold"
+                value={row.days}
+                onChange={e => setVacTableRow(idx, 'days', e.target.value)} />
+            </div>
+          ))}
+        </div>
+        <p className="text-[9px] text-gray-600 font-mono mt-3">
+          💡 Art. 804 LFT: conserva registros de nómina por al menos 5 años.
+        </p>
       </div>
 
       <p className="text-center text-xs font-mono text-gray-600 mb-4">CheckPro v1.0 · SaaS · Todos los derechos reservados</p>
