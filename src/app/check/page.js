@@ -9,6 +9,18 @@ const ABANDON_MINUTES = 20        // minutes outside zone before auto-close
 const GPS_INTERVAL_MS = 60_000    // check GPS every 60s while shift is open
 const IP_INTERVAL_MS = 5 * 60_000 // check IP every 5 min
 
+// ── Get or create a stable deviceId (UUID stored in localStorage) ─────────────
+function getOrCreateDeviceId() {
+  if (typeof window === 'undefined') return null
+  const key = 'checkpro_device_id'
+  let id = localStorage.getItem(key)
+  if (!id) {
+    id = crypto.randomUUID ? crypto.randomUUID() : `dev-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    localStorage.setItem(key, id)
+  }
+  return id
+}
+
 // ── LiveClock ─────────────────────────────────────────────────────────────────
 function LiveClock({ locationName, branchName }) {
   const [t, setT] = useState(new Date())
@@ -137,15 +149,47 @@ function AbandonBanner({ monitor, onAbandon }) {
   )
 }
 
+// ── EmergencyExitModal ────────────────────────────────────────────────────────
+function EmergencyExitModal({ onConfirm, onCancel, busy }) {
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-5">
+      <div className="bg-dark-800 border border-red-500/30 rounded-2xl p-6 w-full max-w-sm">
+        <div className="text-center mb-4">
+          <div className="text-4xl mb-2">🚨</div>
+          <h3 className="text-white font-bold text-lg mb-1">Salida de emergencia</h3>
+          <p className="text-gray-400 text-sm">
+            Esto registrará tu salida <span className="text-red-400 font-semibold">aunque estés fuera de la sucursal</span>.
+            Se creará una incidencia que el gerente deberá revisar.
+          </p>
+        </div>
+        <div className="space-y-2">
+          <button onClick={onConfirm} disabled={busy}
+            className="w-full py-3 bg-red-500/20 border border-red-500/40 rounded-xl text-red-400 font-bold text-sm active:bg-red-500/30 transition-all disabled:opacity-50">
+            {busy ? '⏳ Registrando...' : 'Confirmar salida de emergencia'}
+          </button>
+          <button onClick={onCancel} disabled={busy}
+            className="w-full py-3 bg-dark-700 border border-dark-border rounded-xl text-gray-400 font-bold text-sm active:bg-dark-600 transition-all">
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function CheckPage() {
   const [cfg, setCfg]           = useState(null)
+  const [logoUrl, setLogoUrl]   = useState(null)
   const [tenantId, setTenantId] = useState(null)
   const [branchId, setBranchId] = useState(null)
   const [branchName, setBranchName] = useState('')
   const [slug, setSlug]         = useState('')
 
-  // Session (QR-bound, IP-tied)
+  // Device ID (persistent, bound to this browser)
+  const [deviceId, setDeviceId] = useState(null)
+
+  // Session (QR-bound, IP-tied, device-tied)
   const [session, setSession]   = useState(null)   // { token, ip }
   const [sessionLoading, setSessionLoading] = useState(true)
 
@@ -171,6 +215,15 @@ export default function CheckPage() {
   monitorRef.current            = monitor
   const abandonCalledRef        = useRef(false)
 
+  // Emergency exit
+  const [showEmergency, setShowEmergency] = useState(false)
+  const [emergencyBusy, setEmergencyBusy] = useState(false)
+
+  // ── Init deviceId on mount ────────────────────────────────────────────────
+  useEffect(() => {
+    setDeviceId(getOrCreateDeviceId())
+  }, [])
+
   // ── Load tenant from URL/localStorage ──────────────────────────────────────
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -185,7 +238,7 @@ export default function CheckPage() {
           if (res.ok) {
             const data = await res.json()
             setTenantId(data.id); setCfg(data.config); setSlug(data.slug)
-            // Find branch name
+            setLogoUrl(data.config?.logoUrl || null)
             if (urlBranch && data.config?.branches) {
               const b = data.config.branches.find(b => b.id === urlBranch)
               setBranchName(b?.name || '')
@@ -202,6 +255,7 @@ export default function CheckPage() {
         try {
           const data = JSON.parse(stored)
           setTenantId(data.id); setCfg(data.config); setSlug(data.slug)
+          setLogoUrl(data.config?.logoUrl || null)
           if (urlBranch && data.config?.branches) {
             const b = data.config.branches.find(b => b.id === urlBranch)
             setBranchName(b?.name || ''); setBranchId(urlBranch)
@@ -212,20 +266,20 @@ export default function CheckPage() {
     init()
   }, [])
 
-  // ── Create IP-bound session when tenant is ready ───────────────────────────
+  // ── Create session when tenant + deviceId are ready ───────────────────────
   useEffect(() => {
-    if (!tenantId) return
+    if (!tenantId || !deviceId) return
     setSessionLoading(true)
     fetch('/api/check/session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenantId, branchId })
+      body: JSON.stringify({ tenantId, branchId, deviceId })
     })
       .then(r => r.json())
       .then(data => { setSession({ token: data.token, ip: data.ip }); setCurrentIp(data.ip) })
-      .catch(() => {}) // non-fatal: can still punch without token (will be flagged)
+      .catch(() => {})
       .finally(() => setSessionLoading(false))
-  }, [tenantId, branchId])
+  }, [tenantId, branchId, deviceId])
 
   // ── GPS one-shot verify ───────────────────────────────────────────────────
   const verifyGps = useCallback(() => {
@@ -258,7 +312,6 @@ export default function CheckPage() {
     let countdownTimer = null
     const abandonCalledLocal = { v: false }
 
-    // ── Trigger abandon
     async function triggerAbandon(reason, leftAt) {
       if (abandonCalledLocal.v) return
       abandonCalledLocal.v = true
@@ -272,7 +325,6 @@ export default function CheckPage() {
       setMsg({ type: 'warn', text: 'Tu turno fue cerrado automáticamente por salir de la sucursal. El gerente revisará la incidencia.' })
     }
 
-    // ── Evaluate combined outside status
     function evaluate(gpsOutside, ipOutside) {
       const outside = gpsOutside || ipOutside
       const reason = gpsOutside && ipOutside ? 'both' : gpsOutside ? 'gps' : 'ip'
@@ -291,7 +343,7 @@ export default function CheckPage() {
     let lastGpsOutside = false
     let lastIpOutside = false
 
-    // ── GPS watch
+    // ── GPS watch (disabled when screen is locked — browser limitation)
     if (!simMode && navigator.geolocation && cfg?.location) {
       gpsWatchId = navigator.geolocation.watchPosition(
         pos => {
@@ -306,7 +358,7 @@ export default function CheckPage() {
       )
     }
 
-    // ── IP watch
+    // ── IP watch (continues even when screen locked)
     const branchIp = branchId ? (cfg?.branches || []).find(b => b.id === branchId)?.ip : null
     async function checkIp() {
       try {
@@ -319,6 +371,7 @@ export default function CheckPage() {
     }
     checkIp()
     ipTimer = setInterval(checkIp, IP_INTERVAL_MS)
+
     countdownTimer = setInterval(() => {
       setMonitor(prev => {
         if (!prev.outsideSince) return prev
@@ -326,12 +379,36 @@ export default function CheckPage() {
         const left = Math.max(0, Math.ceil(ABANDON_MINUTES - elapsed))
         return { ...prev, minsLeft: left }
       })
-    }, 10000) // update countdown every 10s
+    }, 10000)
+
+    // ── Re-verify GPS when tab becomes visible again (phone unlocked)
+    function handleVisibility() {
+      if (document.visibilityState === 'visible') {
+        // Re-check GPS immediately
+        if (!simMode && navigator.geolocation && cfg?.location) {
+          navigator.geolocation.getCurrentPosition(
+            pos => {
+              const { latitude: lat, longitude: lng } = pos.coords
+              const dist = Math.round(haversineMeters(lat, lng, cfg.location.lat, cfg.location.lng))
+              lastGpsOutside = dist > (cfg.location.radius || 300)
+              setGps(g => ({ ...g, status: 'ok', lat, lng, dist, valid: !lastGpsOutside, accuracy: Math.round(pos.coords.accuracy) }))
+              evaluate(lastGpsOutside, lastIpOutside)
+            },
+            () => {},
+            { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+          )
+        }
+        // Also re-check IP
+        checkIp()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
 
     return () => {
       if (gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId)
       clearInterval(ipTimer)
       clearInterval(countdownTimer)
+      document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [step, openShift, tenantId, cfg, simMode, branchId])
 
@@ -339,6 +416,7 @@ export default function CheckPage() {
   const reset = () => {
     setStep('id'); setEmpCode(''); setFoundEmp(null); setOpenShift(null)
     setMsg(null); setCoverMode(false); setCoverTarget('')
+    setMonitor({ outsideSince: null, outsideReason: null, minsLeft: ABANDON_MINUTES })
   }
 
   // ── Identify employee ─────────────────────────────────────────────────────
@@ -373,6 +451,7 @@ export default function CheckPage() {
           coveringEmployeeId: coverMode && coverTarget ? coverTarget : null,
           geo: { lat: gps.lat, lng: gps.lng, dist: gps.dist, accuracy: gps.accuracy, simulated: gps.simulated, valid: gps.valid },
           sessionToken: session?.token || null,
+          deviceId,
         })
       })
       const data = await res.json()
@@ -380,7 +459,6 @@ export default function CheckPage() {
         setMsg({ type: 'ok', text: data.msg })
         toast.success(data.msg)
         if (action === 'in') {
-          // Keep shift open state for monitoring; go to "done" screen
           setStep('done')
           setOpenShift({ employee_id: foundEmp?.id, entry_time: new Date().toISOString() })
         } else {
@@ -395,7 +473,7 @@ export default function CheckPage() {
     finally { setBusy(false) }
   }
 
-  // ── Manual abandon ────────────────────────────────────────────────────────
+  // ── Manual abandon (from countdown) ──────────────────────────────────────
   async function manualAbandon() {
     if (!openShift) return
     await fetch('/api/check/abandon', {
@@ -406,6 +484,33 @@ export default function CheckPage() {
     setOpenShift(null)
     setMsg({ type: 'warn', text: 'Turno cerrado. El gerente revisará la incidencia.' })
     setTimeout(reset, 4000)
+  }
+
+  // ── Emergency exit ────────────────────────────────────────────────────────
+  async function handleEmergencyExit() {
+    if (!openShift) return
+    setEmergencyBusy(true)
+    try {
+      await fetch('/api/check/abandon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantId,
+          employeeId: foundEmp?.id || openShift.employee_id,
+          reason: 'emergency',
+          leftAt: new Date().toISOString(),
+        })
+      })
+      setShowEmergency(false)
+      setOpenShift(null)
+      toast('Salida registrada. Se creó una incidencia.', { icon: '⚠️' })
+      setMsg({ type: 'warn', text: 'Salida de emergencia registrada. El gerente revisará la incidencia.' })
+      setTimeout(reset, 5000)
+    } catch {
+      toast.error('Error al registrar salida.')
+    } finally {
+      setEmergencyBusy(false)
+    }
   }
 
   // ── Not configured ────────────────────────────────────────────────────────
@@ -423,14 +528,28 @@ export default function CheckPage() {
 
   return (
     <main className="min-h-dvh bg-dark-900 flex flex-col max-w-[430px] mx-auto">
+      {/* Emergency exit modal */}
+      {showEmergency && (
+        <EmergencyExitModal
+          onConfirm={handleEmergencyExit}
+          onCancel={() => setShowEmergency(false)}
+          busy={emergencyBusy}
+        />
+      )}
+
       <div className="flex-1 overflow-y-auto no-scrollbar pb-safe">
 
         {/* Hero / clock */}
         <div className="mx-3.5 mt-3.5 bg-gradient-to-br from-brand-400/7 to-blue-500/5 border border-brand-400/15 rounded-2xl">
+          {logoUrl && (
+            <div className="pt-4 flex justify-center">
+              <img src={logoUrl} alt="Logo" className="h-10 w-auto object-contain opacity-80" />
+            </div>
+          )}
           <LiveClock locationName={cfg?.location?.name} branchName={branchName} />
         </div>
 
-        {/* Abandon banner (shown when monitoring detects outside) */}
+        {/* Abandon banner */}
         {step === 'done' && openShift && (
           <div className="mt-3">
             <AbandonBanner monitor={monitor} onAbandon={manualAbandon} />
@@ -440,7 +559,7 @@ export default function CheckPage() {
         <div className="px-4 pt-3">
           <GpsStatus gps={gps} onVerify={verifyGps} simMode={simMode} setSimMode={setSimMode} />
 
-          {/* ── DONE screen (after clock-in, waiting for QR rescan to clock-out) ── */}
+          {/* ── DONE screen: shift is open, waiting for QR rescan ── */}
           {step === 'done' && openShift && (
             <div className="card text-center">
               <div className="w-14 h-14 rounded-full bg-brand-400/10 border-2 border-brand-400/20 text-brand-400 text-xl font-bold font-mono flex items-center justify-center mx-auto mb-3">
@@ -458,11 +577,21 @@ export default function CheckPage() {
                   {monitor.outsideSince ? '⚠ Fuera de red' : '🌐 En red de sucursal'}
                 </div>
               )}
-              <div className="mt-2 p-4 bg-dark-700 border border-dark-border rounded-xl">
+
+              {/* Rescan to exit instructions */}
+              <div className="mt-2 p-4 bg-dark-700 border border-dark-border rounded-xl mb-4">
                 <p className="text-2xl mb-2">📱</p>
                 <p className="text-white font-bold text-sm mb-1">Para registrar tu salida:</p>
                 <p className="text-gray-400 text-xs">Escanea de nuevo el código QR de la sucursal con tu celular.</p>
               </div>
+
+              {/* Emergency exit */}
+              <button
+                onClick={() => setShowEmergency(true)}
+                className="w-full py-2.5 border border-red-500/20 rounded-xl text-red-500/70 text-xs font-semibold hover:bg-red-500/10 transition-all">
+                🚨 Salida de emergencia (crea incidencia)
+              </button>
+
               {msg && (
                 <div className={`mt-3 px-4 py-3 rounded-xl text-sm font-semibold
                   ${msg.type === 'ok' ? 'bg-brand-400/10 border border-brand-400/20 text-brand-400' :
@@ -474,7 +603,7 @@ export default function CheckPage() {
             </div>
           )}
 
-          {/* ── DONE screen (after clock-out) ── */}
+          {/* ── DONE screen: after clock-out ── */}
           {step === 'done' && !openShift && (
             <div className="card text-center py-8">
               <div className="text-5xl mb-3">✅</div>
