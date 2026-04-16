@@ -1,12 +1,14 @@
 {
   "name": "checkpro",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
+  "engines": { "node": ">=18.17.0" },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "lint:fix": "next lint --fix"
   },
   "dependencies": {
     "next": "14.2.5",
@@ -16,8 +18,6 @@
     "@supabase/ssr": "^0.3.0",
     "date-fns": "^3.6.0",
     "date-fns-tz": "^3.1.3",
-    "jspdf": "^2.5.1",
-    "jspdf-autotable": "^3.8.2",
     "react-hot-toast": "^2.4.1",
     "clsx": "^2.1.1"
   },

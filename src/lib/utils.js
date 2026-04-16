@@ -1,5 +1,6 @@
 // src/lib/utils.js
 import { clsx } from 'clsx'
+import { formatInTimeZone, zonedTimeToUtc } from 'date-fns-tz'
 
 export function cn(...inputs) { return clsx(inputs) }
 
@@ -7,14 +8,25 @@ export const DAYS = ['lun','mar','mie','jue','vie','sab','dom']
 export const DAY_L = { lun:'Lun',mar:'Mar',mie:'Mié',jue:'Jue',vie:'Vie',sab:'Sáb',dom:'Dom' }
 export const DAY_FL = { lun:'Lunes',mar:'Martes',mie:'Miércoles',jue:'Jueves',vie:'Viernes',sab:'Sábado',dom:'Domingo' }
 
-export const fmtTime = d => d ? new Date(d).toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' }) : '--:--'
-export const fmtDate = d => d ? new Date(d).toLocaleDateString('es-MX', { weekday:'short', day:'2-digit', month:'short' }) : ''
-export const fmtDateFull = d => d ? new Date(d).toLocaleDateString('es-MX', { day:'2-digit', month:'2-digit', year:'numeric' }) : ''
+const DEFAULT_TZ = 'America/Mexico_City'
+
+export const fmtTime = d => d ? new Date(d).toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', timeZone: DEFAULT_TZ }) : '--:--'
+export const fmtDate = d => d ? new Date(d).toLocaleDateString('es-MX', { weekday:'short', day:'2-digit', month:'short', timeZone: DEFAULT_TZ }) : ''
+export const fmtDateFull = d => d ? new Date(d).toLocaleDateString('es-MX', { day:'2-digit', month:'2-digit', year:'numeric', timeZone: DEFAULT_TZ }) : ''
 export const fmtDT = d => d ? `${fmtDate(d)} ${fmtTime(d)}` : ''
-export const isoDate = d => new Date(d).toISOString().slice(0,10)
+
+// CAMBIO — isoDate usa TZ (no UTC); clave para México-5/-6
+export const isoDate = (d, tz = DEFAULT_TZ) => formatInTimeZone(new Date(d), tz, 'yyyy-MM-dd')
+
 export const diffMin = (a,b) => Math.round((new Date(b)-new Date(a))/60000)
 export const diffHrs = (a,b) => (new Date(b)-new Date(a))/3600000
-export const dayKey = d => { const i = new Date(d).getDay(); return DAYS[i===0?6:i-1] }
+
+// CAMBIO — dayKey usa TZ
+export const dayKey = (d, tz = DEFAULT_TZ) => {
+  const wd = formatInTimeZone(new Date(d), tz, 'EEE').toLowerCase()
+  const map = { mon:'lun', tue:'mar', wed:'mie', thu:'jue', fri:'vie', sat:'sab', sun:'dom' }
+  return map[wd] || 'lun'
+}
 
 export function hoursInSchedule(schedule, dk) {
   const s = schedule?.[dk]
@@ -41,14 +53,14 @@ export function toMonthlySalary(employee) {
   return employee.monthly_salary
 }
 
-export function classifyEntry(schedule, entryTime, toleranceMinutes) {
-  const dk = dayKey(entryTime)
+// CAMBIO — classifyEntry compara en la TZ del tenant
+export function classifyEntry(schedule, entryTime, toleranceMinutes, tz = DEFAULT_TZ) {
+  const dk = dayKey(entryTime, tz)
   const s = schedule?.[dk]
   if (!s?.work) return { type:'no_laboral', label:'Día no laboral' }
-  const [h,m] = s.start.split(':').map(Number)
-  const ref = new Date(entryTime)
-  ref.setHours(h, m, 0, 0)
-  const diff = Math.round((new Date(entryTime) - ref) / 60000)
+  const dateStr = isoDate(entryTime, tz)
+  const refUtc = zonedTimeToUtc(`${dateStr}T${s.start}:00`, tz)
+  const diff = Math.round((new Date(entryTime) - refUtc) / 60000)
   if (diff <= 0) return { type:'puntual', label:'Puntual' }
   if (diff <= toleranceMinutes) return { type:'tolerancia', label:`Tolerancia (${diff} min)` }
   return { type:'retardo', label:`Retardo (${diff} min)` }
@@ -62,43 +74,37 @@ export function haversineMeters(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
 }
 
-export function weekRange(refDate, closingDay) {
-  const d = new Date(refDate)
+// CAMBIO — weekRange usa TZ
+export function weekRange(refDate, closingDay, tz = DEFAULT_TZ) {
+  const dk = dayKey(refDate, tz)
   const ci = DAYS.indexOf(closingDay)
-  const cur = d.getDay()===0 ? 6 : d.getDay()-1
-  const end = new Date(d)
-  end.setDate(d.getDate() + (ci-cur+7)%7)
-  end.setHours(23,59,59,999)
-  const start = new Date(end)
-  start.setDate(end.getDate()-6)
-  start.setHours(0,0,0,0)
+  const cur = DAYS.indexOf(dk)
+  const daysForward = (ci - cur + 7) % 7
+  const refIso = isoDate(refDate, tz)
+  const endLocal = new Date(`${refIso}T00:00:00`)
+  endLocal.setDate(endLocal.getDate() + daysForward)
+  const endIso = formatInTimeZone(endLocal, tz, 'yyyy-MM-dd')
+  const end = zonedTimeToUtc(`${endIso}T23:59:59.999`, tz)
+  const startLocal = new Date(endLocal); startLocal.setDate(startLocal.getDate() - 6)
+  const startIso = formatInTimeZone(startLocal, tz, 'yyyy-MM-dd')
+  const start = zonedTimeToUtc(`${startIso}T00:00:00`, tz)
   return { start, end }
 }
 
-// ── Horas extra ──────────────────────────────────────────────────────────────
-// 30 min de gracia; después, cada 60 min completos = 1 HE (redondeado hacia arriba
-// a partir del primer minuto que excede la gracia).
-// Ejemplos: ≤30min=0HE | 31-90=1HE | 91-150=2HE | 151-210=3HE
 export function calcOvertimeHours(minutesOver) {
   if (minutesOver <= 30) return 0
   return Math.ceil((minutesOver - 30) / 60)
 }
 
-// Devuelve la hora de salida programada como Date para la fecha dada
-export function scheduledExitDate(dateStr, employee) {
-  const d = new Date(dateStr + 'T00:00:00')
-  const dk = dayKey(d)
+// CAMBIO — scheduledExitDate usa TZ
+export function scheduledExitDate(dateStr, employee, tz = DEFAULT_TZ) {
+  const dk = dayKey(`${dateStr}T12:00:00Z`, tz)
   const s = employee.schedule?.[dk]
   if (!s?.work || !s.end) return null
-  const [h, m] = s.end.split(':').map(Number)
-  const exit = new Date(d)
-  exit.setHours(h, m, 0, 0)
-  return exit
+  return zonedTimeToUtc(`${dateStr}T${s.end}:00`, tz)
 }
 
 // ── Vacaciones (LFT 2023) ─────────────────────────────────────────────────────
-// Tabla por defecto conforme a la reforma de 2022 vigente desde 2023.
-// Configurable por empresa en cfg.vacationTable.
 export const LFT_VACATION_TABLE = [
   { fromYear: 1, toYear: 1, days: 12 },
   { fromYear: 2, toYear: 2, days: 14 },
@@ -111,18 +117,15 @@ export const LFT_VACATION_TABLE = [
   { fromYear: 25, toYear: 999, days: 28 },
 ]
 
-// Años completos trabajados desde la fecha de contratación
 export function calcYearsWorked(hireDate) {
   if (!hireDate) return 0
-  const hire = new Date(hireDate)
-  const now = new Date()
+  const hire = new Date(hireDate); const now = new Date()
   let years = now.getFullYear() - hire.getFullYear()
   const m = now.getMonth() - hire.getMonth()
   if (m < 0 || (m === 0 && now.getDate() < hire.getDate())) years--
   return Math.max(0, years)
 }
 
-// Días de vacaciones que corresponden según años trabajados y tabla
 export function calcVacationDays(hireDate, customTable = null) {
   const table = customTable || LFT_VACATION_TABLE
   const years = calcYearsWorked(hireDate)
@@ -131,17 +134,13 @@ export function calcVacationDays(hireDate, customTable = null) {
   return entry?.days || 28
 }
 
-// El "año de aniversario actual" = año del último cumpleaños de trabajo.
-// Si el aniversario de este año ya pasó, retorna este año. Si no, el año pasado.
 export function currentAnniversaryYear(hireDate) {
   if (!hireDate) return null
-  const hire = new Date(hireDate)
-  const now = new Date()
+  const hire = new Date(hireDate); const now = new Date()
   const thisYearAnniv = new Date(now.getFullYear(), hire.getMonth(), hire.getDate())
   return thisYearAnniv <= now ? now.getFullYear() : now.getFullYear() - 1
 }
 
-// ¿Tiene vacaciones pendientes? (el aniversario actual no aparece en schedule.vacationYearsTaken)
 export function hasVacationPending(employee) {
   const hireDate = employee.schedule?.hireDate
   if (!hireDate) return false
@@ -152,46 +151,28 @@ export function hasVacationPending(employee) {
   return !taken.includes(annivYear)
 }
 
-// ── Pago por cobertura ────────────────────────────────────────────────────────
-// coveragePayMode: 'own' | 'covered' | 'lower'
-// 'own'     → siempre cobra con su propio sueldo
-// 'covered' → cobra con el sueldo del empleado cubierto (default histórico)
-// 'lower'   → cobra el sueldo más bajo entre ambos
 function resolvePayEmployee(employee, coveringEmployee, coveragePayMode) {
   if (!coveringEmployee) return employee
   const mode = coveragePayMode || 'covered'
   if (mode === 'own') return employee
   if (mode === 'covered') return coveringEmployee
   if (mode === 'lower') {
-    const salA = toMonthlySalary(employee)
-    const salB = toMonthlySalary(coveringEmployee)
+    const salA = toMonthlySalary(employee); const salB = toMonthlySalary(coveringEmployee)
     return salA <= salB ? employee : coveringEmployee
   }
   return coveringEmployee
 }
 
-// ── Cálculo de pago por turno ─────────────────────────────────────────────────
-// - Días festivos: ×3 sobre todas las horas
-// - Horas extra (en corrections.overtime.hours): prima adicional ×1 (total ×2)
-// - Faltas injustificadas: no se pagan (duration_hours es 0 y tipo es falta_injustificada)
-// - coveragePayMode: regla de la sucursal ('own' | 'covered' | 'lower')
 export function calcShiftPay(shift, employee, coveringEmployee, coveragePayMode) {
-  // Absences never pay
   if (shift.classification?.type === 'falta_injustificada') return 0
   if (!shift.duration_hours) return 0
-
   const payEmp = resolvePayEmployee(employee, coveringEmployee, coveragePayMode)
   const rate = monthlyToHourly(payEmp)
   const otHours = shift.corrections?.overtime?.hours || 0
-
-  if (shift.is_holiday) {
-    return shift.duration_hours * rate * 3
-  }
-  // Regular pay + OT premium (OT hours already counted in duration, +1× more for 2× total)
+  if (shift.is_holiday) return shift.duration_hours * rate * 3
   return shift.duration_hours * rate + otHours * rate
 }
 
-// ── Resumen semanal por empleado ──────────────────────────────────────────────
 export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMode) {
   const mine = weekShifts.filter(s => s.employee_id === employee.id)
   const closed = mine.filter(s => ['closed','incident'].includes(s.status))
@@ -204,18 +185,17 @@ export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMo
     s.classification?.type === 'falta_justificada_pagada' ||
     s.classification?.type === 'falta_justificada_no_pagada'
   ).length
-
+  const empMap = new Map(allEmployees.map(e => [e.id, e]))
   let grossPay = 0
   closed.forEach(s => {
-    const cov = s.covering_employee_id ? allEmployees.find(e=>e.id===s.covering_employee_id) : null
+    const cov = s.covering_employee_id ? empMap.get(s.covering_employee_id) : null
     grossPay += calcShiftPay(s, employee, cov, coveragePayMode)
   })
   const hr = monthlyToHourly(employee)
   const retardoDesc = retardos * (hr * 0.5)
   const incidentDesc = incidents * (hr * 8)
   return {
-    totalH: parseFloat(totalH.toFixed(2)),
-    otHours: parseFloat(otHours.toFixed(2)),
+    totalH: parseFloat(totalH.toFixed(2)), otHours: parseFloat(otHours.toFixed(2)),
     retardos, incidents, faltasInjustificadas, faltasJustificadas, grossPay,
     retardoDesc, incidentDesc,
     netPay: Math.max(0, grossPay - retardoDesc - incidentDesc),
@@ -223,7 +203,6 @@ export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMo
   }
 }
 
-// ── Contar faltas graves (injustificadas) históricas de un empleado ───────────
 export function countGraveIncidents(allShifts, employeeId) {
   return allShifts.filter(s =>
     s.employee_id === employeeId &&
