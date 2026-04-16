@@ -1,27 +1,26 @@
 'use client'
 // src/app/dashboard/settings/page.js
+// Tabs: Empresa / Sucursales / Equipo
+// - Empresa: tenant-wide identity (name, logo, payroll legend, vacation table)
+// - Sucursales: list + open each one → per-branch config (hours, GPS, tolerancia,
+//   holidays, rest days, printing, coverage pay, IP, QR).
+// - Equipo: invitations (owner-only).
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { DAYS, DAY_L, DAY_FL, LFT_VACATION_TABLE } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 const DEFAULT_LEYENDA = 'Al firmar el presente comprobante de nómina, el trabajador acepta que los montos, horas trabajadas e incidencias registradas son correctos y conformes a su contrato laboral. Cualquier aclaración deberá presentarse por escrito en un plazo máximo de 5 días hábiles. Documento confidencial de uso interno.'
-
 const FALLBACK_URL = 'https://checkpro-self.vercel.app'
 
 export default function SettingsPage() {
-  const [cfg, setCfg] = useState(null)
-  const [tenantId, setTenantId] = useState(null)
-  const [tenantSlug, setTenantSlug] = useState('')
+  const [tab, setTab] = useState('empresa')
+  const [profile, setProfile] = useState(null)
+  const [tenant, setTenant] = useState(null)
+  const [branches, setBranches] = useState([])
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [newHol, setNewHol] = useState({ name: '', date: '' })
-  const [newRest, setNewRest] = useState({ name: '', date: '' })
-  const [newBranch, setNewBranch] = useState('')
-  const [editingBranch, setEditingBranch] = useState(null) // { id, name, ip } for inline edit
+  const [openBranchId, setOpenBranchId] = useState(null)
   const [origin, setOrigin] = useState(FALLBACK_URL)
-  const [detectingIp, setDetectingIp] = useState(null) // branchId being detected
-  const [empCounts, setEmpCounts] = useState({}) // branchId → count
 
   useEffect(() => { setOrigin(window.location.origin) }, [])
 
@@ -29,399 +28,390 @@ export default function SettingsPage() {
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) return
-    const { data: prof } = await supabase.from('profiles').select('tenant_id').eq('id', session.user.id).single()
-    if (!prof?.tenant_id) return
-    setTenantId(prof.tenant_id)
-    const { data: tenant } = await supabase.from('tenants').select('config,slug').eq('id', prof.tenant_id).single()
-    setCfg(tenant?.config || {})
-    setTenantSlug(tenant?.slug || '')
-    // Load employee counts per branch
-    const { data: emps } = await supabase.from('employees').select('id,schedule').eq('tenant_id', prof.tenant_id).eq('status', 'active')
-    const counts = {}
-    ;(emps || []).forEach(e => {
-      const bid = e.schedule?.branch?.id
-      if (bid) counts[bid] = (counts[bid] || 0) + 1
-    })
-    setEmpCounts(counts)
+    const { data: prof } = await supabase.from('profiles').select('*').eq('id', session.user.id).single()
+    setProfile(prof)
+    if (!prof?.tenant_id) { setLoading(false); return }
+    const { data: ten } = await supabase.from('tenants').select('*').eq('id', prof.tenant_id).single()
+    setTenant(ten)
+    const r = await fetch('/api/branches')
+    if (r.ok) {
+      const { branches: list } = await r.json()
+      setBranches(list || [])
+    }
     setLoading(false)
   }, [])
 
   useEffect(() => { load() }, [load])
 
+  if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando...</div>
+
+  const isOwner = profile?.role === 'owner' || profile?.role === 'super_admin'
+
+  // ── Branch detail view ────────────────────────────────────────────────────
+  if (openBranchId) {
+    const branch = branches.find(b => b.id === openBranchId)
+    if (!branch) { setOpenBranchId(null); return null }
+    return (
+      <BranchDetail
+        branch={branch}
+        origin={origin}
+        tenantSlug={tenant?.slug || ''}
+        canEditName={isOwner}
+        onBack={() => setOpenBranchId(null)}
+        onSaved={async () => { await load() }}
+      />
+    )
+  }
+
+  const TABS = isOwner
+    ? [['empresa','Empresa'],['sucursales','Sucursales'],['equipo','Equipo']]
+    : [['sucursales','Mi sucursal']]
+
+  // Manager can't see Empresa/Equipo tabs; default to sucursales
+  if (!isOwner && tab !== 'sucursales') setTab('sucursales')
+
+  return (
+    <div className="p-4 md:p-6 max-w-3xl">
+      <div className="mb-5">
+        <h1 className="text-2xl font-extrabold text-white">Configuración</h1>
+        <p className="text-gray-500 text-xs font-mono mt-0.5">PARÁMETROS DEL SISTEMA</p>
+      </div>
+
+      <div className="flex gap-2 mb-4 border-b border-dark-border overflow-x-auto">
+        {TABS.map(([id,label]) => (
+          <button key={id} onClick={() => setTab(id)}
+            className={`px-3 py-2 text-sm font-semibold whitespace-nowrap border-b-2 transition-colors ${
+              tab === id ? 'text-brand-400 border-brand-400' : 'text-gray-500 border-transparent hover:text-white'
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'empresa' && isOwner && (
+        <TenantIdentityTab tenant={tenant} onSaved={async () => { await load() }} />
+      )}
+
+      {tab === 'sucursales' && (
+        <BranchesTab
+          branches={branches}
+          isOwner={isOwner}
+          myBranchId={profile?.branch_id}
+          onOpen={setOpenBranchId}
+          onChanged={async () => { await load() }}
+        />
+      )}
+
+      {tab === 'equipo' && isOwner && (
+        <TeamTab branches={branches} onChanged={load} />
+      )}
+    </div>
+  )
+}
+
+// ── Tab: Tenant identity (owner-only) ────────────────────────────────────────
+function TenantIdentityTab({ tenant, onSaved }) {
+  const [name, setName] = useState(tenant?.name || '')
+  const [cfg, setCfg] = useState(tenant?.config || {})
+  const [saving, setSaving] = useState(false)
   const F = (k, v) => setCfg(c => ({ ...c, [k]: v }))
-  const FL = (k, v) => setCfg(c => ({ ...c, location: { ...c.location, [k]: v } }))
-  const FH = (day, k, v) => setCfg(c => ({ ...c, businessHours: { ...c.businessHours, [day]: { ...c.businessHours?.[day], [k]: v } } }))
 
-  async function save() {
-    setSaving(true)
-    const supabase = createClient()
-    await supabase.from('tenants').update({ config: cfg }).eq('id', tenantId)
-    toast.success('Configuración guardada')
-    setSaving(false)
-  }
-
-  // ── Branches ──────────────────────────────────────────────────────────────
-  function addBranch() {
-    if (!newBranch.trim()) { toast.error('Escribe el nombre de la sucursal'); return }
-    const branch = { id: crypto.randomUUID(), name: newBranch.trim() }
-    setCfg(c => ({ ...c, branches: [...(c.branches || []), branch] }))
-    setNewBranch('')
-    toast('Guarda la configuración para que persista', { icon: '💾' })
-  }
-
-  function removeBranch(id) {
-    if (!confirm('¿Eliminar esta sucursal? Los empleados asignados quedarán sin sucursal.')) return
-    setCfg(c => ({ ...c, branches: (c.branches || []).filter(b => b.id !== id) }))
-  }
-
-  function startEditBranch(b) {
-    setEditingBranch({ id: b.id, name: b.name })
-  }
-
-  function saveEditBranch() {
-    if (!editingBranch?.name?.trim()) { toast.error('El nombre no puede estar vacío'); return }
-    setCfg(c => ({
-      ...c,
-      branches: (c.branches || []).map(b =>
-        b.id === editingBranch.id ? { ...b, name: editingBranch.name.trim() } : b
-      )
-    }))
-    setEditingBranch(null)
-    toast('Nombre actualizado. Guarda para que persista.', { icon: '💾' })
-  }
-
-  function setBranchCoverage(branchId, mode) {
-    setCfg(c => ({
-      ...c,
-      branches: (c.branches || []).map(b =>
-        b.id === branchId ? { ...b, coveragePayMode: mode } : b
-      )
-    }))
-  }
-
-  // Vacation table — initialize from LFT or existing config
-  function getVacTable() {
-    return cfg.vacationTable || LFT_VACATION_TABLE
-  }
-
+  function getVacTable() { return cfg.vacationTable || LFT_VACATION_TABLE }
   function setVacTableRow(idx, field, val) {
     const table = [...getVacTable()]
     table[idx] = { ...table[idx], [field]: parseInt(val) || 0 }
     setCfg(c => ({ ...c, vacationTable: table }))
   }
+  function resetVacTableToLFT() { setCfg(c => ({ ...c, vacationTable: null })); toast.success('Tabla reseteada a LFT 2023') }
 
-  function resetVacTableToLFT() {
-    setCfg(c => ({ ...c, vacationTable: null })) // null = use LFT default
-    toast.success('Tabla reseteada a LFT 2023')
+  async function save() {
+    setSaving(true)
+    const supabase = createClient()
+    await supabase.from('tenants').update({ name: name.trim() || tenant.name, config: cfg }).eq('id', tenant.id)
+    toast.success('Empresa guardada')
+    setSaving(false)
+    await onSaved?.()
   }
-
-  async function detectBranchIp(branchId) {
-    setDetectingIp(branchId)
-    try {
-      const res = await fetch('/api/check/ip')
-      const { ip } = await res.json()
-      setCfg(c => ({
-        ...c,
-        branches: (c.branches || []).map(b =>
-          b.id === branchId ? { ...b, ip, ipDetectedAt: new Date().toISOString() } : b
-        )
-      }))
-      toast.success(`IP registrada: ${ip}`)
-      toast('Guarda la configuración para que persista', { icon: '💾' })
-    } catch { toast.error('No se pudo detectar la IP') }
-    finally { setDetectingIp(null) }
-  }
-
-  function branchCheckUrl(branchId) {
-    return `${origin}/check?tenant=${tenantSlug}&branch=${branchId}`
-  }
-
-  function branchQrImgSrc(branchId, size = 200) {
-    const data = encodeURIComponent(branchCheckUrl(branchId))
-    return `https://api.qrserver.com/v1/create-qr-code/?data=${data}&size=${size}x${size}&bgcolor=0d0d0d&color=3DFFA0&qzone=2`
-  }
-
-  function copyBranchUrl(branchId) {
-    navigator.clipboard.writeText(branchCheckUrl(branchId)).then(() => toast.success('URL copiada'))
-  }
-
-  function printBranchQr(branchId, branchName) {
-    const imgSrc = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(branchCheckUrl(branchId))}&size=600x600&bgcolor=ffffff&color=000000&qzone=2`
-    const win = window.open('', '_blank')
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>QR ${branchName}</title></head>
-    <body style="text-align:center;font-family:Arial,sans-serif;padding:40px;background:#fff">
-      <h2 style="font-size:22pt;margin-bottom:4px">${branchName}</h2>
-      <p style="color:#555;font-size:12pt;margin-top:0">Escanea con tu celular para registrar asistencia</p>
-      <img src="${imgSrc}" style="width:280px;height:280px;margin:20px auto;display:block;border:4px solid #000;border-radius:8px"/>
-      <p style="font-size:9pt;color:#888;font-family:monospace;word-break:break-all;max-width:400px;margin:0 auto">${branchCheckUrl(branchId)}</p>
-      <script>window.onload=function(){window.print()}</script>
-    </body></html>`)
-    win.document.close()
-  }
-
-  // ── Holidays / Rest days ──────────────────────────────────────────────────
-  function addHoliday() {
-    if (!newHol.name || !newHol.date) { toast.error('Ingresa nombre y fecha'); return }
-    const holidays = [...(cfg.holidays || []), { id: crypto.randomUUID(), name: newHol.name, date: newHol.date }]
-    setCfg(c => ({ ...c, holidays }))
-    setNewHol({ name: '', date: '' })
-  }
-
-  function removeHoliday(id) { setCfg(c => ({ ...c, holidays: c.holidays.filter(h => h.id !== id) })) }
-
-  function addRestDay() {
-    if (!newRest.name || !newRest.date) { toast.error('Ingresa nombre y fecha'); return }
-    const restDays = [...(cfg.restDays || []), { id: crypto.randomUUID(), name: newRest.name, date: newRest.date }]
-    setCfg(c => ({ ...c, restDays }))
-    setNewRest({ name: '', date: '' })
-  }
-
-  function removeRestDay(id) { setCfg(c => ({ ...c, restDays: c.restDays.filter(r => r.id !== id) })) }
-
-  if (loading || !cfg) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando...</div>
-
-  const branches = cfg.branches || []
 
   return (
-    <div className="p-4 md:p-6 max-w-2xl">
-      <div className="flex items-end justify-between mb-5">
+    <div className="space-y-4">
+      <div className="card space-y-3">
         <div>
-          <h1 className="text-2xl font-extrabold text-white">Configuración</h1>
-          <p className="text-gray-500 text-xs font-mono mt-0.5">PARÁMETROS DEL SISTEMA</p>
+          <label className="label">Nombre legal de la empresa</label>
+          <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Mi Empresa S.A. de C.V." />
+          <p className="text-[10px] text-gray-600 font-mono mt-1">Aparece en las cabeceras de reportes.</p>
         </div>
-        <button onClick={save} disabled={saving}
-          className="flex items-center gap-1.5 px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40">
-          {saving ? '...' : '✓ Guardar'}
-        </button>
-      </div>
-
-      {/* ── Logo de empresa ──────────────────────────────────────────────── */}
-      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Identidad de empresa</p>
-      <div className="card mb-4 space-y-3">
         <div>
-          <label className="label">Logo (URL de imagen)</label>
+          <label className="label">Logo principal (URL)</label>
           <input className="input text-sm" placeholder="https://tuempresa.com/logo.png"
-            value={cfg.logoUrl || ''}
-            onChange={e => F('logoUrl', e.target.value)} />
+            value={cfg.logoUrl || ''} onChange={e => F('logoUrl', e.target.value)} />
+          {cfg.logoUrl && (
+            <div className="mt-2 p-2 bg-dark-700 border border-dark-border rounded-xl inline-flex items-center gap-2">
+              <img src={cfg.logoUrl} alt="" className="h-10 w-auto object-contain" onError={e => { e.target.style.display='none' }} />
+              <span className="text-[10px] text-gray-500 font-mono">Vista previa</span>
+            </div>
+          )}
           <p className="text-[10px] text-gray-600 font-mono mt-1">
-            PNG o JPG, fondo transparente recomendado. Máx. 400×400px, menos de 100KB.
-            Aparece en el checador y en el encabezado de las nóminas.
+            Cada sucursal puede sobrescribir el logo para sus hojas impresas.
           </p>
         </div>
-        {cfg.logoUrl && (
-          <div className="flex items-center gap-3 p-3 bg-dark-700 border border-dark-border rounded-xl">
-            <img src={cfg.logoUrl} alt="Logo preview" className="h-12 w-auto object-contain rounded"
-              onError={e => { e.target.style.display='none' }} />
-            <p className="text-xs text-gray-500 font-mono">Vista previa del logo</p>
-          </div>
-        )}
         <div>
           <label className="label">Leyenda legal al pie de nóminas</label>
           <textarea className="input text-xs leading-relaxed" rows={4}
             value={cfg.payrollLegend ?? DEFAULT_LEYENDA}
-            onChange={e => F('payrollLegend', e.target.value)}
-            placeholder={DEFAULT_LEYENDA} />
+            onChange={e => F('payrollLegend', e.target.value)} placeholder={DEFAULT_LEYENDA} />
           <button onClick={() => F('payrollLegend', DEFAULT_LEYENDA)}
-            className="mt-1 text-[10px] text-gray-600 hover:text-gray-400 font-mono">
-            ↻ Restaurar texto por defecto
-          </button>
+            className="mt-1 text-[10px] text-gray-600 hover:text-gray-400 font-mono">↻ Restaurar texto por defecto</button>
         </div>
       </div>
 
-      {/* ── Active branches overview ────────────────────────────────────── */}
-      {branches.length > 0 && (
-        <>
-          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Sucursales activas</p>
-          <div className="grid grid-cols-2 gap-2 mb-4">
-            {branches.map(b => (
-              <div key={b.id} className="card-sm flex flex-col gap-1">
-                <div className="flex items-center justify-between gap-1">
-                  <span className="font-bold text-white text-sm truncate">{b.name}</span>
-                  <span className={`shrink-0 w-2 h-2 rounded-full ${b.ip ? 'bg-brand-400' : 'bg-gray-600'}`} title={b.ip ? 'WiFi configurado' : 'Solo GPS'} />
-                </div>
-                <div className="text-[10px] font-mono text-gray-500 space-y-0.5">
-                  <div>👥 {empCounts[b.id] || 0} empleado{(empCounts[b.id] || 0) !== 1 ? 's' : ''}</div>
-                  <div className={b.ip ? 'text-brand-400/70' : 'text-gray-600'}>
-                    {b.ip ? `🌐 ${b.ip}` : '🌐 Sin IP registrada'}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
+      <div className="card">
+        <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Tabla de vacaciones (LFT 2023)</p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs text-gray-400">Puedes aumentar los días si tu empresa da más beneficios (nunca menos).</p>
+          {cfg.vacationTable && (
+            <button onClick={resetVacTableToLFT} className="shrink-0 ml-2 px-2.5 py-1 bg-dark-700 border border-dark-border rounded-lg text-[10px] font-bold text-gray-400">↻ LFT default</button>
+          )}
+        </div>
+        <div className="grid grid-cols-3 gap-2 mb-1">
+          <span className="text-[10px] font-mono text-gray-500 uppercase">Desde</span>
+          <span className="text-[10px] font-mono text-gray-500 uppercase">Hasta</span>
+          <span className="text-[10px] font-mono text-gray-500 uppercase">Días</span>
+        </div>
+        <div className="space-y-1.5">
+          {getVacTable().map((row, idx) => (
+            <div key={idx} className="grid grid-cols-3 gap-2 items-center">
+              <input type="number" min="1" max="50" className="input py-1.5 text-sm text-center" value={row.fromYear}
+                onChange={e => setVacTableRow(idx, 'fromYear', e.target.value)} />
+              <input type="number" min="1" max="999" className="input py-1.5 text-sm text-center" value={row.toYear === 999 ? '∞' : row.toYear}
+                onChange={e => setVacTableRow(idx, 'toYear', e.target.value === '∞' ? 999 : e.target.value)} />
+              <input type="number" min="1" max="365" className="input py-1.5 text-sm text-center text-brand-400 font-bold" value={row.days}
+                onChange={e => setVacTableRow(idx, 'days', e.target.value)} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <button onClick={save} disabled={saving}
+        className="w-full md:w-auto flex items-center gap-1.5 px-5 py-2.5 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40">
+        {saving ? '...' : '✓ Guardar empresa'}
+      </button>
+    </div>
+  )
+}
+
+// ── Tab: Branches list ────────────────────────────────────────────────────────
+function BranchesTab({ branches, isOwner, myBranchId, onOpen, onChanged }) {
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+
+  async function createBranch() {
+    if (!newName.trim()) { toast.error('Nombre requerido'); return }
+    setCreating(true)
+    const r = await fetch('/api/branches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName.trim() })
+    })
+    const d = await r.json()
+    setCreating(false)
+    if (!r.ok) { toast.error(d.error || 'No se pudo crear la sucursal'); return }
+    toast.success('Sucursal creada')
+    setNewName('')
+    onChanged?.()
+  }
+
+  async function deleteBranch(id, name) {
+    if (!confirm(`¿Eliminar "${name}"?\n\nLos empleados y jornadas de esta sucursal se eliminarán en cascada.`)) return
+    const r = await fetch(`/api/branches/${id}`, { method: 'DELETE' })
+    const d = await r.json()
+    if (!r.ok) { toast.error(d.error || 'No se pudo eliminar'); return }
+    toast.success('Sucursal eliminada')
+    onChanged?.()
+  }
+
+  const visible = isOwner ? branches : branches.filter(b => b.id === myBranchId)
+
+  return (
+    <div className="space-y-3">
+      {visible.length === 0 && (
+        <div className="card text-center py-8 text-gray-600 text-sm font-mono">
+          <div className="text-3xl mb-2">🏢</div>
+          {isOwner ? 'Aún no hay sucursales. Crea la primera abajo.' : 'No tienes sucursal asignada.'}
+        </div>
       )}
 
-      {/* ── Sucursales + QR ─────────────────────────────────────────────── */}
-      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Sucursales y Códigos QR</p>
-      <div className="card mb-4">
-        <p className="text-xs text-gray-400 mb-4">
-          Cada sucursal tiene su propio código QR. Los empleados lo escanean con su celular para abrir el checador automáticamente.
-        </p>
-
-        {branches.length === 0 && (
-          <div className="text-center py-6 text-gray-600 text-sm font-mono">
-            <div className="text-3xl mb-2">🏢</div>
-            Aún no hay sucursales. Agrega la primera abajo.
+      {visible.map(b => (
+        <div key={b.id} className="card flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="font-bold text-white truncate">{b.name}</div>
+            <div className="text-[10px] text-gray-500 font-mono mt-0.5">
+              {b.config?.location?.name || 'Sin ubicación'}
+              {b.config?.ip ? <span className="text-brand-400/70"> · 🌐 {b.config.ip}</span> : null}
+            </div>
           </div>
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => onOpen(b.id)}
+              className="px-3 py-1.5 bg-brand-400 text-black text-xs font-bold rounded-lg active:brightness-90">
+              Abrir →
+            </button>
+            {isOwner && visible.length > 1 && (
+              <button onClick={() => deleteBranch(b.id, b.name)}
+                className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg" title="Eliminar">🗑</button>
+            )}
+          </div>
+        </div>
+      ))}
+
+      {isOwner && (
+        <div className="card">
+          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Agregar sucursal</p>
+          <div className="flex gap-2">
+            <input className="input text-sm flex-1" placeholder="Nombre (ej. Centro, Norte)"
+              value={newName} onChange={e => setNewName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && createBranch()} />
+            <button onClick={createBranch} disabled={creating}
+              className="px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40 shrink-0">
+              {creating ? '...' : '+ Crear'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Branch detail page ───────────────────────────────────────────────────────
+function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved }) {
+  const [name, setName] = useState(branch.name)
+  const [cfg, setCfg] = useState(branch.config || {})
+  const [saving, setSaving] = useState(false)
+  const [locating, setLocating] = useState(false)
+  const [newHol, setNewHol] = useState({ name: '', date: '' })
+  const [newRest, setNewRest] = useState({ name: '', date: '' })
+
+  const F = (k, v) => setCfg(c => ({ ...c, [k]: v }))
+  const FL = (k, v) => setCfg(c => ({ ...c, location: { ...(c.location || {}), [k]: v } }))
+  const FH = (day, k, v) => setCfg(c => ({ ...c, businessHours: { ...(c.businessHours || {}), [day]: { ...(c.businessHours?.[day] || {}), [k]: v } } }))
+
+  function captureLocation() {
+    if (!navigator.geolocation) { toast.error('Tu navegador no soporta geolocalización'); return }
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const { latitude, longitude, accuracy } = pos.coords
+        FL('lat', +latitude.toFixed(6))
+        FL('lng', +longitude.toFixed(6))
+        setLocating(false)
+        toast.success(`📍 Ubicación capturada (precisión ±${Math.round(accuracy)}m)`)
+      },
+      err => {
+        setLocating(false)
+        toast.error(err.code === 1
+          ? 'Permiso de ubicación denegado. Actívalo en el navegador.'
+          : 'No se pudo obtener la ubicación. Asegúrate de estar al aire libre.')
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    )
+  }
+
+  function addHoliday() {
+    if (!newHol.name || !newHol.date) { toast.error('Nombre y fecha'); return }
+    F('holidays', [...(cfg.holidays || []), { id: crypto.randomUUID(), name: newHol.name, date: newHol.date }])
+    setNewHol({ name: '', date: '' })
+  }
+  function removeHoliday(id) { F('holidays', (cfg.holidays || []).filter(h => h.id !== id)) }
+  function addRestDay() {
+    if (!newRest.name || !newRest.date) { toast.error('Nombre y fecha'); return }
+    F('restDays', [...(cfg.restDays || []), { id: crypto.randomUUID(), name: newRest.name, date: newRest.date }])
+    setNewRest({ name: '', date: '' })
+  }
+  function removeRestDay(id) { F('restDays', (cfg.restDays || []).filter(r => r.id !== id)) }
+
+  async function detectIp() {
+    try {
+      const r = await fetch('/api/check/ip')
+      const { ip } = await r.json()
+      F('ip', ip)
+      F('ipDetectedAt', new Date().toISOString())
+      toast.success(`IP registrada: ${ip}`)
+    } catch { toast.error('No se pudo detectar la IP') }
+  }
+
+  async function save() {
+    setSaving(true)
+    const body = { config: cfg }
+    if (canEditName && name.trim() && name !== branch.name) body.name = name.trim()
+    const r = await fetch(`/api/branches/${branch.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    const d = await r.json()
+    setSaving(false)
+    if (!r.ok) { toast.error(d.error || 'No se pudo guardar'); return }
+    toast.success('Sucursal guardada')
+    await onSaved?.()
+  }
+
+  const checkUrl = `${origin}/check?tenant=${tenantSlug}&branch=${branch.id}`
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(checkUrl)}&size=200x200&bgcolor=0d0d0d&color=3DFFA0&qzone=2`
+
+  return (
+    <div className="p-4 md:p-6 max-w-3xl">
+      <div className="flex items-center justify-between mb-4 gap-2">
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white">
+          ← Volver a sucursales
+        </button>
+        <button onClick={save} disabled={saving}
+          className="px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40">
+          {saving ? '...' : '✓ Guardar'}
+        </button>
+      </div>
+
+      <div className="mb-5">
+        {canEditName ? (
+          <input className="input text-2xl font-extrabold bg-transparent border-0 border-b border-dark-border rounded-none px-0 focus:border-brand-400"
+            value={name} onChange={e => setName(e.target.value)} />
+        ) : (
+          <h1 className="text-2xl font-extrabold text-white">{branch.name}</h1>
         )}
+        <p className="text-gray-500 text-xs font-mono mt-0.5">CONFIGURACIÓN DE ESTA SUCURSAL</p>
+      </div>
 
-        {branches.map(b => (
-          <div key={b.id} className="mb-5 pb-5 border-b border-dark-border last:border-0 last:mb-0 last:pb-0">
-            {/* Branch name row — with inline edit */}
-            <div className="flex items-center justify-between mb-3 gap-2">
-              {editingBranch?.id === b.id ? (
-                <>
-                  <input
-                    className="input text-sm flex-1 py-1.5"
-                    value={editingBranch.name}
-                    autoFocus
-                    onChange={e => setEditingBranch(eb => ({ ...eb, name: e.target.value }))}
-                    onKeyDown={e => { if (e.key === 'Enter') saveEditBranch(); if (e.key === 'Escape') setEditingBranch(null) }}
-                  />
-                  <button onClick={saveEditBranch} className="px-3 py-1.5 bg-brand-400 text-black text-xs font-bold rounded-lg active:brightness-90">✓</button>
-                  <button onClick={() => setEditingBranch(null)} className="px-3 py-1.5 bg-dark-700 border border-dark-border text-gray-400 text-xs font-bold rounded-lg">✕</button>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-bold text-white truncate">{b.name}</span>
-                    {empCounts[b.id] > 0 && (
-                      <span className="shrink-0 px-1.5 py-0.5 bg-brand-400/10 border border-brand-400/20 rounded-full text-brand-400 text-[9px] font-mono">
-                        {empCounts[b.id]} emp.
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={() => startEditBranch(b)}
-                      className="p-1.5 text-gray-400 text-xs active:bg-dark-700 rounded-lg" title="Editar nombre">✏️</button>
-                    <button onClick={() => removeBranch(b.id)}
-                      className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg">🗑</button>
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="flex gap-4 items-start">
-              {/* QR inline */}
-              <div className="shrink-0 p-2 bg-dark-700 border border-dark-border rounded-xl">
-                {tenantSlug
-                  ? <img src={branchQrImgSrc(b.id)} alt={`QR ${b.name}`} width={112} height={112} className="rounded-lg" />
-                  : <div className="w-28 h-28 flex items-center justify-center text-[10px] text-gray-600 text-center px-2">
-                      Guarda para ver QR
-                    </div>
-                }
-              </div>
-              <div className="flex-1 min-w-0 space-y-2">
-                {tenantSlug && (
-                  <p className="text-[10px] text-gray-500 font-mono break-all leading-relaxed">
-                    {branchCheckUrl(b.id)}
-                  </p>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={() => copyBranchUrl(b.id)}
-                    className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600">
-                    📋 Copiar URL
-                  </button>
-                  <button onClick={() => printBranchQr(b.id, b.name)}
-                    className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600">
-                    🖨️ Imprimir QR
-                  </button>
-                </div>
-                {/* WiFi / IP candado */}
-                <div className="mt-2 p-2.5 bg-dark-800 border border-dark-border rounded-xl">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">Red WiFi (2do candado)</p>
-                      {b.ip
-                        ? <p className="text-xs text-brand-400 font-mono mt-0.5">🌐 {b.ip} <span className="text-gray-600 text-[9px]">· {b.ipDetectedAt ? new Date(b.ipDetectedAt).toLocaleDateString('es-MX') : ''}</span></p>
-                        : <p className="text-[10px] text-gray-600 mt-0.5">Sin IP registrada — solo GPS activo</p>
-                      }
-                    </div>
-                    <button
-                      onClick={() => detectBranchIp(b.id)}
-                      disabled={detectingIp === b.id}
-                      className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600 disabled:opacity-40 shrink-0">
-                      {detectingIp === b.id ? '...' : b.ip ? '↻ Actualizar' : '📡 Detectar IP'}
-                    </button>
-                  </div>
-                  <p className="text-[9px] text-gray-600 font-mono mt-1.5">
-                    Toca "Detectar IP" mientras estés conectado al WiFi de esta sucursal.
-                  </p>
-                </div>
-
-                {/* Coverage pay mode */}
-                <div className="mt-2 p-2.5 bg-dark-800 border border-dark-border rounded-xl">
-                  <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider mb-2">Sueldo en coberturas</p>
-                  <div className="space-y-1.5">
-                    {[
-                      { value: 'covered', label: 'Sueldo del compañero cubierto', desc: 'El que cubre cobra la tarifa de quien está cubriendo' },
-                      { value: 'own', label: 'Sueldo propio siempre', desc: 'Cada quien cobra con su tarifa sin importar a quién cubre' },
-                      { value: 'lower', label: 'El más bajo de ambos', desc: 'Siempre la tarifa menor entre quien cubre y quien es cubierto' },
-                    ].map(opt => (
-                      <label key={opt.value} className="flex items-start gap-2.5 cursor-pointer">
-                        <input type="radio" name={`cov-${b.id}`} value={opt.value}
-                          checked={(b.coveragePayMode || 'covered') === opt.value}
-                          onChange={() => setBranchCoverage(b.id, opt.value)}
-                          className="mt-0.5 accent-brand-400 shrink-0" />
-                        <div>
-                          <p className="text-xs text-white font-semibold">{opt.label}</p>
-                          <p className="text-[9px] text-gray-500">{opt.desc}</p>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
+      {/* QR + URL */}
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Código QR para empleados</p>
+      <div className="card mb-4 flex gap-4 items-start">
+        <div className="shrink-0 p-2 bg-dark-700 border border-dark-border rounded-xl">
+          <img src={qrSrc} alt="QR" width={112} height={112} className="rounded-lg" />
+        </div>
+        <div className="flex-1 min-w-0 space-y-2">
+          <p className="text-[10px] text-gray-500 font-mono break-all leading-relaxed">{checkUrl}</p>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => navigator.clipboard.writeText(checkUrl).then(() => toast.success('URL copiada'))}
+              className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600">📋 Copiar URL</button>
+            <a href={checkUrl} target="_blank" rel="noreferrer"
+              className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600">↗ Abrir checador</a>
           </div>
-        ))}
-
-        {/* Add branch */}
-        <div className="flex gap-2 mt-3">
-          <input
-            className="input text-sm flex-1"
-            placeholder="Nombre de sucursal (ej. Centro, Norte...)"
-            value={newBranch}
-            onChange={e => setNewBranch(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && addBranch()}
-          />
-          <button onClick={addBranch}
-            className="px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 shrink-0">
-            + Agregar
-          </button>
-        </div>
-        <p className="text-[10px] text-gray-600 font-mono mt-2">
-          💾 Recuerda tocar "Guardar" para que las sucursales queden registradas.
-        </p>
-      </div>
-
-      {/* ── Tiempo ─────────────────────────────────────────────────────────── */}
-      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Tiempo y tolerancia</p>
-      <div className="card mb-4 space-y-3">
-        <div>
-          <label className="label">Tolerancia de entrada (minutos)</label>
-          <input className="input" type="number" min="0" max="60"
-            value={cfg.toleranceMinutes || 10} onChange={e => F('toleranceMinutes', parseInt(e.target.value) || 0)} />
-        </div>
-        <div>
-          <label className="label">Alerta jornada abierta (horas)</label>
-          <input className="input" type="number" min="1" max="24"
-            value={cfg.alertHours || 8} onChange={e => F('alertHours', parseInt(e.target.value) || 8)} />
-        </div>
-        <div>
-          <label className="label">Día de cierre de semana</label>
-          <select className="input" value={cfg.weekClosingDay || 'dom'} onChange={e => F('weekClosingDay', e.target.value)}>
-            {DAYS.map(d => <option key={d} value={d}>{DAY_FL[d]}</option>)}
-          </select>
         </div>
       </div>
 
-      {/* ── GPS ────────────────────────────────────────────────────────────── */}
-      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Ubicación GPS autorizada</p>
+      {/* GPS */}
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Ubicación GPS</p>
       <div className="card mb-4 space-y-3">
         <div>
           <label className="label">Nombre del lugar</label>
-          <input className="input" value={cfg.location?.name || ''} onChange={e => FL('name', e.target.value)} placeholder="Oficina Principal" />
+          <input className="input" value={cfg.location?.name || ''} onChange={e => FL('name', e.target.value)} placeholder="Oficina principal" />
         </div>
+
+        <button onClick={captureLocation} disabled={locating}
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40">
+          {locating ? '📡 Obteniendo...' : '📍 Usar mi ubicación actual'}
+        </button>
+        <p className="text-[10px] text-gray-600 font-mono -mt-2">
+          Párate en el punto exacto de la sucursal y toca el botón. Tu navegador pedirá permiso.
+        </p>
+
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="label">Latitud</label>
@@ -432,16 +422,41 @@ export default function SettingsPage() {
             <input className="input" type="number" step="any" value={cfg.location?.lng || ''} onChange={e => FL('lng', parseFloat(e.target.value) || 0)} />
           </div>
         </div>
+
         <div>
-          <label className="label">Radio permitido (metros)</label>
-          <input className="input" type="number" value={cfg.location?.radius || 300} onChange={e => FL('radius', parseInt(e.target.value) || 100)} />
-        </div>
-        <div className="bg-dark-700 border border-dark-border rounded-xl p-3 text-xs text-gray-500 font-mono">
-          💡 Para obtener las coordenadas: abre maps.google.com desde la sucursal, haz clic derecho en el punto exacto y copia las coordenadas.
+          <label className="label flex items-center justify-between">
+            <span>Radio permitido</span>
+            <span className="text-brand-400 font-mono text-sm">{cfg.location?.radius || 300} m</span>
+          </label>
+          <input type="range" min="30" max="1000" step="10"
+            value={cfg.location?.radius || 300} onChange={e => FL('radius', parseInt(e.target.value))}
+            className="w-full accent-brand-400" />
+          <div className="flex justify-between text-[10px] text-gray-600 font-mono mt-1">
+            <span>30 m</span><span>1 km</span>
+          </div>
         </div>
       </div>
 
-      {/* ── Horario del establecimiento ─────────────────────────────────────── */}
+      {/* Time & tolerance */}
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Tiempo y tolerancia</p>
+      <div className="card mb-4 space-y-3">
+        <div>
+          <label className="label">Tolerancia de entrada (minutos)</label>
+          <input className="input" type="number" min="0" max="60" value={cfg.toleranceMinutes ?? 10} onChange={e => F('toleranceMinutes', parseInt(e.target.value) || 0)} />
+        </div>
+        <div>
+          <label className="label">Alerta jornada abierta (horas)</label>
+          <input className="input" type="number" min="1" max="24" value={cfg.alertHours ?? 8} onChange={e => F('alertHours', parseInt(e.target.value) || 8)} />
+        </div>
+        <div>
+          <label className="label">Día de cierre de semana</label>
+          <select className="input" value={cfg.weekClosingDay || 'dom'} onChange={e => F('weekClosingDay', e.target.value)}>
+            {DAYS.map(d => <option key={d} value={d}>{DAY_FL[d]}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Business hours */}
       <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Horario del establecimiento</p>
       <div className="card mb-4">
         {DAYS.map(day => {
@@ -463,18 +478,13 @@ export default function SettingsPage() {
         })}
       </div>
 
-      {/* ── Días feriados ──────────────────────────────────────────────────── */}
-      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">
-        Días feriados <span className="normal-case text-gray-600">(pago ×3)</span>
-      </p>
+      {/* Holidays */}
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Días feriados <span className="normal-case text-gray-600">(pago ×3)</span></p>
       <div className="card mb-4">
         {(cfg.holidays || []).length === 0 && <p className="text-gray-600 text-xs font-mono mb-3">Sin feriados registrados</p>}
         {(cfg.holidays || []).map(h => (
           <div key={h.id} className="flex items-center justify-between py-2 border-b border-dark-border last:border-0">
-            <div>
-              <div className="font-semibold text-sm text-white">{h.name}</div>
-              <div className="text-xs text-gray-500 font-mono">{h.date} · ×3</div>
-            </div>
+            <div><div className="font-semibold text-sm text-white">{h.name}</div><div className="text-xs text-gray-500 font-mono">{h.date} · ×3</div></div>
             <button onClick={() => removeHoliday(h.id)} className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg">🗑</button>
           </div>
         ))}
@@ -482,23 +492,16 @@ export default function SettingsPage() {
           <input className="input text-sm py-2" placeholder="Nombre" value={newHol.name} onChange={e => setNewHol(f => ({ ...f, name: e.target.value }))} />
           <input className="input text-sm py-2" type="date" value={newHol.date} onChange={e => setNewHol(f => ({ ...f, date: e.target.value }))} />
         </div>
-        <button onClick={addHoliday} className="mt-2 w-full py-2 bg-dark-700 border border-dark-border rounded-xl text-xs font-bold text-white active:bg-dark-600">
-          + Agregar feriado
-        </button>
+        <button onClick={addHoliday} className="mt-2 w-full py-2 bg-dark-700 border border-dark-border rounded-xl text-xs font-bold text-white active:bg-dark-600">+ Agregar feriado</button>
       </div>
 
-      {/* ── Días de descanso colectivo ─────────────────────────────────────── */}
-      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">
-        Días de descanso colectivo <span className="normal-case text-gray-600">(día libre pagado)</span>
-      </p>
+      {/* Rest days */}
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Días de descanso colectivo <span className="normal-case text-gray-600">(día libre pagado)</span></p>
       <div className="card mb-4">
         {(cfg.restDays || []).length === 0 && <p className="text-gray-600 text-xs font-mono mb-3">Sin días registrados</p>}
         {(cfg.restDays || []).map(r => (
           <div key={r.id} className="flex items-center justify-between py-2 border-b border-dark-border last:border-0">
-            <div>
-              <div className="font-semibold text-sm text-white">{r.name}</div>
-              <div className="text-xs text-gray-500 font-mono">{r.date}</div>
-            </div>
+            <div><div className="font-semibold text-sm text-white">{r.name}</div><div className="text-xs text-gray-500 font-mono">{r.date}</div></div>
             <button onClick={() => removeRestDay(r.id)} className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg">🗑</button>
           </div>
         ))}
@@ -506,53 +509,147 @@ export default function SettingsPage() {
           <input className="input text-sm py-2" placeholder="Nombre" value={newRest.name} onChange={e => setNewRest(f => ({ ...f, name: e.target.value }))} />
           <input className="input text-sm py-2" type="date" value={newRest.date} onChange={e => setNewRest(f => ({ ...f, date: e.target.value }))} />
         </div>
-        <button onClick={addRestDay} className="mt-2 w-full py-2 bg-dark-700 border border-dark-border rounded-xl text-xs font-bold text-white active:bg-dark-600">
-          + Agregar día
+        <button onClick={addRestDay} className="mt-2 w-full py-2 bg-dark-700 border border-dark-border rounded-xl text-xs font-bold text-white active:bg-dark-600">+ Agregar día</button>
+      </div>
+
+      {/* WiFi / IP lock */}
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Red WiFi (2do candado)</p>
+      <div className="card mb-4">
+        <div className="flex items-center justify-between">
+          <div>
+            {cfg.ip
+              ? <p className="text-xs text-brand-400 font-mono">🌐 {cfg.ip}</p>
+              : <p className="text-[10px] text-gray-600">Sin IP registrada — solo GPS</p>}
+          </div>
+          <button onClick={detectIp} className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600">
+            {cfg.ip ? '↻ Actualizar' : '📡 Detectar'}
+          </button>
+        </div>
+        <p className="text-[9px] text-gray-600 font-mono mt-2">Toca "Detectar" mientras estés conectado al WiFi de esta sucursal.</p>
+      </div>
+
+      {/* Printing — owner only (manager has no preview anyway) */}
+      {canEditName && (
+        <>
+          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Hoja impresa de esta sucursal</p>
+          <div className="card mb-4 space-y-3">
+            <div>
+              <label className="label">Encabezado</label>
+              <input className="input text-sm" value={cfg.printHeader || ''} onChange={e => F('printHeader', e.target.value)} placeholder="Nombre de la sucursal" />
+            </div>
+            <div>
+              <label className="label">Texto legal</label>
+              <textarea className="input text-xs" rows={3} value={cfg.printLegalText || ''} onChange={e => F('printLegalText', e.target.value)} placeholder="Texto que aparece al pie de las hojas impresas de esta sucursal" />
+            </div>
+            <div>
+              <label className="label">Pie</label>
+              <input className="input text-sm" value={cfg.printFooter || ''} onChange={e => F('printFooter', e.target.value)} placeholder="Teléfono, dirección, etc." />
+            </div>
+          </div>
+        </>
+      )}
+
+      <button onClick={save} disabled={saving}
+        className="w-full flex items-center justify-center gap-1.5 px-5 py-3 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40">
+        {saving ? '...' : '✓ Guardar sucursal'}
+      </button>
+    </div>
+  )
+}
+
+// ── Tab: Team / invitations (owner-only) ─────────────────────────────────────
+function TeamTab({ branches, onChanged }) {
+  const [invs, setInvs] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [form, setForm] = useState({ email: '', branchId: branches[0]?.id || '' })
+  const [sending, setSending] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    const r = await fetch('/api/invite')
+    const d = await r.json()
+    setInvs(d.invitations || [])
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  async function invite() {
+    if (!form.email || !form.email.includes('@')) { toast.error('Correo inválido'); return }
+    if (!form.branchId) { toast.error('Elige una sucursal'); return }
+    setSending(true)
+    const r = await fetch('/api/invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: form.email, branchId: form.branchId })
+    })
+    const d = await r.json()
+    setSending(false)
+    if (!r.ok) {
+      toast.error(d.error || 'No se pudo invitar')
+      if (d.manualLink) {
+        navigator.clipboard.writeText(d.manualLink).then(() => toast('Link copiado — mándaselo manualmente', { icon: '📋' }))
+      }
+      return
+    }
+    toast.success('Invitación enviada')
+    setForm({ email: '', branchId: branches[0]?.id || '' })
+    load()
+  }
+
+  async function cancel(id) {
+    if (!confirm('¿Cancelar esta invitación?')) return
+    const r = await fetch(`/api/invite?id=${id}`, { method: 'DELETE' })
+    if (!r.ok) { toast.error('No se pudo cancelar'); return }
+    toast.success('Invitación cancelada')
+    load()
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="card space-y-3">
+        <p className="text-sm font-bold text-white">Invitar gerente</p>
+        <p className="text-xs text-gray-500">El gerente sólo podrá gestionar empleados, asistencia y nómina de su sucursal. No podrá crear sucursales ni cambiar la identidad de la empresa.</p>
+        <div>
+          <label className="label">Correo del gerente</label>
+          <input className="input" type="email" value={form.email} placeholder="gerente@tuempresa.com"
+            onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+        </div>
+        <div>
+          <label className="label">Sucursal asignada</label>
+          <select className="input" value={form.branchId} onChange={e => setForm(f => ({ ...f, branchId: e.target.value }))}>
+            <option value="">— Elegir sucursal —</option>
+            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+        <button onClick={invite} disabled={sending}
+          className="w-full md:w-auto px-5 py-2.5 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40">
+          {sending ? 'Enviando...' : 'Enviar invitación'}
         </button>
       </div>
 
-      {/* ── Tabla de vacaciones ────────────────────────────────────────────── */}
-      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">
-        Tabla de vacaciones <span className="normal-case text-gray-600">(días por año de antigüedad)</span>
-      </p>
-      <div className="card mb-4">
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-xs text-gray-400">
-            Base LFT 2023. Puedes aumentar los días si tu empresa da más beneficios que la ley (nunca menos).
-          </p>
-          {cfg.vacationTable && (
-            <button onClick={resetVacTableToLFT}
-              className="shrink-0 ml-2 px-2.5 py-1 bg-dark-700 border border-dark-border rounded-lg text-[10px] font-bold text-gray-400 active:bg-dark-600">
-              ↻ LFT default
-            </button>
-          )}
-        </div>
-        <div className="space-y-1.5">
-          <div className="grid grid-cols-3 gap-2 mb-1">
-            <span className="text-[10px] font-mono text-gray-500 uppercase">Desde año</span>
-            <span className="text-[10px] font-mono text-gray-500 uppercase">Hasta año</span>
-            <span className="text-[10px] font-mono text-gray-500 uppercase">Días</span>
-          </div>
-          {getVacTable().map((row, idx) => (
-            <div key={idx} className="grid grid-cols-3 gap-2 items-center">
-              <input type="number" min="1" max="50" className="input py-1.5 text-sm text-center"
-                value={row.fromYear}
-                onChange={e => setVacTableRow(idx, 'fromYear', e.target.value)} />
-              <input type="number" min="1" max="999" className="input py-1.5 text-sm text-center"
-                value={row.toYear === 999 ? '∞' : row.toYear}
-                onChange={e => setVacTableRow(idx, 'toYear', e.target.value === '∞' ? 999 : e.target.value)} />
-              <input type="number" min="1" max="365" className="input py-1.5 text-sm text-center text-brand-400 font-bold"
-                value={row.days}
-                onChange={e => setVacTableRow(idx, 'days', e.target.value)} />
+      <div>
+        <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Invitaciones activas</p>
+        {loading && <p className="text-xs text-gray-500 font-mono">Cargando...</p>}
+        {!loading && invs.length === 0 && <p className="text-xs text-gray-600 font-mono">Sin invitaciones activas.</p>}
+        {invs.map(i => {
+          const branch = branches.find(b => b.id === i.branch_id)
+          const expired = new Date(i.expires_at) < new Date()
+          return (
+            <div key={i.id} className="card flex items-center justify-between gap-2 mb-2">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-white truncate">{i.email}</div>
+                <div className="text-[10px] text-gray-500 font-mono">
+                  {branch?.name || 'Sucursal eliminada'} · {i.accepted_at ? '✓ Aceptada' : expired ? '⏱ Expirada' : '⏳ Pendiente'}
+                </div>
+              </div>
+              {!i.accepted_at && (
+                <button onClick={() => cancel(i.id)} className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg">🗑</button>
+              )}
             </div>
-          ))}
-        </div>
-        <p className="text-[9px] text-gray-600 font-mono mt-3">
-          💡 Art. 804 LFT: conserva registros de nómina por al menos 5 años.
-        </p>
+          )
+        })}
       </div>
-
-      <p className="text-center text-xs font-mono text-gray-600 mb-4">CheckPro v1.0 · SaaS · Todos los derechos reservados</p>
     </div>
   )
 }
