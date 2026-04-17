@@ -105,7 +105,7 @@ export default function EmployeesPage() {
   function openAdd() {
     const b = { ...DEF_BASE }
     setBase(b)
-    setForm({ schedule: buildSchedule(b), has_shift: true, can_manage: false, role_label: 'Empleado' })
+    setForm({ schedule: buildSchedule(b), has_shift: true, can_manage: false, role_label: 'Empleado', payment_type: 'efectivo', birth_date: '' })
     setSheet('add')
   }
 
@@ -134,6 +134,8 @@ export default function EmployeesPage() {
       can_manage: form.can_manage || false,
       has_shift: form.has_shift !== false,
       monthly_salary: parseFloat(form.monthly_salary) || 0,
+      payment_type: form.payment_type || 'efectivo',
+      birth_date: form.birth_date || null,
       schedule,
     }
     try {
@@ -172,6 +174,8 @@ export default function EmployeesPage() {
       schedule,
       branch_id: emp.schedule?.branch?.id || '',
       hireDate: emp.schedule?.hireDate || '',
+      payment_type: emp.payment_type || 'efectivo',
+      birth_date: emp.birth_date || '',
     })
     setSheet('edit')
   }
@@ -357,6 +361,21 @@ export default function EmployeesPage() {
                 <div>
                   <label className="label">Salario mensual ($)</label>
                   <input className="input" type="number" inputMode="decimal" value={form.monthly_salary || ''} onChange={e => F('monthly_salary', e.target.value)} placeholder="15000" />
+                </div>
+
+                <div>
+                  <label className="label">Tipo de pago</label>
+                  <select className="input" value={form.payment_type || 'efectivo'} onChange={e => F('payment_type', e.target.value)}>
+                    <option value="efectivo">Efectivo</option>
+                    <option value="transferencia">Transferencia</option>
+                  </select>
+                  <p className="text-[10px] text-gray-600 font-mono mt-1">Aparecerá en los recibos firmados. Los cambios solo afectan nuevos pagos.</p>
+                </div>
+
+                <div>
+                  <label className="label">Fecha de nacimiento <span className="text-gray-600 font-normal">(opcional)</span></label>
+                  <input className="input" type="date" value={form.birth_date || ''} onChange={e => F('birth_date', e.target.value)} />
+                  <p className="text-[10px] text-gray-600 font-mono mt-1">Se usa para felicitarlo el día de su cumpleaños.</p>
                 </div>
 
                 <div>
