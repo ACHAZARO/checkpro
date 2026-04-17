@@ -1,6 +1,6 @@
 // src/lib/utils.js
 import { clsx } from 'clsx'
-import { formatInTimeZone, zonedTimeToUtc } from 'date-fns-tz'
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 
 export function cn(...inputs) { return clsx(inputs) }
 
@@ -65,7 +65,7 @@ export function classifyEntry(schedule, entryTime, toleranceMinutes, tz = DEFAUL
   const s = schedule?.[dk]
   if (!s?.work) return { type:'no_laboral', label:'Día no laboral' }
   const dateStr = isoDate(entryTime, tz)
-  const refUtc = zonedTimeToUtc(`${dateStr}T${s.start}:00`, tz)
+  const refUtc = fromZonedTime(`${dateStr}T${s.start}:00`, tz)
   const diff = Math.round((new Date(entryTime) - refUtc) / 60000)
   if (diff <= 0) return { type:'puntual', label:'Puntual' }
   if (diff <= toleranceMinutes) return { type:'tolerancia', label:`Tolerancia (${diff} min)` }
@@ -90,10 +90,10 @@ export function weekRange(refDate, closingDay, tz = DEFAULT_TZ) {
   const endLocal = new Date(`${refIso}T00:00:00`)
   endLocal.setDate(endLocal.getDate() + daysForward)
   const endIso = formatInTimeZone(endLocal, tz, 'yyyy-MM-dd')
-  const end = zonedTimeToUtc(`${endIso}T23:59:59.999`, tz)
+  const end = fromZonedTime(`${endIso}T23:59:59.999`, tz)
   const startLocal = new Date(endLocal); startLocal.setDate(startLocal.getDate() - 6)
   const startIso = formatInTimeZone(startLocal, tz, 'yyyy-MM-dd')
-  const start = zonedTimeToUtc(`${startIso}T00:00:00`, tz)
+  const start = fromZonedTime(`${startIso}T00:00:00`, tz)
   return { start, end }
 }
 
@@ -107,7 +107,7 @@ export function scheduledExitDate(dateStr, employee, tz = DEFAULT_TZ) {
   const dk = dayKey(`${dateStr}T12:00:00Z`, tz)
   const s = employee.schedule?.[dk]
   if (!s?.work || !s.end) return null
-  return zonedTimeToUtc(`${dateStr}T${s.end}:00`, tz)
+  return fromZonedTime(`${dateStr}T${s.end}:00`, tz)
 }
 
 // ── Vacaciones (LFT 2023) ─────────────────────────────────────────────────────
