@@ -38,7 +38,7 @@ export async function POST(req) {
 
     const { data: emp } = await supabase
       .from('employees')
-      .select('id,name')
+      .select('id,name,birth_date,can_manage')
       .eq('tenant_id', tenantId)
       .eq('employee_code', code)
       .eq('status', 'active')
@@ -66,7 +66,7 @@ export async function POST(req) {
 
     return NextResponse.json({
       found: true,
-      employee: { id: emp.id, name: emp.name },
+      employee: { id: emp.id, name: emp.name, birth_date: emp.birth_date, can_manage: emp.can_manage },
       openShift: openShift ? { id: openShift.id, entry_time: openShift.entry_time } : null,
       allEmployees: coverageList || [],
     })
