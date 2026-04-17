@@ -1,6 +1,7 @@
 'use client'
 // src/app/dashboard/employees/page.js
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import {
   DAYS, DAY_L, monthlyToHourly, generateEmployeeCode,
@@ -303,6 +304,9 @@ export default function EmployeesPage() {
                     )}
                   </div>
                   <div className="flex flex-col gap-1.5 shrink-0">
+                    <Link href={`/dashboard/employees/${emp.id}`}
+                      className="p-2 bg-brand-400/10 border border-brand-400/30 rounded-lg text-brand-400 active:bg-brand-400/20 text-xs text-center"
+                      title="Ver detalle">👁</Link>
                     <button onClick={() => openEdit(emp)}
                       className="p-2 bg-dark-700 border border-dark-border rounded-lg text-gray-400 active:bg-dark-600 text-xs">✏️</button>
                     <button onClick={() => deactivate(emp)}
