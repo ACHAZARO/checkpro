@@ -403,7 +403,18 @@ export default function PayrollPage() {
       shift_ids: uncutShifts.map(s => s.id)
     }).select().single()
     if (error) { toast.error('Error al cerrar semana'); setClosing(false); return }
-    await supabase.from('shifts').update({ week_cut_id: cut.id }).in('id', uncutShifts.map(s => s.id))
+    // FIX: antes se swallowed el error — si week_cut_id no se pega a los shifts,
+    // el week_cut existe pero la proxima semana re-incluye los mismos turnos =
+    // doble pago. Surface con toast.error y rollback del week_cut.
+    const { error: linkErr } = await supabase.from('shifts').update({ week_cut_id: cut.id }).in('id', uncutShifts.map(s => s.id))
+    if (linkErr) {
+      console.error('[payroll] link shifts→week_cut error:', linkErr)
+      // Rollback: borrar el week_cut recien creado para que no quede huerfano.
+      await supabase.from('week_cuts').delete().eq('id', cut.id)
+      toast.error(`No se pudo vincular los turnos: ${linkErr.message}`)
+      setClosing(false)
+      return
+    }
     await supabase.from('audit_log').insert({
       tenant_id: tenantId, action: 'WEEK_CUT', employee_name: 'Gerente',
       detail: `${startStr}→${endStr}`, success: true

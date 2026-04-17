@@ -278,11 +278,17 @@ export async function POST(req) {
     const overtimeCorrections = overtimeHours > 0
       ? { overtime: { hours: overtimeHours, minutes: overtimeMinutes, calculatedAt: now } } : {}
 
-    await supabase.from('shifts').update({
+    // FIX: antes se swallowed el error — si la update fallaba, el empleado
+    // recibia "salida registrada" pero el shift seguia open y podia re-checar.
+    const { error: outErr } = await supabase.from('shifts').update({
       exit_time: now, duration_hours: duration, status: newStatus, geo_exit: safeGeo,
       incidents: [...prevIncidents, ...newIncidents],
       corrections: { ...(openShift.corrections || {}), exitIp: currentIp, ...overtimeCorrections },
     }).eq('id', openShift.id)
+    if (outErr) {
+      console.error('[check/punch] exit update error:', outErr)
+      return NextResponse.json({ error: 'No se pudo registrar la salida', detail: outErr.message }, { status: 500 })
+    }
 
     await supabase.from('audit_log').insert({
       tenant_id: tenantId, action: 'CHK_OUT',

@@ -36,7 +36,9 @@ export async function POST(req) {
       both: 'Salió del perímetro GPS y de la red WiFi',
     }[reason] || 'Abandonó la sucursal'
 
-    await supabase.from('shifts').update({
+    // FIX: antes se swallowed el error — si la update fallaba, el shift seguia
+    // open y el audit log decia success:true falsamente.
+    const { error: upErr } = await supabase.from('shifts').update({
       exit_time: exitTime,
       duration_hours: Math.max(0, duration),
       status: 'incident',
@@ -49,6 +51,17 @@ export async function POST(req) {
         autoClose: true,
       }],
     }).eq('id', openShift.id)
+    if (upErr) {
+      console.error('[check/abandon] update error:', upErr)
+      await supabase.from('audit_log').insert({
+        tenant_id: tenantId,
+        action: 'AUTO_CLOSE',
+        employee_id: employeeId,
+        detail: `FALLO al auto-cerrar: ${upErr.message}`,
+        success: false,
+      })
+      return NextResponse.json({ ok: false, msg: 'Error al cerrar turno', detail: upErr.message }, { status: 500 })
+    }
 
     await supabase.from('audit_log').insert({
       tenant_id: tenantId,
