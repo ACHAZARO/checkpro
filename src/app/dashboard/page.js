@@ -12,10 +12,25 @@ function daysUntilBirthday(iso) {
   if (parts.length !== 3) return null
   const m = parseInt(parts[1], 10) - 1
   const d = parseInt(parts[2], 10)
+  if (!Number.isFinite(m) || !Number.isFinite(d)) return null
   const today = new Date()
   today.setHours(0, 0, 0, 0)
-  let next = new Date(today.getFullYear(), m, d)
-  if (next < today) next = new Date(today.getFullYear() + 1, m, d)
+
+  // BUG 10: Feb 29 en anio no bisiesto -> JS hace overflow a 1-marzo.
+  // Para 29/02 bajamos a 28/02 en anios no bisiestos. Tambien validamos
+  // que el dia resultante en el mes objetivo coincida (si no, reajustar).
+  function buildBirthdayIn(year) {
+    const candidate = new Date(year, m, d)
+    // Si JS hizo overflow (ej: 29/feb en no-bisiesto -> 1/mar),
+    // regresamos el ultimo dia del mes objetivo.
+    if (candidate.getMonth() !== m) {
+      return new Date(year, m + 1, 0) // ultimo dia del mes m
+    }
+    return candidate
+  }
+
+  let next = buildBirthdayIn(today.getFullYear())
+  if (next < today) next = buildBirthdayIn(today.getFullYear() + 1)
   const diff = Math.round((next - today) / (1000 * 60 * 60 * 24))
   return diff
 }
@@ -93,9 +108,9 @@ export default function DashboardPage() {
     async function load() {
       const supabase = createClient()
       const { data: { session } } = await supabase.auth.getSession()
-      if (!session) return
+      if (!session) { setLoading(false); return }
       const { data: profile } = await supabase.from('profiles').select('tenant_id').eq('id', session.user.id).single()
-      if (!profile?.tenant_id) return
+      if (!profile?.tenant_id) { setLoading(false); return }
       setTenantId(profile.tenant_id)
 
       const today = isoDate(now)

@@ -18,6 +18,12 @@ export const fmtDT = d => d ? `${fmtDate(d)} ${fmtTime(d)}` : ''
 // CAMBIO — isoDate usa TZ (no UTC); clave para México-5/-6
 export const isoDate = (d, tz = DEFAULT_TZ) => formatInTimeZone(new Date(d), tz, 'yyyy-MM-dd')
 
+// Fecha HOY en TZ America/Mexico_City como 'YYYY-MM-DD'.
+// Vercel corre UTC; usar este helper en cualquier comparacion de fechas-dia.
+export function todayISOMX(tz = DEFAULT_TZ) {
+  return formatInTimeZone(new Date(), tz, 'yyyy-MM-dd')
+}
+
 export const diffMin = (a,b) => Math.round((new Date(b)-new Date(a))/60000)
 export const diffHrs = (a,b) => (new Date(b)-new Date(a))/3600000
 

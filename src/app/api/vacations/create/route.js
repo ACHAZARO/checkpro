@@ -10,6 +10,7 @@ import {
   checkLFTWarnings,
   LFT_2023_DEFAULT,
 } from '@/lib/vacations'
+import { todayISOMX } from '@/lib/utils'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -53,11 +54,6 @@ function addDaysLocal(date, n) {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
   d.setDate(d.getDate() + n)
   return d
-}
-
-function todayISO() {
-  const t = new Date()
-  return toISODate(new Date(t.getFullYear(), t.getMonth(), t.getDate()))
 }
 
 // Calcula end_date sumando N dias laborales (segun schedule) a partir de start_date.
@@ -117,19 +113,56 @@ export async function POST(req) {
   const vacTable = tenant?.config?.vacation_table || tenant?.config?.vacationTable || null
   const holidays = Array.isArray(tenant?.config?.holidays) ? tenant.config.holidays : []
 
-  // anniversary_year: si no viene, usar yearsWorked + 1
-  let anniversary_year = Number.isFinite(body.anniversary_year) ? body.anniversary_year : null
+  // anniversary_year: tolerar number o string numerico
+  const annivRaw = Number(body.anniversary_year)
+  let anniversary_year = Number.isFinite(annivRaw) && annivRaw > 0 ? Math.floor(annivRaw) : null
   if (!anniversary_year) {
     const info = anniversaryInfo(employee.hire_date, new Date())
     anniversary_year = (info?.yearsWorked || 0) + 1
   }
 
-  // entitled_days
-  const entitled_days = daysForYear(anniversary_year, vacTable)
+  // BUG 7: evitar duplicados por (employee_id, anniversary_year) cuando no estan cancelled/expired.
+  {
+    const { data: existing } = await admin
+      .from('vacation_periods')
+      .select('id, status, tipo')
+      .eq('tenant_id', profile.tenant_id)
+      .eq('employee_id', employee.id)
+      .eq('anniversary_year', anniversary_year)
+      .not('status', 'in', '(cancelled,expired)')
+      .limit(1)
+      .maybeSingle()
+    if (existing) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'duplicate_anniversary',
+          msg: `Ya existe un periodo activo para el aniversario ${anniversary_year}.`,
+          existing_period_id: existing.id,
+        },
+        { status: 409 }
+      )
+    }
+  }
+
+  // BUG 8: aceptar entitled_days del cliente si viene (override de la tabla).
+  // Si no viene, derivar de la tabla.
+  const entitledRaw = Number(body.entitled_days)
+  const entitled_days = Number.isFinite(entitledRaw) && entitledRaw > 0
+    ? Math.floor(entitledRaw)
+    : daysForYear(anniversary_year, vacTable)
   const ltfBaseline = daysForYear(anniversary_year, LFT_2023_DEFAULT)
 
-  // prima_pct default 25
-  const prima_pct = Number.isFinite(body.prima_pct) ? Number(body.prima_pct) : 25
+  // BUG 12: prima_pct debe quedar [0, 100]; NaN -> 25 (default LFT).
+  let prima_pct = 25
+  if (body.prima_pct !== undefined && body.prima_pct !== null && body.prima_pct !== '') {
+    const raw = Number(body.prima_pct)
+    if (!Number.isFinite(raw)) {
+      prima_pct = 25
+    } else {
+      prima_pct = Math.max(0, Math.min(100, raw))
+    }
+  }
 
   const warnings = checkLFTWarnings({
     entitledDays: entitled_days,
@@ -161,7 +194,7 @@ export async function POST(req) {
       const prelim = computeEndDateFromSchedule(start_date, entitled_days, employee.schedule)
       end_date = extendForHolidays(start_date, prelim, holidays)
     }
-    const today = todayISO()
+    const today = todayISOMX()
     const isActive = start_date <= today && today <= end_date
     row.start_date = start_date
     row.end_date = end_date
@@ -171,8 +204,21 @@ export async function POST(req) {
     row.status = 'postponed'
   } else if (tipo === 'compensadas') {
     const compensated_days = Number(body.compensated_days)
-    if (!Number.isFinite(compensated_days) || compensated_days <= 0) {
-      return NextResponse.json({ ok: false, error: 'compensated_days requerido' }, { status: 400 })
+    if (!Number.isFinite(compensated_days) || compensated_days <= 0 || !Number.isInteger(compensated_days)) {
+      return NextResponse.json(
+        { ok: false, error: 'compensated_days debe ser entero positivo' },
+        { status: 400 }
+      )
+    }
+    // BUG 12: compensated_days <= entitled_days.
+    if (compensated_days > entitled_days) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `compensated_days (${compensated_days}) no puede exceder entitled_days (${entitled_days})`,
+        },
+        { status: 400 }
+      )
     }
     // payment_type: body > employee.payment_type > schedule.payment_type > 'efectivo'
     const payment_type = body.payment_type

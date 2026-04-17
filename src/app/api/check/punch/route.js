@@ -1,7 +1,7 @@
 // src/app/api/check/punch/route.js
 import { createServiceClient } from '@/lib/supabase'
 import { NextResponse } from 'next/server'
-import { classifyEntry, isoDate, diffHrs, calcOvertimeHours, scheduledExitDate, haversineMeters } from '@/lib/utils'
+import { classifyEntry, isoDate, diffHrs, calcOvertimeHours, scheduledExitDate, haversineMeters, todayISOMX } from '@/lib/utils'
 import { rateLimit } from '@/lib/rate-limit'
 import crypto from 'crypto'
 
@@ -121,6 +121,46 @@ export async function POST(req) {
     const safeGeo = { lat: geo?.lat ?? null, lng: geo?.lng ?? null, dist, accuracy: geo?.accuracy ?? null, verified: true }
 
     if (action === 'in') {
+      // BUG 5: revalidar vacaciones server-side. El bloqueo de cliente puede ser
+      // saltado via DevTools/fetch directo. Si hay un periodo active que cubre HOY
+      // (MX TZ), rechazar la entrada. El cliente ya sabe reaccionar al codigo
+      // 'on_vacation' mostrando el modal de reincorporacion temprana.
+      const todayMX = todayISOMX(tz)
+      const { data: activeVac } = await supabase
+        .from('vacation_periods')
+        .select('id, start_date, end_date, entitled_days, tipo, status')
+        .eq('tenant_id', tenantId)
+        .eq('employee_id', emp.id)
+        .eq('status', 'active')
+        .lte('start_date', todayMX)
+        .gte('end_date', todayMX)
+        .maybeSingle()
+      if (activeVac) {
+        await supabase.from('audit_log').insert({
+          tenant_id: tenantId,
+          action: 'CHK_IN_REJ_VAC',
+          employee_id: emp.id,
+          employee_name: emp.name,
+          detail: `Intento de entrada durante vacaciones (periodo ${activeVac.id}, ${activeVac.start_date} -> ${activeVac.end_date})`,
+          success: false,
+        })
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'on_vacation',
+            msg: 'Estas en periodo de vacaciones. Si te reincorporas temprano, usa el modal del checador.',
+            period: {
+              id: activeVac.id,
+              start_date: activeVac.start_date,
+              end_date: activeVac.end_date,
+              entitled_days: activeVac.entitled_days,
+              tipo: activeVac.tipo,
+            },
+          },
+          { status: 409 }
+        )
+      }
+
       const classification = classifyEntry(emp.schedule || {}, now, cfg.toleranceMinutes || 10, tz)
       const holidays = cfg.holidays || []
       const holiday = holidays.find(h => h.date === dateStr)

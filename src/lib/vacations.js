@@ -238,6 +238,13 @@ export function extendForHolidays(startDate, endDate, holidays) {
  * Calcula el monto a pagar cuando un empleado COMPENSA dias de
  * vacaciones (los trabaja en lugar de descansar). Pago doble.
  *
+ * BUG 4: salario diario para vacaciones/LFT = monthly_salary / 30 (regla
+ * LFT art. 89). NO dividir entre workDaysPerMonth (22/17/etc), ya que
+ * jornadas <5 dias inflan el diario artificialmente.
+ *
+ * Se preserva workDaysPerMonth en el retorno por compatibilidad con UI/
+ * metricas, pero ya no se usa para dailyRate.
+ *
  * @param {Object} employee - debe traer monthly_salary y opcionalmente schedule
  * @param {number} days
  * @returns {{
@@ -260,11 +267,11 @@ export function computeCompensationAmount(employee, days) {
       if (day && day.work) workDaysPerWeek += 1
     }
   }
-  // Equivalente mensual: 22 dias por defecto
   const workDaysPerMonth = workDaysPerWeek > 0
     ? Math.round((workDaysPerWeek * 52) / 12)
     : 22
-  const dailyRate = workDaysPerMonth > 0 ? salary / workDaysPerMonth : 0
+  // LFT art. 89: salario diario = mensual / 30.
+  const dailyRate = salary / 30
   const doubleRate = dailyRate * 2
   const amount = doubleRate * days
   return {

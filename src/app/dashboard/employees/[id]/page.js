@@ -155,6 +155,21 @@ export default function EmployeeDetailPage() {
 
   useEffect(() => { load() }, [load])
 
+  // BUG 9: auto-calcular end_date cuando cambian start_date o entitled_days
+  // en el modal "Tomar". No usar closures con el valor stale; usar effect.
+  useEffect(() => {
+    if (sheet !== 'tomar') return
+    const sd = form.start_date
+    const ed = Number(form.entitled_days)
+    if (!sd || !Number.isFinite(ed) || ed <= 0) return
+    const newEnd = addDaysISO(sd, Math.max(0, ed - 1))
+    if (newEnd && newEnd !== form.end_date) {
+      setForm(prev => ({ ...prev, end_date: newEnd }))
+    }
+    // Solo corremos cuando cambian start_date o entitled_days (no end_date manual).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheet, form.start_date, form.entitled_days])
+
   // ── derivados ──────────────────────────────────────────────────────────────
   const employee = data?.employee || null
   const anniv = data?.anniversaryInfo || null
@@ -238,6 +253,8 @@ export default function EmployeeDetailPage() {
         body: JSON.stringify({
           employee_id: employeeId,
           tipo: 'tomadas',
+          anniversary_year: Number(form.anniversary_year) || undefined,
+          entitled_days: Number(form.entitled_days) || undefined,
           start_date: form.start_date,
           end_date: form.end_date,
           prima_pct: Number(form.prima_pct) || 25,
@@ -265,6 +282,7 @@ export default function EmployeeDetailPage() {
         body: JSON.stringify({
           employee_id: employeeId,
           tipo: 'pospuestas',
+          anniversary_year: Number(form.anniversary_year) || undefined,
           notes: form.notes || null,
         }),
       })
@@ -291,6 +309,8 @@ export default function EmployeeDetailPage() {
         body: JSON.stringify({
           employee_id: employeeId,
           tipo: 'compensadas',
+          anniversary_year: Number(form.anniversary_year) || undefined,
+          entitled_days: Number(form.entitled_days) || undefined,
           compensated_days: days,
           payment_type: form.payment_type || 'efectivo',
           prima_pct: Number(form.prima_pct) || 25,
@@ -623,11 +643,12 @@ export default function EmployeeDetailPage() {
                 onChange={e => {
                   const y = Number(e.target.value)
                   const found = periods.find(p => p.anniversary_year === y && ['pending','postponed'].includes(p.status))
-                  F('anniversary_year', y)
-                  if (found?.entitled_days) {
-                    F('entitled_days', found.entitled_days)
-                    F('end_date', addDaysISO(form.start_date || todayISO(), Math.max(0, Number(found.entitled_days) - 1)))
-                  }
+                  // BUG 9: usar updater funcional; el useEffect sincroniza end_date.
+                  setForm(prev => ({
+                    ...prev,
+                    anniversary_year: y,
+                    entitled_days: found?.entitled_days || prev.entitled_days,
+                  }))
                 }}>
                 {pendingOrPostponed.filter(p => p.tipo !== 'compensadas').map(p => (
                   <option key={p.id} value={p.anniversary_year}>
@@ -649,13 +670,7 @@ export default function EmployeeDetailPage() {
             <div>
               <label className="label">Fecha inicio</label>
               <input type="date" className="input" value={form.start_date || ''}
-                onChange={e => {
-                  const v = e.target.value
-                  F('start_date', v)
-                  if (form.entitled_days && v) {
-                    F('end_date', addDaysISO(v, Math.max(0, Number(form.entitled_days) - 1)))
-                  }
-                }} />
+                onChange={e => F('start_date', e.target.value)} />
             </div>
             <div>
               <label className="label">Fecha fin</label>

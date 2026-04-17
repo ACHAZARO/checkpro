@@ -5,24 +5,14 @@ import { createClient } from '@/lib/supabase'
 import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
-// ── Calculo de salario diario a partir del schedule del empleado ──────────
-// Usamos el mismo criterio que lib/vacations.js computeCompensationAmount:
-// workDaysPerMonth = round(workDaysPerWeek * 52 / 12), fallback 22.
+// ── Calculo de salario diario para PAGO DE VACACIONES ─────────────────────
+// BUG 4: LFT art. 89 dicta salario diario = monthly_salary / 30.
+// Se usa 30 fijo (no workDaysPerWeek*52/12) para que jornadas de <5 dias
+// no inflen el diario. Coincide con lib/vacations.js computeCompensationAmount.
 function computeDailyRate(emp) {
   if (!emp) return 0
   const salary = Number(emp.monthly_salary) || 0
-  let workDaysPerWeek = 0
-  const sched = emp.schedule
-  if (sched && typeof sched === 'object') {
-    for (const k of Object.keys(sched)) {
-      const day = sched[k]
-      if (day && day.work) workDaysPerWeek += 1
-    }
-  }
-  const workDaysPerMonth = workDaysPerWeek > 0
-    ? Math.round((workDaysPerWeek * 52) / 12)
-    : 22
-  return workDaysPerMonth > 0 ? salary / workDaysPerMonth : 0
+  return salary / 30
 }
 
 // Numero de dias entre dos fechas ISO (inclusive) que intersectan [aStart, aEnd]

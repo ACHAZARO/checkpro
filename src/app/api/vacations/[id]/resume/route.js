@@ -3,6 +3,7 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase-server'
 import { extendForHolidays } from '@/lib/vacations'
+import { todayISOMX } from '@/lib/utils'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -46,11 +47,6 @@ function addDaysLocal(date, n) {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
   d.setDate(d.getDate() + n)
   return d
-}
-
-function todayISO() {
-  const t = new Date()
-  return toISODate(new Date(t.getFullYear(), t.getMonth(), t.getDate()))
 }
 
 function computeEndDateFromSchedule(startISO, workingDays, schedule) {
@@ -118,7 +114,7 @@ export async function POST(req, { params }) {
     end_date = extendForHolidays(start_date, prelim, holidays)
   }
 
-  const today = todayISO()
+  const today = todayISOMX()
   const isActive = start_date <= today && today <= end_date
   const newStatus = isActive ? 'active' : (start_date > today ? 'pending' : 'completed')
   const patch = { status: newStatus, start_date, end_date }

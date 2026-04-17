@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { rateLimit } from '@/lib/rate-limit'
+import { todayISOMX } from '@/lib/utils'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -38,11 +39,6 @@ function addDaysLocal(date, n) {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
   d.setDate(d.getDate() + n)
   return d
-}
-
-function todayISO() {
-  const t = new Date()
-  return toISODate(new Date(t.getFullYear(), t.getMonth(), t.getDate()))
 }
 
 function formatDMY(iso) {
@@ -145,8 +141,29 @@ export async function POST(req, { params }) {
       )
     }
 
-    const return_date = todayISO()
+    const return_date = todayISOMX()
     const returnD = parseISODateLocal(return_date)
+
+    // BUG 11: validar return_date dentro de [start_date+1, end_date+1].
+    // return_date = end_date+1 significa "regreso el mismo dia que termina"
+    // (caso degenerado; end_date queda igual). return_date <= start_date
+    // haria end_date anterior a start_date, invalido.
+    const periodStart = parseISODateLocal(period.start_date)
+    const periodEnd = parseISODateLocal(period.end_date)
+    if (!periodStart || !periodEnd) {
+      return NextResponse.json({ ok: false, error: 'Periodo con fechas invalidas' }, { status: 400 })
+    }
+    const maxReturn = addDaysLocal(periodEnd, 1)
+    if (returnD <= periodStart || returnD > maxReturn) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Fecha de reincorporacion fuera del rango del periodo',
+        },
+        { status: 400 }
+      )
+    }
+
     const newEndISO = toISODate(addDaysLocal(returnD, -1))
 
     const existingNotes = period.notes ? `${period.notes} | ` : ''

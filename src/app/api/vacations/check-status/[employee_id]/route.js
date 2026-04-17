@@ -1,21 +1,20 @@
 // src/app/api/vacations/check-status/[employee_id]/route.js
 // Endpoint PUBLICO (sin auth de gerente) para el checador.
 // Devuelve si el empleado esta en un periodo de vacaciones activo hoy.
-// Protegido solo por tenant_id (el checador ya tiene el tenant_id en localStorage
-// porque escaneo el QR de su sucursal).
+// Protegido por tenant_id (del QR de la sucursal) + validacion explicita
+// de que el employee_id pertenece a ese tenant (anti cross-tenant leak).
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
+import { todayISOMX } from '@/lib/utils'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-function todayISO() {
-  // Fecha local del servidor en formato YYYY-MM-DD (TZ MX por default del server)
-  const t = new Date()
-  const y = t.getFullYear()
-  const m = String(t.getMonth() + 1).padStart(2, '0')
-  const d = String(t.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
+function getClientIp(req) {
+  const xff = req.headers.get('x-forwarded-for')
+  if (xff) return xff.split(',')[0].trim()
+  return req.headers.get('x-real-ip') || req.headers.get('cf-connecting-ip') || 'unknown'
 }
 
 export async function GET(req, { params }) {
@@ -31,8 +30,39 @@ export async function GET(req, { params }) {
       )
     }
 
+    // Rate-limit: 30 requests / 5 min por (tenant, IP, employee).
+    // Protege contra enumeracion cross-tenant y scraping.
+    const ip = getClientIp(req)
+    const rl = rateLimit(`vac_check_status:${tenantId}:${ip}:${employeeId}`, 30, 5 * 60_000)
+    if (!rl.ok) {
+      return NextResponse.json(
+        { ok: false, error: `Demasiados intentos. Espera ${Math.ceil(rl.retryAfter / 60)} min.` },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } }
+      )
+    }
+
     const admin = createServiceClient()
-    const today = todayISO()
+
+    // 1) Verificar que employee_id pertenezca al tenant_id declarado.
+    //    Si no, devolver la misma respuesta que si no hubiera periodo
+    //    (no enumerar existencia de empleados cross-tenant).
+    const { data: emp, error: empErr } = await admin
+      .from('employees')
+      .select('id')
+      .eq('id', employeeId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    if (empErr) {
+      return NextResponse.json({ ok: false, error: empErr.message }, { status: 500 })
+    }
+    if (!emp) {
+      // Mismo shape que "no hay periodo" para no revelar info.
+      return NextResponse.json({ ok: true, onVacation: false, period: null })
+    }
+
+    // 2) Ya validado, buscar periodo activo.
+    const today = todayISOMX()
 
     const { data: period, error } = await admin
       .from('vacation_periods')

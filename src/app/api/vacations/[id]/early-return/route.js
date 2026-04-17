@@ -4,6 +4,7 @@
 // trabajando el return_date).
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase-server'
+import { todayISOMX } from '@/lib/utils'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -47,11 +48,6 @@ function addDaysLocal(date, n) {
   return d
 }
 
-function todayISO() {
-  const t = new Date()
-  return toISODate(new Date(t.getFullYear(), t.getMonth(), t.getDate()))
-}
-
 function formatDMY(iso) {
   const d = parseISODateLocal(iso)
   if (!d) return iso
@@ -72,7 +68,7 @@ export async function POST(req, { params }) {
   const body = await req.json().catch(() => ({}))
   const return_date = /^\d{4}-\d{2}-\d{2}$/.test(body.return_date || '')
     ? body.return_date
-    : todayISO()
+    : todayISOMX()
 
   const { data: period, error: pErr } = await admin
     .from('vacation_periods')
@@ -93,6 +89,21 @@ export async function POST(req, { params }) {
   // end_date = return_date - 1 dia
   const returnD = parseISODateLocal(return_date)
   if (!returnD) return NextResponse.json({ ok: false, error: 'return_date invalido' }, { status: 400 })
+
+  // BUG 11: validar return_date dentro de (start_date, end_date+1].
+  const periodStart = parseISODateLocal(period.start_date)
+  const periodEnd = parseISODateLocal(period.end_date)
+  if (!periodStart || !periodEnd) {
+    return NextResponse.json({ ok: false, error: 'Periodo con fechas invalidas' }, { status: 400 })
+  }
+  const maxReturn = addDaysLocal(periodEnd, 1)
+  if (returnD <= periodStart || returnD > maxReturn) {
+    return NextResponse.json(
+      { ok: false, error: 'return_date fuera del rango del periodo' },
+      { status: 400 }
+    )
+  }
+
   const newEndISO = toISODate(addDaysLocal(returnD, -1))
 
   const existingNotes = period.notes ? `${period.notes} | ` : ''

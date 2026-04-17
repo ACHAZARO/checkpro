@@ -42,7 +42,7 @@ export async function GET() {
     .select('*')
     .eq('tenant_id', profile.tenant_id)
     .eq('status', 'expired')
-    .order('expiration_date', { ascending: false, nullsFirst: false })
+    .order('updated_at', { ascending: false, nullsFirst: false })
 
   if (profile.role === 'manager' && profile.branch_id) {
     q = q.eq('branch_id', profile.branch_id)
