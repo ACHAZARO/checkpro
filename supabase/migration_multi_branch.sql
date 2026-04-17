@@ -160,29 +160,37 @@ begin
 end$$;
 
 -- ─── 4. HELPERS ───────────────────────────────────────────────
+-- Must be SECURITY DEFINER: these are called from RLS policies on profiles,
+-- and their internal SELECT on profiles would otherwise re-trigger the same
+-- policy (infinite recursion → 500 on every profile fetch → login bounces).
 
 create or replace function public.my_tenant_id()
-returns uuid language sql stable as $$
+returns uuid language sql stable security definer set search_path = public as $$
   select tenant_id from public.profiles where id = auth.uid()
 $$;
 
 create or replace function public.my_role()
-returns text language sql stable as $$
+returns text language sql stable security definer set search_path = public as $$
   select role from public.profiles where id = auth.uid()
 $$;
 
 create or replace function public.my_branch_id()
-returns uuid language sql stable as $$
+returns uuid language sql stable security definer set search_path = public as $$
   select branch_id from public.profiles where id = auth.uid()
 $$;
 
 create or replace function public.is_tenant_admin()
-returns boolean language sql stable as $$
+returns boolean language sql stable security definer set search_path = public as $$
   select coalesce(
     (select role from public.profiles where id = auth.uid()) in ('owner','super_admin'),
     false
   )
 $$;
+
+grant execute on function public.my_tenant_id()    to anon, authenticated, service_role;
+grant execute on function public.my_role()         to anon, authenticated, service_role;
+grant execute on function public.my_branch_id()    to anon, authenticated, service_role;
+grant execute on function public.is_tenant_admin() to anon, authenticated, service_role;
 
 -- ─── 5. RLS POLICIES — rebuild with branch awareness ─────────
 
