@@ -342,7 +342,201 @@ function TenantIdentityTab({ tenant, onSaved }) {
         className="w-full md:w-auto flex items-center gap-1.5 px-5 py-2.5 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40">
         {saving ? '...' : '✓ Guardar empresa'}
       </button>
+
+      {/* ── Zona de peligro: borrar cuenta ────────────────────────────────── */}
+      <DangerZone tenantName={tenant?.name || ''} />
     </div>
+  )
+}
+
+// ── Zona de peligro: eliminar cuenta + empresa ──────────────────────────────
+// Requiere doble confirmación: (1) escribir el nombre exacto de la empresa,
+// (2) contraseña válida. El POST/DELETE al /api/account/delete re-autentica
+// con signInWithPassword antes de tocar nada.
+function DangerZone({ tenantName: fallbackName }) {
+  const [open, setOpen] = useState(false)
+  const [preview, setPreview] = useState(null)
+  const [loadingPreview, setLoadingPreview] = useState(false)
+  const [confirmName, setConfirmName] = useState('')
+  const [password, setPassword] = useState('')
+  const [deleting, setDeleting] = useState(false)
+
+  async function openModal() {
+    setOpen(true)
+    setConfirmName('')
+    setPassword('')
+    setPreview(null)
+    setLoadingPreview(true)
+    try {
+      const r = await fetch('/api/account/delete')
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        toast.error(j.error || 'No se pudo cargar el resumen')
+        setOpen(false)
+        return
+      }
+      setPreview(j)
+    } catch (e) {
+      console.error('[danger] preview error:', e)
+      toast.error('Error de red al cargar el resumen')
+      setOpen(false)
+    } finally {
+      setLoadingPreview(false)
+    }
+  }
+
+  function closeModal() {
+    if (deleting) return
+    setOpen(false)
+  }
+
+  const expectedName = (preview?.tenant_name || fallbackName || '').trim()
+  const nameMatches = expectedName.length > 0 &&
+    confirmName.trim().toLowerCase() === expectedName.toLowerCase()
+  const canDelete = !deleting && nameMatches && password.length > 0
+
+  async function doDelete() {
+    if (!canDelete) return
+    setDeleting(true)
+    try {
+      const r = await fetch('/api/account/delete', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        toast.error(j.error || 'No se pudo eliminar la cuenta')
+        setDeleting(false)
+        return
+      }
+      toast.success('Cuenta eliminada')
+      // Cerrar sesión en el cliente y mandar a la landing.
+      const supabase = createClient()
+      try { await supabase.auth.signOut() } catch {}
+      setTimeout(() => { window.location.href = '/' }, 1200)
+    } catch (e) {
+      console.error('[danger] delete error:', e)
+      toast.error('Error de red al eliminar')
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="mt-8 p-4 border border-red-500/40 bg-red-500/5 rounded-2xl">
+        <p className="text-sm font-bold text-red-400 mb-1">⚠️ Zona de peligro</p>
+        <p className="text-xs text-gray-400 mb-3 leading-relaxed">
+          Eliminar tu cuenta borra permanentemente la empresa, todos los empleados, turnos,
+          cortes, sucursales y registros de bitácora. El email queda libre para volver a
+          registrarse. <span className="text-red-400 font-bold">Esta acción no se puede deshacer.</span>
+        </p>
+        <button
+          type="button"
+          onClick={openModal}
+          className="px-4 py-2 bg-red-500/20 border border-red-500/50 text-red-400 text-sm font-bold rounded-xl active:brightness-90 hover:bg-red-500/30"
+        >
+          🗑️ Eliminar cuenta permanentemente
+        </button>
+      </div>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 overflow-y-auto"
+          onClick={closeModal}
+        >
+          <div
+            className="bg-dark-800 border border-red-500/40 rounded-2xl max-w-md w-full p-5 space-y-4 my-8"
+            onClick={e => e.stopPropagation()}
+          >
+            <div>
+              <h3 className="text-lg font-extrabold text-red-400">⚠️ Eliminar cuenta</h3>
+              <p className="text-xs text-gray-500 font-mono mt-0.5">ESTA ACCIÓN ES PERMANENTE E IRREVERSIBLE</p>
+            </div>
+
+            {loadingPreview ? (
+              <p className="text-sm text-gray-400 font-mono">Cargando resumen…</p>
+            ) : preview ? (
+              <>
+                <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-xs space-y-1.5">
+                  <p className="text-red-400 font-bold mb-1">Se borrará permanentemente:</p>
+                  <p className="text-gray-300">🏢 La empresa <span className="text-white font-bold">{preview.tenant_name || '(sin nombre)'}</span></p>
+                  <p className="text-gray-300">📍 <span className="text-white font-bold">{preview.counts.branches}</span> sucursal(es)</p>
+                  <p className="text-gray-300">👥 <span className="text-white font-bold">{preview.counts.employees}</span> empleado(s)</p>
+                  <p className="text-gray-300">📅 <span className="text-white font-bold">{preview.counts.shifts}</span> turno(s)</p>
+                  <p className="text-gray-300">🧾 <span className="text-white font-bold">{preview.counts.cuts}</span> corte(s) de nómina</p>
+                  <p className="text-gray-300">🏖️ <span className="text-white font-bold">{preview.counts.vacations}</span> periodo(s) de vacaciones</p>
+                  <p className="text-gray-300">📋 <span className="text-white font-bold">{preview.counts.audits}</span> registro(s) de bitácora</p>
+                  <p className="text-gray-300">🔑 <span className="text-white font-bold">{preview.counts.profiles}</span> cuenta(s) de admin/gerente</p>
+                  <p className="text-orange-400 pt-1.5 border-t border-red-500/20 mt-1.5">
+                    🔓 El email <span className="font-bold text-white">{preview.owner_email || ''}</span> queda libre para registrarse de nuevo.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-mono text-gray-500 uppercase tracking-wider">
+                    Escribe el nombre EXACTO de la empresa para confirmar
+                  </label>
+                  <input
+                    className="input mt-1 text-sm"
+                    placeholder={expectedName}
+                    value={confirmName}
+                    onChange={e => setConfirmName(e.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                    disabled={deleting}
+                  />
+                  {confirmName && !nameMatches && (
+                    <p className="text-[10px] text-orange-400 font-mono mt-1">
+                      Debe coincidir con: <span className="text-white">{expectedName}</span>
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-mono text-gray-500 uppercase tracking-wider">
+                    Contraseña de tu cuenta
+                  </label>
+                  <input
+                    className="input mt-1 text-sm"
+                    type="password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                    disabled={deleting}
+                  />
+                  <p className="text-[10px] text-gray-600 font-mono mt-1">
+                    Se valida contra Supabase Auth antes de borrar nada.
+                  </p>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={closeModal}
+                    disabled={deleting}
+                    className="flex-1 px-4 py-2 bg-dark-700 border border-dark-border text-gray-300 text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={doDelete}
+                    disabled={!canDelete}
+                    className="flex-1 px-4 py-2 bg-red-500 text-white text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    {deleting ? '⏳ Eliminando…' : 'Eliminar definitivamente'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-red-400 font-mono">No se pudo cargar el resumen.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
