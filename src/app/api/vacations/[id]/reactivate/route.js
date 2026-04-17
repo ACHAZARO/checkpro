@@ -58,6 +58,36 @@ export async function POST(req, { params }) {
     }, { status: 400 })
   }
 
+  // BUG 4: el UNIQUE INDEX parcial cubre (employee_id, anniversary_year)
+  // WHERE status NOT IN ('cancelled','expired'). Si ya existe otro periodo
+  // "vivo" del mismo aniversario y reactivamos este expired, Postgres
+  // lanzaría 23505 y respondíamos 500 con mensaje crudo. Chequeamos antes.
+  const { data: alive, error: aliveErr } = await admin
+    .from('vacation_periods')
+    .select('id, status')
+    .eq('tenant_id', profile.tenant_id)
+    .eq('employee_id', period.employee_id)
+    .eq('anniversary_year', period.anniversary_year)
+    .not('status', 'in', '(cancelled,expired)')
+    .neq('id', id)
+    .limit(1)
+    .maybeSingle()
+  if (aliveErr) {
+    console.error('reactivate alive-check error:', aliveErr?.message)
+    return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 })
+  }
+  if (alive) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'conflict_alive_period',
+        msg: `Ya existe otro periodo activo (${alive.status}) para el aniversario ${period.anniversary_year}.`,
+        existing_id: alive.id,
+      },
+      { status: 409 }
+    )
+  }
+
   const newStatus = period.start_date ? 'pending' : 'postponed'
   const { data: updated, error: upErr } = await admin
     .from('vacation_periods')
@@ -65,7 +95,22 @@ export async function POST(req, { params }) {
     .eq('id', id)
     .select('*')
     .single()
-  if (upErr) return NextResponse.json({ ok: false, error: upErr.message }, { status: 500 })
+  if (upErr) {
+    // BUG 4: si a pesar del check otro request insertó un periodo entre
+    // medias y caemos en la constraint, responder 409 — no 500.
+    if (upErr.code === '23505') {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'conflict_alive_period',
+          msg: `Ya existe otro periodo activo para el aniversario ${period.anniversary_year}.`,
+        },
+        { status: 409 }
+      )
+    }
+    console.error('reactivate update error:', upErr?.message)
+    return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 })
+  }
 
   try {
     const { data: emp } = await admin

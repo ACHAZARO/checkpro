@@ -181,10 +181,11 @@ export default function AttendancePage() {
     for (const d of rangeDates) {
       if (d < s || d > e) continue
       if (shiftsByEmpDate.has(`${emp.id}_${d}`)) continue // prevalece la asistencia real
-      // BUG L: filtrar dias donde el empleado no trabaja segun schedule.
-      // Mostrar filas moradas en domingos o descansos confunde visualmente.
-      const dk = dayKey(d + 'T12:00:00')
-      if (!emp.schedule?.[dk]?.work) continue
+      // BUG 10: ANTES filtrábamos por schedule.work=true (no mostrar
+      // descansos/domingos), pero el pago de nómina es en días naturales
+      // (LFT art. 89 — mensual/30). El gerente veía "5d vacaciones" en
+      // asistencia y "7d pagados" en nómina. Mostramos TODOS los días
+      // del rango que caen en el periodo — alinea UI con el pago real.
       virtualVacationRows.push({
         _virtual: 'vacation',
         id: `vac_${p.id}_${d}`,

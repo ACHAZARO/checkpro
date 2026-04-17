@@ -2,6 +2,7 @@
 // Empleados actualmente en vacaciones (status='active' y hoy dentro del rango).
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase-server'
+import { todayISOMX } from '@/lib/utils'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,14 +21,6 @@ async function getAuthedProfile() {
   return { profile: prof, admin }
 }
 
-function todayISO() {
-  const t = new Date()
-  const y = t.getFullYear()
-  const m = String(t.getMonth() + 1).padStart(2, '0')
-  const d = String(t.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
-
 export async function GET() {
   const ctx = await getAuthedProfile()
   if (ctx.error) return NextResponse.json({ ok: false, error: ctx.error }, { status: ctx.status })
@@ -36,7 +29,10 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: 'Sin permisos' }, { status: 403 })
   }
 
-  const today = todayISO()
+  // BUG 2: usar todayISOMX (America/Mexico_City) — Vercel corre UTC
+  // y new Date().toISOString() tiraba a día siguiente/anterior cerca de
+  // medianoche, mostrando periodos equivocados como activos.
+  const today = todayISOMX()
 
   // Traer periodos activos que cubran hoy.
   let q = admin

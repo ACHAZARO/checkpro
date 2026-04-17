@@ -211,7 +211,9 @@ export function isOnVacation(periodsForEmp, today = new Date()) {
  *
  * @param {string|Date} startDate
  * @param {string|Date} endDate
- * @param {string[]} holidays - array de "YYYY-MM-DD"
+ * @param {Array<string|{date:string,name?:string}>} holidays - acepta
+ *   strings "YYYY-MM-DD" o objetos { date: "YYYY-MM-DD", name?: string }
+ *   (que es como se almacenan en tenant.config.holidays).
  * @returns {string} - nueva end_date en formato "YYYY-MM-DD"
  */
 export function extendForHolidays(startDate, endDate, holidays) {
@@ -219,7 +221,15 @@ export function extendForHolidays(startDate, endDate, holidays) {
   const end = parseLocalDate(endDate)
   if (!start || !end) return toISO(end || start)
   const list = Array.isArray(holidays) ? holidays : []
-  const set = new Set(list.map((h) => String(h).slice(0, 10)))
+  // BUG 1: normalizar holidays — el config las guarda como { date, name }
+  // pero algunos call-sites (tests) las pasan como strings. Antes hacíamos
+  // String(h).slice(0,10) y salía "[object Obj" → Set nunca matcheaba y
+  // la decisión 9 del spec (festivo extiende 1 día) jamás se aplicaba.
+  const holidayDates = list
+    .map((h) => (typeof h === 'string' ? h : h?.date))
+    .filter(Boolean)
+    .map((s) => String(s).slice(0, 10))
+  const set = new Set(holidayDates)
 
   let extra = 0
   let cursor = new Date(start)

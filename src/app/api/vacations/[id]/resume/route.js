@@ -50,6 +50,11 @@ function addDaysLocal(date, n) {
   return d
 }
 
+// BUG 7: si la jornada tiene pocos dias laborales (p.ej. 2/semana) +
+// entitled_days alto, 365 se quedaba corto y el endpoint devolvía una
+// fecha tope silenciosa, corrompiendo el balance. Alineamos con create
+// (CAP=730) y devolvemos null cuando se excede para que el caller falle
+// explícitamente con 400.
 function computeEndDateFromSchedule(startISO, workingDays, schedule) {
   const start = parseISODateLocal(startISO)
   if (!start || !Number.isFinite(workingDays) || workingDays <= 0) return startISO
@@ -60,14 +65,15 @@ function computeEndDateFromSchedule(startISO, workingDays, schedule) {
   }
   let cursor = new Date(start)
   let counted = 0
-  for (let i = 0; i < 365; i++) {
+  const CAP = 730
+  for (let i = 0; i < CAP; i++) {
     const key = DAY_KEYS[cursor.getDay()]
     const day = schedule[key]
     if (day && day.work) counted += 1
     if (counted >= workingDays) return toISODate(cursor)
     cursor = addDaysLocal(cursor, 1)
   }
-  return toISODate(cursor)
+  return null
 }
 
 export async function POST(req, { params }) {
@@ -133,8 +139,20 @@ export async function POST(req, { params }) {
       admin.from('employees').select('schedule').eq('id', period.employee_id).maybeSingle(),
       admin.from('tenants').select('config').eq('id', profile.tenant_id).maybeSingle(),
     ])
+    // BUG 1: pasar holidays directo — extendForHolidays normaliza objetos.
     const holidays = Array.isArray(tenant?.config?.holidays) ? tenant.config.holidays : []
     const prelim = computeEndDateFromSchedule(start_date, period.entitled_days, employee?.schedule)
+    // BUG 7: cap excedido ⇒ 400 explícito en vez de fecha corrupta.
+    if (!prelim) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'schedule_insufficient',
+          msg: 'No se pudo calcular end_date — revisa el schedule (muy pocos dias laborales o entitled_days excesivo).',
+        },
+        { status: 400 }
+      )
+    }
     end_date = extendForHolidays(start_date, prelim, holidays)
   }
 

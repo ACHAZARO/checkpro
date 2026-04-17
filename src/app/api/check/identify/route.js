@@ -36,9 +36,11 @@ export async function POST(req) {
 
     const supabase = createServiceClient()
 
+    // BUG 9: incluir department y role_label — la UI del checador los
+    // mostraba como "undefined · undefined" antes de completar el PIN.
     const { data: emp } = await supabase
       .from('employees')
-      .select('id,name,birth_date,can_manage')
+      .select('id,name,birth_date,can_manage,department,role_label')
       .eq('tenant_id', tenantId)
       .eq('employee_code', code)
       .eq('status', 'active')
@@ -66,7 +68,14 @@ export async function POST(req) {
 
     return NextResponse.json({
       found: true,
-      employee: { id: emp.id, name: emp.name, birth_date: emp.birth_date, can_manage: emp.can_manage },
+      employee: {
+        id: emp.id,
+        name: emp.name,
+        birth_date: emp.birth_date,
+        can_manage: emp.can_manage,
+        department: emp.department,
+        role_label: emp.role_label,
+      },
       openShift: openShift ? { id: openShift.id, entry_time: openShift.entry_time } : null,
       allEmployees: coverageList || [],
     })

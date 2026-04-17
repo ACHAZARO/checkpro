@@ -97,18 +97,42 @@ const TIPO_ICON = { tomadas: '🏖️', pospuestas: '📅', compensadas: '💰' 
 const TIPO_LABEL = { tomadas: 'Tomadas', pospuestas: 'Pospuestas', compensadas: 'Compensadas' }
 
 // ── modal wrapper (mismo patrón que employees/page.js) ──────────────────────
+// BUG 11: stack de modales para que ESC sólo lo maneje el modal "top".
+// Antes BottomSheet y ConfirmSheet registraban keydown en `document` y
+// stopPropagation no servía (no hay bubbling entre addEventListener del
+// mismo target), así que ESC cerraba ambos a la vez.
+let modalIdCounter = 0
+const activeModals = []
+
+function useEscapeKey(enabled, onEscape) {
+  useEffect(() => {
+    if (!enabled) return undefined
+    const id = ++modalIdCounter
+    activeModals.push(id)
+    const handler = (e) => {
+      if (e.key !== 'Escape') return
+      if (activeModals[activeModals.length - 1] !== id) return
+      onEscape?.()
+    }
+    document.addEventListener('keydown', handler)
+    return () => {
+      document.removeEventListener('keydown', handler)
+      const ix = activeModals.indexOf(id)
+      if (ix >= 0) activeModals.splice(ix, 1)
+    }
+  }, [enabled, onEscape])
+}
+
 // BUG O: a11y. role=dialog, aria-modal, ESC para cerrar, click backdrop cierra,
 // body scroll lock, foco inicial al primer input del sheet.
 function BottomSheet({ open, title, onClose, children }) {
   const panelRef = useRef(null)
   const titleId = useRef('bs-title-' + Math.random().toString(36).slice(2, 9)).current
 
+  useEscapeKey(open, onClose)
+
   useEffect(() => {
     if (!open) return undefined
-    function onKey(e) {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose?.() }
-    }
-    document.addEventListener('keydown', onKey)
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     // Foco inicial al primer input/select/textarea del panel
@@ -117,11 +141,10 @@ function BottomSheet({ open, title, onClose, children }) {
       first?.focus?.()
     }, 30)
     return () => {
-      document.removeEventListener('keydown', onKey)
       document.body.style.overflow = prevOverflow
       clearTimeout(t)
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
   return (
@@ -160,22 +183,21 @@ function BottomSheet({ open, title, onClose, children }) {
 // y render <ConfirmSheet state={confirmState} onCancel={() => setConfirmState(null)} />
 function ConfirmSheet({ state, onCancel }) {
   const open = !!state
+  const loading = !!state?.loading
+  useEscapeKey(open && !loading, onCancel)
   useEffect(() => {
     if (!open) return undefined
-    function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); onCancel?.() } }
-    document.addEventListener('keydown', onKey)
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
-      document.removeEventListener('keydown', onKey)
       document.body.style.overflow = prev
     }
-  }, [open, onCancel])
+  }, [open])
   if (!open) return null
   return (
     <div
       className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-5"
-      onClick={onCancel}
+      onClick={loading ? undefined : onCancel}
     >
       <div
         role="alertdialog"
@@ -187,18 +209,23 @@ function ConfirmSheet({ state, onCancel }) {
         <h3 id="cs-title" className="text-white font-bold text-base mb-2">{state.title || 'Confirmar'}</h3>
         <p className="text-gray-400 text-sm mb-5">{state.message}</p>
         <div className="flex gap-2">
+          {/* BUG 12: botón queda disabled durante `loading` para que un
+              double-click no dispare dos fetches. Solo `onConfirm` sabe
+              cuándo dejó de cargar — cierra el modal cuando termina. */}
           <button
-            onClick={() => { state.onConfirm?.(); onCancel?.() }}
-            className={`flex-1 py-2.5 rounded-xl font-bold text-sm border active:brightness-90 ${
+            onClick={() => { if (!loading) state.onConfirm?.() }}
+            disabled={loading}
+            className={`flex-1 py-2.5 rounded-xl font-bold text-sm border active:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed ${
               state.danger
                 ? 'bg-red-500/20 border-red-500/40 text-red-300'
                 : 'bg-brand-400 border-brand-400 text-black'
             }`}>
-            {state.confirmLabel || 'Confirmar'}
+            {loading ? 'Procesando…' : (state.confirmLabel || 'Confirmar')}
           </button>
           <button
             onClick={onCancel}
-            className="flex-1 py-2.5 bg-dark-700 border border-dark-border rounded-xl text-gray-400 font-bold text-sm active:bg-dark-600">
+            disabled={loading}
+            className="flex-1 py-2.5 bg-dark-700 border border-dark-border rounded-xl text-gray-400 font-bold text-sm active:bg-dark-600 disabled:opacity-60 disabled:cursor-not-allowed">
             {state.cancelLabel || 'Cancelar'}
           </button>
         </div>
@@ -221,6 +248,10 @@ export default function EmployeeDetailPage() {
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [confirmState, setConfirmState] = useState(null) // BUG P: reemplaza confirm()
+  // BUG 14: si el usuario edita end_date manualmente, el auto-cálculo
+  // (que dispara al cambiar start_date o entitled_days) ya no debe pisar
+  // su valor. Se resetea a false al abrir cada modal.
+  const [endDateDirty, setEndDateDirty] = useState(false)
 
   const F = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -247,10 +278,12 @@ export default function EmployeeDetailPage() {
 
   useEffect(() => { load() }, [load])
 
-  // BUG 9: auto-calcular end_date cuando cambian start_date o entitled_days
-  // en el modal "Tomar". No usar closures con el valor stale; usar effect.
+  // BUG 9/14: auto-calcular end_date cuando cambian start_date o entitled_days
+  // en el modal "Tomar". Si el usuario ya editó manualmente end_date
+  // (endDateDirty=true) no sobreescribimos su valor.
   useEffect(() => {
     if (sheet !== 'tomar') return
+    if (endDateDirty) return
     const sd = form.start_date
     const ed = Number(form.entitled_days)
     if (!sd || !Number.isFinite(ed) || ed <= 0) return
@@ -258,9 +291,8 @@ export default function EmployeeDetailPage() {
     if (newEnd && newEnd !== form.end_date) {
       setForm(prev => ({ ...prev, end_date: newEnd }))
     }
-    // Solo corremos cuando cambian start_date o entitled_days (no end_date manual).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheet, form.start_date, form.entitled_days])
+  }, [sheet, form.start_date, form.entitled_days, endDateDirty])
 
   // ── derivados ──────────────────────────────────────────────────────────────
   const employee = data?.employee || null
@@ -291,6 +323,7 @@ export default function EmployeeDetailPage() {
       prima_pct: 25,
       notes: '',
     })
+    setEndDateDirty(false) // BUG 14: reset flag al abrir
     setSheet('tomar')
   }
 
@@ -332,6 +365,7 @@ export default function EmployeeDetailPage() {
     setSheet(null)
     setSheetCtx({})
     setForm({})
+    setEndDateDirty(false) // BUG 14
   }
 
   // ── submits ────────────────────────────────────────────────────────────────
@@ -403,7 +437,10 @@ export default function EmployeeDetailPage() {
           employee_id: employeeId,
           tipo: 'compensadas',
           anniversary_year: Number(form.anniversary_year) || undefined,
-          entitled_days: Number(form.entitled_days) || undefined,
+          // BUG 15: no mandar entitled_days — el form de compensar no
+          // tiene input para este campo; era un residuo del state y
+          // podía llegar stale o forzar override indeseado de la tabla.
+          // El endpoint lo infiere del aniversario.
           compensated_days: days,
           payment_type: form.payment_type || 'efectivo',
           prima_pct: Number(form.prima_pct) || 25,
@@ -465,7 +502,11 @@ export default function EmployeeDetailPage() {
   }
 
   // BUG P: reemplazamos confirm()/alert() nativos por <ConfirmSheet>.
+  // BUG 12: marcamos el ConfirmSheet como `loading` durante el fetch para
+  // evitar double-click que dispara dos requests. El modal se cierra
+  // cuando la operación termina (éxito o error).
   async function performCancel(period) {
+    setConfirmState(prev => prev ? { ...prev, loading: true } : prev)
     try {
       const res = await fetch(`/api/vacations/${period.id}/cancel`, { method: 'POST' })
       const body = await res.json().catch(() => ({}))
@@ -473,9 +514,13 @@ export default function EmployeeDetailPage() {
       toast.success('Periodo cancelado')
       await load()
     } catch { toast.error('Error de red') }
+    finally {
+      setConfirmState(null)
+    }
   }
 
   function doCancel(period) {
+    if (confirmState?.loading) return
     setConfirmState({
       title: 'Cancelar periodo',
       message: `¿Cancelar este periodo (${TIPO_LABEL[period.tipo]} ${period.anniversary_year})?`,
@@ -487,6 +532,7 @@ export default function EmployeeDetailPage() {
   }
 
   async function performReactivate(period) {
+    setConfirmState(prev => prev ? { ...prev, loading: true } : prev)
     try {
       const res = await fetch(`/api/vacations/${period.id}/reactivate`, { method: 'POST' })
       const body = await res.json().catch(() => ({}))
@@ -494,9 +540,13 @@ export default function EmployeeDetailPage() {
       toast.success('Periodo reactivado')
       await load()
     } catch { toast.error('Error de red') }
+    finally {
+      setConfirmState(null)
+    }
   }
 
   function doReactivate(period) {
+    if (confirmState?.loading) return
     setConfirmState({
       title: 'Reactivar periodo prescrito',
       message: `¿Reactivar este periodo prescrito (año ${period.anniversary_year})? Volverá a ${period.start_date ? 'pendiente' : 'pospuesto'}.`,
@@ -797,10 +847,12 @@ export default function EmployeeDetailPage() {
             <div>
               <label className="label" htmlFor="vac-end-date">Fecha fin</label>
               {/* BUG Q: end_date no puede ser antes de start_date */}
+              {/* BUG 14: marcar dirty al teclear para que el auto-cálculo
+                  no pise la edición manual. */}
               <input id="vac-end-date" type="date" className="input"
                 min={form.start_date || todayISO()}
                 value={form.end_date || ''}
-                onChange={e => F('end_date', e.target.value)} />
+                onChange={e => { setEndDateDirty(true); F('end_date', e.target.value) }} />
             </div>
           </div>
 
@@ -948,9 +1000,12 @@ export default function EmployeeDetailPage() {
           </div>
           <div>
             <label className="label" htmlFor="vac-return-date">Fecha de reincorporación</label>
+            {/* BUG 13: el max anterior (end_date+1) dejaba seleccionar un
+                día DESPUÉS del fin del periodo. min/max ahora coinciden
+                con el rango real [start_date, end_date]. */}
             <input id="vac-return-date" type="date" className="input"
-              min={sheetCtx.period?.start_date ? addDaysISO(sheetCtx.period.start_date, 1) : undefined}
-              max={sheetCtx.period?.end_date ? addDaysISO(sheetCtx.period.end_date, 1) : undefined}
+              min={sheetCtx.period?.start_date || undefined}
+              max={sheetCtx.period?.end_date || undefined}
               value={form.return_date || ''}
               onChange={e => F('return_date', e.target.value)} />
           </div>

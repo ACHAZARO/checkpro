@@ -606,6 +606,20 @@ export default function CheckPage() {
         })
       })
       const data = await res.json()
+      // BUG 3: si el servidor detecta en el punch un periodo de vacaciones
+      // activo (race con el check-status inicial), responde 409 on_vacation.
+      // Reabrimos el modal de vacaciones con el periodo recibido para que el
+      // empleado pueda aceptar la reincorporación y volver a intentar el PIN.
+      if (res.status === 409 && data?.error === 'on_vacation') {
+        setVacationPeriod(data.period || null)
+        setVacationAccepted(false)
+        setShowVacationModal(true)
+        setStep('pin')
+        setMsg({ type: 'warn', text: data.msg || 'Estás en vacaciones. Confirma tu reincorporación antes de checar.' })
+        if (data.msg) toast(data.msg, { icon: '🏖️', duration: 5000 })
+        setBusy(false)
+        return
+      }
       if (data.ok) {
         setMsg({ type: 'ok', text: data.msg })
         toast.success(data.msg)
@@ -838,7 +852,13 @@ export default function CheckPage() {
                   {initials}
                 </div>
                 <div className="font-bold text-lg text-white">{foundEmp?.name}</div>
-                <div className="text-gray-500 text-xs mt-0.5">{foundEmp?.department} · {foundEmp?.role_label}</div>
+                {/* BUG 9: renderizar solo si hay valores — antes imprimía
+                    "undefined · undefined" cuando el endpoint no los devolvía. */}
+                {(foundEmp?.department || foundEmp?.role_label) && (
+                  <div className="text-gray-500 text-xs mt-0.5">
+                    {[foundEmp?.department, foundEmp?.role_label].filter(Boolean).join(' · ')}
+                  </div>
+                )}
                 {openShift ? (
                   <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 bg-brand-400/10 border border-brand-400/20 rounded-full text-brand-400 text-xs font-semibold">
                     <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />

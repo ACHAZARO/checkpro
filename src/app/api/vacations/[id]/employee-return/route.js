@@ -144,17 +144,22 @@ export async function POST(req, { params }) {
     const return_date = todayISOMX()
     const returnD = parseISODateLocal(return_date)
 
-    // BUG 11: validar return_date dentro de [start_date+1, end_date+1].
-    // return_date = end_date+1 significa "regreso el mismo dia que termina"
-    // (caso degenerado; end_date queda igual). return_date <= start_date
-    // haria end_date anterior a start_date, invalido.
+    // BUG 11/8: validar return_date dentro de [start_date, end_date+1].
+    // - returnD == periodStart ⇒ el empleado decidió no tomar vacaciones
+    //   hoy mismo; antes lo rechazábamos como "fuera de rango" aunque
+    //   check-status dijera onVacation=true. Ahora lo tratamos como
+    //   cancelación (nunca descansó) y conservamos el balance intacto.
+    // - returnD > periodStart ⇒ cierre temprano normal (completed,
+    //   end_date = returnD - 1).
+    // - returnD == periodEnd+1 ⇒ caso degenerado (regresa el día que
+    //   termina), end_date queda igual y status completed.
     const periodStart = parseISODateLocal(period.start_date)
     const periodEnd = parseISODateLocal(period.end_date)
     if (!periodStart || !periodEnd) {
       return NextResponse.json({ ok: false, error: 'Periodo con fechas invalidas' }, { status: 400 })
     }
     const maxReturn = addDaysLocal(periodEnd, 1)
-    if (returnD <= periodStart || returnD > maxReturn) {
+    if (returnD < periodStart || returnD > maxReturn) {
       return NextResponse.json(
         {
           ok: false,
@@ -164,37 +169,49 @@ export async function POST(req, { params }) {
       )
     }
 
-    const newEndISO = toISODate(addDaysLocal(returnD, -1))
-
     // BUG T: cap en longitud de notes para evitar crecimiento sin bound.
     const existingNotes = period.notes ? `${period.notes} | ` : ''
-    let newNotes = `${existingNotes}Reincorporacion temprana ${formatDMY(return_date)} (desde checador)`
+    const sameDay = returnD.getTime() === periodStart.getTime()
+    const baseNote = sameDay
+      ? `Reincorporacion el mismo dia de inicio ${formatDMY(return_date)} — periodo cancelado (sin dias consumidos)`
+      : `Reincorporacion temprana ${formatDMY(return_date)} (desde checador)`
+    let newNotes = `${existingNotes}${baseNote}`
     if (newNotes.length > 1000) {
       newNotes = '…' + newNotes.slice(-999)
     }
 
+    // BUG 8: si returnD === periodStart, status=cancelled (no consumió
+    // ningún día). Si returnD > periodStart, end_date = returnD - 1.
+    const patch = sameDay
+      ? { status: 'cancelled', notes: newNotes }
+      : {
+          status: 'completed',
+          end_date: toISODate(addDaysLocal(returnD, -1)),
+          completed_at: new Date().toISOString(),
+          notes: newNotes,
+        }
+
     const { data: updated, error: upErr } = await admin
       .from('vacation_periods')
-      .update({
-        status: 'completed',
-        end_date: newEndISO,
-        completed_at: new Date().toISOString(),
-        notes: newNotes,
-      })
+      .update(patch)
       .eq('id', id)
       .select('*')
       .single()
 
     if (upErr) {
-      return NextResponse.json({ ok: false, error: upErr.message }, { status: 500 })
+      // BUG 5: no filtrar error.message crudo en endpoint público.
+      console.error('employee-return update error:', upErr?.message)
+      return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 })
     }
 
     await admin.from('audit_log').insert({
       tenant_id: tenantId,
-      action: 'vacation_early_return_self',
+      action: sameDay ? 'vacation_cancelled_self_sameday' : 'vacation_early_return_self',
       employee_id: emp.id,
       employee_name: emp.name,
-      detail: `Reincorporacion temprana (auto-servicio) periodo ${id} el ${return_date} (end_date -> ${newEndISO})`,
+      detail: sameDay
+        ? `Cancelacion (mismo dia de inicio) periodo ${id} el ${return_date}`
+        : `Reincorporacion temprana (auto-servicio) periodo ${id} el ${return_date} (end_date -> ${patch.end_date})`,
       success: true,
     })
 

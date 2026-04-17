@@ -207,7 +207,17 @@ export async function POST(req) {
           { status: 400 }
         )
       }
+      // BUG 1: pasar holidays sin transformar — extendForHolidays ahora
+      // acepta objetos { date } o strings y normaliza internamente.
       end_date = extendForHolidays(start_date, prelim, holidays)
+    }
+    // BUG 6: si el gerente tecleó end_date manualmente, validar que no quede
+    // antes del start_date — antes pasaba y guardaba un periodo incoherente.
+    if (end_date < start_date) {
+      return NextResponse.json(
+        { ok: false, error: 'end_date_before_start', msg: 'La fecha fin no puede ser anterior al inicio.' },
+        { status: 400 }
+      )
     }
     const today = todayISOMX()
     const isActive = start_date <= today && today <= end_date

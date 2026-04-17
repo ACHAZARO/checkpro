@@ -54,7 +54,10 @@ export async function GET(req, { params }) {
       .maybeSingle()
 
     if (empErr) {
-      return NextResponse.json({ ok: false, error: empErr.message }, { status: 500 })
+      // BUG 5: no exponer detalles internos de Postgres a un endpoint
+      // público (esta ruta no requiere auth).
+      console.error('vac/check-status emp lookup error:', empErr?.message)
+      return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 })
     }
     if (!emp) {
       // Mismo shape que "no hay periodo" para no revelar info.
@@ -75,7 +78,9 @@ export async function GET(req, { params }) {
       .maybeSingle()
 
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
+      // BUG 5: genérico al cliente, log al server.
+      console.error('vac/check-status period lookup error:', error?.message)
+      return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 })
     }
 
     if (!period) {
