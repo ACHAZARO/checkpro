@@ -585,6 +585,17 @@ export default function CheckPage() {
                 <p className="text-gray-400 text-xs">Escanea de nuevo el código QR de la sucursal con tu celular.</p>
               </div>
 
+              {/* Manager: quick access to dashboard (opens in new tab so kiosk stays on /check) */}
+              {foundEmp?.can_manage && (
+                <Link
+                  href="/login"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block w-full mb-3 py-3 bg-orange-500/10 border border-orange-400/30 rounded-xl text-orange-400 text-sm font-semibold hover:bg-orange-500/20 transition-all text-center">
+                  🔑 Entrar a mi panel de gerente →
+                </Link>
+              )}
+
               {/* Emergency exit */}
               <button
                 onClick={() => setShowEmergency(true)}
