@@ -2,7 +2,7 @@
 // src/app/dashboard/payroll/page.js
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
-import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate } from '@/lib/utils'
+import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate, dayKey, DAY_FL } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 // Default legend si el usuario no guardo uno custom (espejo de settings/DEFAULT_LEYENDA)
@@ -298,6 +298,10 @@ export default function PayrollPage() {
   const [vacPeriods, setVacPeriods] = useState([])
   const [cfg, setCfg] = useState(null)
   const [tenantId, setTenantId] = useState(null)
+  // FIX BUG: el corte SIEMPRE es por sucursal. Guardamos la sucursal del admin
+  // para filtrar empleados, turnos y cortes anteriores — y validar el día de cierre.
+  const [myBranchId, setMyBranchId] = useState(null)
+  const [myBranchName, setMyBranchName] = useState('')
   const [loading, setLoading] = useState(true)
   const [cutNote, setCutNote] = useState('')
   const [closing, setClosing] = useState(false)
@@ -321,6 +325,8 @@ export default function PayrollPage() {
       .eq('active', true)
       .order('created_at')
     const myBranch = (branchData || []).find(b => b.id === prof.branch_id) || (branchData || [])[0] || null
+    setMyBranchId(myBranch?.id || null)
+    setMyBranchName(myBranch?.name || '')
     // Mezclar tenant.config con override de branch (branch wins)
     // y garantizar que branchName refleje la sucursal actual (no el legacy "Mi Sucursal").
     const mergedCfg = {
@@ -342,7 +348,17 @@ export default function PayrollPage() {
         .select('id,employee_id,tipo,status,start_date,end_date,prima_pct,entitled_days,compensated_days,compensated_amount,completed_at')
         .eq('tenant_id', prof.tenant_id),
     ])
-    setEmps(empData || [])
+    // FIX BUG: antes traiamos TODOS los empleados del tenant y la nomina
+    // mezclaba sucursales. Ahora filtramos por la sucursal del admin (columna
+    // real branch_id, con fallback al legacy schedule.branch.id para empleados
+    // antiguos que todavia no migraron).
+    const filteredEmps = myBranch
+      ? (empData || []).filter(e => {
+          const bid = e.branch_id || e.schedule?.branch?.id
+          return bid === myBranch.id
+        })
+      : (empData || [])
+    setEmps(filteredEmps)
     setShifts(shiftData || [])
     setCuts(cutData || [])
     setVacPeriods(vacData || [])
@@ -351,12 +367,42 @@ export default function PayrollPage() {
 
   useEffect(() => { load() }, [load])
 
-  const range = cfg ? weekRange(new Date(), cfg.weekClosingDay || 'dom') : weekRange(new Date(), 'dom')
+  const closingDay = cfg?.weekClosingDay || 'dom'
+  const range = cfg ? weekRange(new Date(), closingDay) : weekRange(new Date(), 'dom')
   const weekStartStr = isoDate(range.start)
   const weekEndStr = isoDate(range.end)
-  const weekShifts = shifts.filter(s => s.date_str >= weekStartStr && s.date_str <= weekEndStr)
+  // FIX BUG: el set de empleados YA esta filtrado por sucursal en load().
+  // Filtramos los turnos a SOLO empleados de mi sucursal (anti doble pago entre
+  // sucursales si una persona aparece en ambas por algun bug viejo).
+  const myEmpIds = new Set(emps.map(e => e.id))
+  const weekShifts = shifts.filter(s =>
+    s.date_str >= weekStartStr &&
+    s.date_str <= weekEndStr &&
+    myEmpIds.has(s.employee_id)
+  )
   const incidentShifts = weekShifts.filter(s => s.status === 'incident')
   const hasUnresolved = incidentShifts.length > 0
+
+  // FIX BUG: solo se permite cerrar el dia configurado por la sucursal.
+  // dayKey() usa la hora local del navegador (no UTC) — el gerente cierra
+  // cuando es ese dia EN SU ZONA HORARIA.
+  const todayKey = dayKey(new Date())
+  const canCloseToday = todayKey === closingDay
+
+  // Cortes anteriores: filtrar a los que tocan turnos de MI sucursal.
+  // (Antes mostraba todos los cortes del tenant sin importar sucursal.)
+  const cutsForBranch = myBranchId
+    ? cuts.filter(c => {
+        if (!c.shift_ids || c.shift_ids.length === 0) return false
+        // Un corte "es de mi sucursal" si al menos uno de sus shifts pertenece
+        // a un empleado de mi sucursal. Funciona para cortes nuevos (que solo
+        // incluyen turnos de mi sucursal) y para legacy mixtos.
+        return c.shift_ids.some(sid => {
+          const sh = shifts.find(s => s.id === sid)
+          return sh && myEmpIds.has(sh.employee_id)
+        })
+      })
+    : cuts
 
   // Agrupa vacation_periods por employee_id para lookup rapido
   const vacByEmp = {}
@@ -391,6 +437,15 @@ export default function PayrollPage() {
   async function closeWeek() {
     if (hasUnresolved) {
       toast.error(`Resuelve las ${incidentShifts.length} incidencia(s) antes de cerrar la semana`)
+      return
+    }
+    // FIX BUG: bloquear cierre si hoy no es el dia de corte de la sucursal.
+    if (!canCloseToday) {
+      toast.error(`El corte de esta sucursal solo se puede cerrar los ${DAY_FL[closingDay]}. Hoy es ${DAY_FL[todayKey]}.`)
+      return
+    }
+    if (!myBranchId) {
+      toast.error('No se detectó tu sucursal. Revisa tu perfil en Configuración.')
       return
     }
     setClosing(true)
@@ -460,6 +515,11 @@ export default function PayrollPage() {
         <p className="text-gray-500 text-xs font-mono mt-0.5">
           SEMANA: {isoDate(range.start)} → {isoDate(range.end)}
         </p>
+        {myBranchName && (
+          <p className="text-brand-400/80 text-xs font-mono mt-0.5">
+            🏢 {myBranchName} · CORTE: {DAY_FL[closingDay]}
+          </p>
+        )}
       </div>
 
       {/* ── Revisión de incidencias (requerida antes del corte) ─────────────── */}
@@ -577,30 +637,37 @@ export default function PayrollPage() {
       </div>
 
       {/* ── Corte semanal ─────────────────────────────────────────────────── */}
-      <div className={`card mb-4 ${hasUnresolved ? 'opacity-60' : ''}`}>
+      <div className={`card mb-4 ${hasUnresolved || !canCloseToday ? 'opacity-60' : ''}`}>
         <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Corte semanal</p>
         {hasUnresolved && (
           <div className="px-3 py-2 mb-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-xs font-semibold">
             🔒 Resuelve todas las incidencias para habilitar el corte
           </div>
         )}
+        {!canCloseToday && !hasUnresolved && (
+          <div className="px-3 py-2 mb-3 bg-orange-500/10 border border-orange-500/20 rounded-lg text-orange-400 text-xs font-semibold">
+            🗓 El corte de <span className="text-white">{myBranchName || 'esta sucursal'}</span> solo se genera los {DAY_FL[closingDay]}. Hoy es {DAY_FL[todayKey]}.
+          </div>
+        )}
         <div className="mb-3">
           <label className="label">Notas del corte (opcional)</label>
           <input className="input text-sm" placeholder="Observaciones de la semana..."
-            value={cutNote} onChange={e => setCutNote(e.target.value)} disabled={hasUnresolved} />
+            value={cutNote} onChange={e => setCutNote(e.target.value)} disabled={hasUnresolved || !canCloseToday} />
         </div>
-        <button onClick={closeWeek} disabled={closing || hasUnresolved}
+        <button onClick={closeWeek} disabled={closing || hasUnresolved || !canCloseToday}
           className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed">
-          {closing ? '⏳ Cerrando...' : '🖨️ Cerrar semana e imprimir reporte'}
+          {closing ? '⏳ Cerrando...' : !canCloseToday ? `🔒 Disponible los ${DAY_FL[closingDay]}` : '🖨️ Cerrar semana e imprimir reporte'}
         </button>
       </div>
 
       {/* ── Cortes anteriores ─────────────────────────────────────────────── */}
-      {cuts.length > 0 && (
+      {cutsForBranch.length > 0 && (
         <div>
-          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Cortes anteriores</p>
+          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">
+            Cortes anteriores {myBranchName && <span className="normal-case text-gray-600">· {myBranchName}</span>}
+          </p>
           <div className="space-y-2">
-            {cuts.map(c => (
+            {cutsForBranch.map(c => (
               <div key={c.id} className="card-sm flex items-center justify-between gap-3">
                 <div>
                   <div className="font-semibold text-sm text-white">{c.start_date} → {c.end_date}</div>
