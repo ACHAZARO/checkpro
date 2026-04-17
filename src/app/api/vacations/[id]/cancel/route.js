@@ -41,6 +41,11 @@ export async function POST(req, { params }) {
 
   const id = params?.id
   if (!id) return NextResponse.json({ ok: false, error: 'id requerido' }, { status: 400 })
+  // R7: validar UUID antes de mandar a Postgres (evita 500 por cast).
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  if (!UUID_RE.test(id)) {
+    return NextResponse.json({ ok: false, error: 'invalid_id' }, { status: 400 })
+  }
 
   const { data: period, error: pErr } = await admin
     .from('vacation_periods')

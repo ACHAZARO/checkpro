@@ -87,6 +87,33 @@ export async function POST(req) {
     const cfg = tenant?.config || {}
     const tz = cfg.timezone || process.env.APP_TIMEZONE || 'America/Mexico_City'
 
+    // R7: cumpleanios. La RPC validate_employee_pin no expone birth_date (PII),
+    // asi que lo leemos aqui post-PIN por emp.id. Solo exponemos un booleano
+    // `birthday` al cliente — NUNCA la fecha completa.
+    let isBirthdayToday = false
+    try {
+      const { data: empRow } = await supabase
+        .from('employees')
+        .select('birth_date')
+        .eq('id', emp.id)
+        .maybeSingle()
+      if (empRow?.birth_date) {
+        // Fecha "hoy" en TZ MX
+        const nowInTz = new Date(new Date().toLocaleString('en-US', { timeZone: tz }))
+        const s = String(empRow.birth_date).slice(0, 10).split('-')
+        if (s.length === 3) {
+          const bdMonth = parseInt(s[1], 10) - 1
+          const bdDay = parseInt(s[2], 10)
+          if (
+            Number.isFinite(bdMonth) && Number.isFinite(bdDay) &&
+            nowInTz.getMonth() === bdMonth && nowInTz.getDate() === bdDay
+          ) {
+            isBirthdayToday = true
+          }
+        }
+      }
+    } catch { /* no-op: flag por defecto false */ }
+
     // Validar GPS server-side — NO confiar en el cliente
     const locCfg = cfg.location
     let geoValid = true
@@ -199,6 +226,7 @@ export async function POST(req) {
         ok: true,
         msg: `Entrada registrada. ${classification.label}${coverName ? ' · Cubriendo a ' + coverName : ''}${holiday ? ' — Pago ×3 🎉' : ''}.`,
         ipMatchesBranch,
+        birthday: isBirthdayToday, // R7
       })
     }
 
@@ -266,7 +294,7 @@ export async function POST(req) {
     const msg = isIncident
       ? `Salida registrada (${duration}h). ⚠ Se creó una incidencia para revisión.`
       : `Salida registrada. Jornada: ${duration} horas.${overtimeHours > 0 ? ` · ${overtimeHours} HE.` : ''}`
-    return NextResponse.json({ ok: true, msg, overtimeHours, incident: isIncident })
+    return NextResponse.json({ ok: true, msg, overtimeHours, incident: isIncident, birthday: isBirthdayToday })
 
   } catch (err) {
     console.error('punch/route error:', err?.message)

@@ -4,10 +4,13 @@
 // Consume GET /api/vacations/employee/[id] y expone 3 acciones:
 // Tomar, Posponer, Compensar (via POST /api/vacations/create).
 // También permite cancelar, reanudar, reincorporación temprana, reactivar.
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
+// R7: componentes compartidos extraidos a src/components/
+import { BottomSheet } from '@/components/BottomSheet'
+import { ConfirmSheet } from '@/components/ConfirmSheet'
 
 // ── helpers de formato ───────────────────────────────────────────────────────
 function fmtLongDate(iso) {
@@ -96,143 +99,8 @@ const STATUS_CLASS = {
 const TIPO_ICON = { tomadas: '🏖️', pospuestas: '📅', compensadas: '💰' }
 const TIPO_LABEL = { tomadas: 'Tomadas', pospuestas: 'Pospuestas', compensadas: 'Compensadas' }
 
-// ── modal wrapper (mismo patrón que employees/page.js) ──────────────────────
-// BUG 11: stack de modales para que ESC sólo lo maneje el modal "top".
-// Antes BottomSheet y ConfirmSheet registraban keydown en `document` y
-// stopPropagation no servía (no hay bubbling entre addEventListener del
-// mismo target), así que ESC cerraba ambos a la vez.
-let modalIdCounter = 0
-const activeModals = []
-
-function useEscapeKey(enabled, onEscape) {
-  useEffect(() => {
-    if (!enabled) return undefined
-    const id = ++modalIdCounter
-    activeModals.push(id)
-    const handler = (e) => {
-      if (e.key !== 'Escape') return
-      if (activeModals[activeModals.length - 1] !== id) return
-      onEscape?.()
-    }
-    document.addEventListener('keydown', handler)
-    return () => {
-      document.removeEventListener('keydown', handler)
-      const ix = activeModals.indexOf(id)
-      if (ix >= 0) activeModals.splice(ix, 1)
-    }
-  }, [enabled, onEscape])
-}
-
-// BUG O: a11y. role=dialog, aria-modal, ESC para cerrar, click backdrop cierra,
-// body scroll lock, foco inicial al primer input del sheet.
-function BottomSheet({ open, title, onClose, children }) {
-  const panelRef = useRef(null)
-  const titleId = useRef('bs-title-' + Math.random().toString(36).slice(2, 9)).current
-
-  useEscapeKey(open, onClose)
-
-  useEffect(() => {
-    if (!open) return undefined
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    // Foco inicial al primer input/select/textarea del panel
-    const t = setTimeout(() => {
-      const first = panelRef.current?.querySelector('input, select, textarea, button')
-      first?.focus?.()
-    }, 30)
-    return () => {
-      document.body.style.overflow = prevOverflow
-      clearTimeout(t)
-    }
-  }, [open])
-
-  if (!open) return null
-  return (
-    <div
-      className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end"
-      style={{ touchAction: 'none' }}
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="bg-dark-800 rounded-t-2xl overflow-y-scroll no-scrollbar"
-        style={{ maxHeight: '90vh', touchAction: 'pan-y' }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-4" />
-        <div className="px-5 pb-10">
-          <div className="flex items-center justify-between mb-4">
-            <h3 id={titleId} className="text-lg font-bold text-white">{title}</h3>
-            <button
-              onClick={onClose}
-              aria-label="Cerrar"
-              className="text-gray-500 text-2xl leading-none active:text-white">×</button>
-          </div>
-          {children}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// BUG P: reemplaza confirm()/alert() nativos. Estilo dark consistente, no
-// bloquea el hilo en iOS PWA. Uso: setConfirmState({ title, message, onConfirm })
-// y render <ConfirmSheet state={confirmState} onCancel={() => setConfirmState(null)} />
-function ConfirmSheet({ state, onCancel }) {
-  const open = !!state
-  const loading = !!state?.loading
-  useEscapeKey(open && !loading, onCancel)
-  useEffect(() => {
-    if (!open) return undefined
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.body.style.overflow = prev
-    }
-  }, [open])
-  if (!open) return null
-  return (
-    <div
-      className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-5"
-      onClick={loading ? undefined : onCancel}
-    >
-      <div
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="cs-title"
-        className="bg-dark-800 border border-dark-border rounded-2xl p-5 w-full max-w-sm"
-        onClick={e => e.stopPropagation()}
-      >
-        <h3 id="cs-title" className="text-white font-bold text-base mb-2">{state.title || 'Confirmar'}</h3>
-        <p className="text-gray-400 text-sm mb-5">{state.message}</p>
-        <div className="flex gap-2">
-          {/* BUG 12: botón queda disabled durante `loading` para que un
-              double-click no dispare dos fetches. Solo `onConfirm` sabe
-              cuándo dejó de cargar — cierra el modal cuando termina. */}
-          <button
-            onClick={() => { if (!loading) state.onConfirm?.() }}
-            disabled={loading}
-            className={`flex-1 py-2.5 rounded-xl font-bold text-sm border active:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed ${
-              state.danger
-                ? 'bg-red-500/20 border-red-500/40 text-red-300'
-                : 'bg-brand-400 border-brand-400 text-black'
-            }`}>
-            {loading ? 'Procesando…' : (state.confirmLabel || 'Confirmar')}
-          </button>
-          <button
-            onClick={onCancel}
-            disabled={loading}
-            className="flex-1 py-2.5 bg-dark-700 border border-dark-border rounded-xl text-gray-400 font-bold text-sm active:bg-dark-600 disabled:opacity-60 disabled:cursor-not-allowed">
-            {state.cancelLabel || 'Cancelar'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
+// R7: BottomSheet / ConfirmSheet / useEscapeKey viven ahora en
+// @/components/* y @/hooks/useEscapeKey. Este archivo solo los consume.
 
 export default function EmployeeDetailPage() {
   const params = useParams()

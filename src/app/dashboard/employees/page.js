@@ -8,6 +8,8 @@ import {
   calcYearsWorked, calcVacationDays, hasVacationPending
 } from '@/lib/utils'
 import toast from 'react-hot-toast'
+// R7: reemplazamos window.confirm() (nativo, bloqueante, feo) por ConfirmSheet.
+import { ConfirmSheet } from '@/components/ConfirmSheet'
 
 const DEF_BASE = { start: '09:00', end: '18:00' }
 
@@ -51,6 +53,9 @@ export default function EmployeesPage() {
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [base, setBase] = useState({ ...DEF_BASE })
+  // R7: estado del modal de confirmacion (reemplaza window.confirm()).
+  // Forma: { title, message, onConfirm, danger, confirmLabel, cancelLabel, loading }
+  const [confirmState, setConfirmState] = useState(null)
 
   const F = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -200,12 +205,34 @@ export default function EmployeesPage() {
     finally { setSaving(false) }
   }
 
-  async function deactivate(emp) {
-    if (!confirm(`¿Dar de baja a ${emp.name}? Sus registros se conservan.`)) return
-    const supabase = createClient()
-    await supabase.from('employees').update({ status: 'deleted' }).eq('id', emp.id)
-    toast.success('Baja registrada')
-    await load()
+  // R7: ya no usamos window.confirm(). Abrimos ConfirmSheet y ejecutamos la
+  // baja en onConfirm. Mantenemos `loading` para evitar double-clicks.
+  function deactivate(emp) {
+    setConfirmState({
+      title: 'Dar de baja empleado',
+      message: `¿Dar de baja a ${emp.name}? Sus registros se conservan, pero no podrá checar.`,
+      confirmLabel: 'Dar de baja',
+      cancelLabel: 'Cancelar',
+      danger: true,
+      onConfirm: async () => {
+        setConfirmState(s => (s ? { ...s, loading: true } : s))
+        try {
+          const supabase = createClient()
+          const { error } = await supabase
+            .from('employees')
+            .update({ status: 'deleted' })
+            .eq('id', emp.id)
+          if (error) {
+            toast.error(error.message || 'No se pudo dar de baja')
+          } else {
+            toast.success('Baja registrada')
+            await load()
+          }
+        } finally {
+          setConfirmState(null)
+        }
+      },
+    })
   }
 
   function openEdit(emp) {
@@ -561,6 +588,9 @@ export default function EmployeesPage() {
           </div>
         </div>
       )}
+
+      {/* R7: Modal de confirmacion dark (reemplaza window.confirm()) */}
+      <ConfirmSheet state={confirmState} onCancel={() => setConfirmState(null)} />
     </div>
   )
 }

@@ -189,6 +189,10 @@ function EmergencyExitModal({ onConfirm, onCancel, busy }) {
 // BUG M: soporte ESC + back button Android + a11y (role=dialog, aria-modal).
 // Ademas hacemos body scroll lock al abrir y liberamos focus al cerrar.
 function VacationModal({ period, employeeName, onAccept, onCancel }) {
+  // R7: foco inicial al boton primario "Si, reincorporarme" cuando el modal
+  // aparece. Mejora accesibilidad (screen readers anuncian el dialog) y UX en
+  // teclados fisicos: Enter acepta directamente.
+  const acceptRef = useRef(null)
   // Hooks deben llamarse siempre antes de cualquier return (rules-of-hooks).
   useEffect(() => {
     if (!period) return undefined
@@ -198,9 +202,19 @@ function VacationModal({ period, employeeName, onAccept, onCancel }) {
     document.addEventListener('keydown', onKey)
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    // R7: foco inicial (timeout minimo para esperar al mount del boton).
+    const prevFocused = typeof document !== 'undefined' ? document.activeElement : null
+    const t = setTimeout(() => {
+      acceptRef.current?.focus?.()
+    }, 30)
     return () => {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = prevOverflow
+      clearTimeout(t)
+      // Restaurar foco al elemento previo (si sigue en DOM).
+      if (prevFocused && typeof prevFocused.focus === 'function') {
+        try { prevFocused.focus() } catch { /* ignore */ }
+      }
     }
   }, [period, onCancel])
 
@@ -235,7 +249,7 @@ function VacationModal({ period, employeeName, onAccept, onCancel }) {
           </p>
         </div>
         <div className="space-y-2">
-          <button onClick={onAccept}
+          <button ref={acceptRef} onClick={onAccept}
             className="w-full py-3 bg-purple-500/20 border border-purple-500/40 rounded-xl text-purple-300 font-bold text-sm active:bg-purple-500/30 transition-all">
             Sí, reincorporarme
           </button>
@@ -286,6 +300,10 @@ export default function CheckPage() {
   const [allEmps, setAllEmps]   = useState([])
   const [msg, setMsg]           = useState(null)
   const [busy, setBusy]         = useState(false)
+  // R7: flag devuelto por /api/check/punch cuando hoy es cumpleanios del
+  // empleado (en TZ MX). El identify es publico y NO expone birth_date, asi
+  // que la UI reacciona solo tras PIN valido con este booleano.
+  const [isBirthdayToday, setIsBirthdayToday] = useState(false)
 
   // Vacation flow: periodo activo detectado tras identify
   const [vacationPeriod, setVacationPeriod] = useState(null)  // { id, start_date, end_date, ... } | null
@@ -510,6 +528,7 @@ export default function CheckPage() {
     setStep('id'); setEmpCode(''); setFoundEmp(null); setOpenShift(null)
     setMsg(null); setCoverMode(false); setCoverTarget('')
     setVacationPeriod(null); setShowVacationModal(false); setVacationAccepted(false)
+    setIsBirthdayToday(false) // R7
     setMonitor({ outsideSince: null, outsideReason: null, minsLeft: ABANDON_MINUTES })
   }
 
@@ -638,6 +657,16 @@ export default function CheckPage() {
         if (data.ok) {
           setMsg({ type: 'ok', text: data.msg })
           toast.success(data.msg)
+          // R7: el servidor marca birthday:true si hoy es cumpleanios del
+          // empleado (en TZ MX). No exponemos birth_date al cliente: solo el flag.
+          if (data.birthday) {
+            setIsBirthdayToday(true)
+            toast(`🎉 ¡Feliz cumpleaños${foundEmp?.name ? ', ' + (foundEmp.name.split(' ')[0] || '') : ''}!`, {
+              icon: '🎂', duration: 5000,
+            })
+          } else {
+            setIsBirthdayToday(false)
+          }
           if (action === 'in') {
             setStep('done')
             setOpenShift({ employee_id: foundEmp?.id, entry_time: new Date().toISOString() })
@@ -784,11 +813,11 @@ export default function CheckPage() {
                 <p className="text-gray-400 text-xs">Escanea de nuevo el código QR de la sucursal con tu celular.</p>
               </div>
 
-              {/* Birthday greeting */}
-              {foundEmp?.birth_date && isBirthday(foundEmp.birth_date) && (
+              {/* Birthday greeting (R7: usa flag del punch, no birth_date) */}
+              {isBirthdayToday && (
                 <div className="w-full mb-3 px-4 py-3 bg-gradient-to-br from-pink-500/10 via-yellow-500/10 to-brand-400/10 border border-yellow-400/30 rounded-xl text-center">
                   <div className="text-2xl mb-1">🎂 🎉</div>
-                  <div className="text-yellow-300 text-sm font-bold">¡Feliz cumpleaños, {foundEmp.name?.split(' ')[0]}!</div>
+                  <div className="text-yellow-300 text-sm font-bold">¡Feliz cumpleaños{foundEmp?.name ? ', ' + (foundEmp.name.split(' ')[0] || '') : ''}!</div>
                   <div className="text-gray-400 text-xs mt-0.5 font-mono">Que tengas un excelente día.</div>
                 </div>
               )}
