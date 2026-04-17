@@ -114,6 +114,9 @@ function TenantIdentityTab({ tenant, onSaved }) {
   const [name, setName] = useState(tenant?.name || '')
   const [cfg, setCfg] = useState(tenant?.config || {})
   const [saving, setSaving] = useState(false)
+  // Tabla de vacaciones: colapsada por default — la LFT 2023 aplica sin tocar nada.
+  // Solo se expone si el admin explicitamente quiere sobrescribir o si ya habia un override guardado.
+  const [showVacTable, setShowVacTable] = useState(Boolean(tenant?.config?.vacationTable))
   const F = (k, v) => setCfg(c => ({ ...c, [k]: v }))
 
   function getVacTable() { return cfg.vacationTable || LFT_VACATION_TABLE }
@@ -125,12 +128,42 @@ function TenantIdentityTab({ tenant, onSaved }) {
   function resetVacTableToLFT() { setCfg(c => ({ ...c, vacationTable: null })); toast.success('Tabla reseteada a LFT 2023') }
 
   async function save() {
+    if (saving) return
     setSaving(true)
     const supabase = createClient()
-    await supabase.from('tenants').update({ name: name.trim() || tenant.name, config: cfg }).eq('id', tenant.id)
-    toast.success('Empresa guardada')
-    setSaving(false)
-    await onSaved?.()
+    // Timeout de 15s: si Supabase se cuelga (RLS recursivo, red, etc.) no dejamos el boton atascado
+    const timeoutId = setTimeout(() => {
+      toast.error('El guardado esta tardando demasiado. Revisa tu conexion.')
+      setSaving(false)
+    }, 15000)
+    try {
+      const payload = { name: name.trim() || tenant.name, config: cfg }
+      // .select() fuerza a PostgREST a devolver la fila — asi detectamos si RLS filtro 0 filas
+      const { data, error } = await supabase
+        .from('tenants')
+        .update(payload)
+        .eq('id', tenant.id)
+        .select()
+      clearTimeout(timeoutId)
+      if (error) {
+        console.error('[settings] update tenant error:', error)
+        toast.error(error.message || 'No se pudo guardar la empresa')
+        return
+      }
+      if (!data || data.length === 0) {
+        // RLS bloqueo el update sin throw — comun si la session expiro o el rol cambio
+        toast.error('No tienes permisos para guardar esta empresa. Vuelve a iniciar sesion.')
+        return
+      }
+      toast.success('Empresa guardada')
+      try { await onSaved?.() } catch (e) { console.error('[settings] onSaved error:', e) }
+    } catch (e) {
+      clearTimeout(timeoutId)
+      console.error('[settings] save unexpected:', e)
+      toast.error('Error inesperado al guardar')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -173,31 +206,56 @@ function TenantIdentityTab({ tenant, onSaved }) {
         </div>
       </div>
 
+      {/* Tabla de vacaciones — colapsada por default. Solo se expone si el admin la expande a proposito */}
       <div className="card">
-        <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Tabla de vacaciones (LFT 2023)</p>
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-xs text-gray-400">Días sugeridos según la LFT 2023. Puedes ajustarlos; si bajas del mínimo aparecerá una advertencia al asignar vacaciones.</p>
-          {cfg.vacationTable && (
-            <button onClick={resetVacTableToLFT} className="shrink-0 ml-2 px-2.5 py-1 bg-dark-700 border border-dark-border rounded-lg text-[10px] font-bold text-gray-400">↻ LFT default</button>
-          )}
-        </div>
-        <div className="grid grid-cols-3 gap-2 mb-1">
-          <span className="text-[10px] font-mono text-gray-500 uppercase">Desde</span>
-          <span className="text-[10px] font-mono text-gray-500 uppercase">Hasta</span>
-          <span className="text-[10px] font-mono text-gray-500 uppercase">Días</span>
-        </div>
-        <div className="space-y-1.5">
-          {getVacTable().map((row, idx) => (
-            <div key={idx} className="grid grid-cols-3 gap-2 items-center">
-              <input type="number" min="1" max="50" className="input py-1.5 text-sm text-center" value={row.fromYear}
-                onChange={e => setVacTableRow(idx, 'fromYear', e.target.value)} />
-              <input type="number" min="1" max="999" className="input py-1.5 text-sm text-center" value={row.toYear === 999 ? '∞' : row.toYear}
-                onChange={e => setVacTableRow(idx, 'toYear', e.target.value === '∞' ? 999 : e.target.value)} />
-              <input type="number" min="1" max="365" className="input py-1.5 text-sm text-center text-brand-400 font-bold" value={row.days}
-                onChange={e => setVacTableRow(idx, 'days', e.target.value)} />
+        <button
+          type="button"
+          onClick={() => setShowVacTable(v => !v)}
+          className="w-full flex items-center justify-between text-left"
+          aria-expanded={showVacTable}
+        >
+          <div>
+            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">Tabla de vacaciones (avanzado)</p>
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              {cfg.vacationTable
+                ? 'Usando tabla personalizada. Click para editar.'
+                : 'Usando LFT 2023 por default. Click para sobrescribir (opcional).'}
+            </p>
+          </div>
+          <span className={`text-gray-500 transition-transform ${showVacTable ? 'rotate-90' : ''}`}>▶</span>
+        </button>
+
+        {showVacTable && (
+          <div className="mt-4 pt-4 border-t border-dark-border">
+            <div className="flex items-center justify-between mb-3 gap-2">
+              <p className="text-xs text-gray-400">
+                Dias sugeridos segun la LFT 2023. Puedes ajustarlos; si bajas del minimo aparecera una advertencia al asignar vacaciones.
+              </p>
+              {cfg.vacationTable && (
+                <button onClick={resetVacTableToLFT} className="shrink-0 px-2.5 py-1 bg-dark-700 border border-dark-border rounded-lg text-[10px] font-bold text-gray-400">
+                  ↻ LFT default
+                </button>
+              )}
             </div>
-          ))}
-        </div>
+            <div className="grid grid-cols-3 gap-2 mb-1">
+              <span className="text-[10px] font-mono text-gray-500 uppercase">Desde</span>
+              <span className="text-[10px] font-mono text-gray-500 uppercase">Hasta</span>
+              <span className="text-[10px] font-mono text-gray-500 uppercase">Dias</span>
+            </div>
+            <div className="space-y-1.5">
+              {getVacTable().map((row, idx) => (
+                <div key={idx} className="grid grid-cols-3 gap-2 items-center">
+                  <input type="number" min="1" max="50" className="input py-1.5 text-sm text-center" value={row.fromYear}
+                    onChange={e => setVacTableRow(idx, 'fromYear', e.target.value)} />
+                  <input type="number" min="1" max="999" className="input py-1.5 text-sm text-center" value={row.toYear === 999 ? '∞' : row.toYear}
+                    onChange={e => setVacTableRow(idx, 'toYear', e.target.value === '∞' ? 999 : e.target.value)} />
+                  <input type="number" min="1" max="365" className="input py-1.5 text-sm text-center text-brand-400 font-bold" value={row.days}
+                    onChange={e => setVacTableRow(idx, 'days', e.target.value)} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <button onClick={save} disabled={saving}
