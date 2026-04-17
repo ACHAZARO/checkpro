@@ -108,9 +108,9 @@ export default function EmployeesPage() {
       supabase.from('tenants').select('config').eq('id', prof.tenant_id).single(),
       supabase
         .from('vacation_periods')
-        .select('employee_id,anniversary_year,status')
+        .select('employee_id,anniversary_year,status,end_date')
         .eq('tenant_id', prof.tenant_id)
-        .in('status', ['pending', 'postponed', 'active', 'completed']),
+        .in('status', ['pending', 'postponed', 'active', 'completed', 'approved']),
     ])
     setEmps(empData || [])
     setBranches(tenantData?.config?.branches || [])
@@ -183,6 +183,13 @@ export default function EmployeesPage() {
           return
         }
         toast.success(`Empleado ${body.employee?.employee_code || ''} creado`)
+        // FIX R6: si el backend detectó años previos no capturados, avisar al gerente.
+        if (body.backfill_warning) {
+          toast(
+            body.backfill_warning,
+            { icon: '⚠️', duration: 10000, style: { background: '#422', color: '#fc0', maxWidth: 500 } }
+          )
+        }
       } else {
         await supabase.from('employees').update({ ...payload, status: form.status || 'active' }).eq('id', form.id)
         toast.success('Empleado actualizado')
@@ -263,6 +270,19 @@ export default function EmployeesPage() {
             const years = calcYearsWorked(hireDate)
             const vacDays = calcVacationDays(hireDate, vacTable)
             const vacPending = hasVacationPending(emp, vacPeriods)
+            // FIX R6: "tomadas ✓" solo si existe un periodo del año actual
+            // en estado `completed` (o `approved` con end_date < hoy). Antes
+            // lo marcaba por el simple hecho de que vacPending=false, lo que
+            // incluia periodos `active`/`approved` aun no terminados.
+            const todayStr = todayISO()
+            const currentYear = years
+            const tomadasOk = (vacPeriods || []).some(p => {
+              if (p.employee_id !== emp.id) return false
+              if (p.anniversary_year !== currentYear) return false
+              if (p.status === 'completed') return true
+              if (p.status === 'approved' && p.end_date && String(p.end_date).slice(0,10) < todayStr) return true
+              return false
+            })
 
             return (
               <div key={emp.id} className="card">
@@ -299,7 +319,7 @@ export default function EmployeesPage() {
                               ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
                               : 'bg-dark-700 border-dark-border text-gray-600'
                           }`}>
-                            🏖 {vacDays}d vacaciones{vacPending ? ' pendientes' : ' tomadas ✓'}
+                            🏖 {vacDays}d vacaciones{vacPending ? ' pendientes' : (tomadasOk ? ' tomadas ✓' : '')}
                           </span>
                         )}
                       </div>

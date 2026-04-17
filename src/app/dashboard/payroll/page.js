@@ -109,7 +109,7 @@ function escapeHtml(s) {
 }
 
 // ── Compact single-page report ───────────────────────────────────────────────
-function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrollLegend, vacByEmp) {
+function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrollLegend, vacByEmp, coveragePayMode) {
   const active = employees.filter(e => e.has_shift)
   let totalNet = 0
   let totalGross = 0
@@ -119,7 +119,7 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
   const weekEnd = cut.end_date
 
   const rows = active.map(emp => {
-    const s = empWeekSummary(emp, weekShifts, employees)
+    const s = empWeekSummary(emp, weekShifts, employees, coveragePayMode)
     const vac = vacationPayForWeek(emp, (vacByEmp && vacByEmp[emp.id]) || [], weekStart, weekEnd)
     // Para la UI del reporte, sumamos la paga de vacaciones al neto/bruto.
     const grossWithVac = s.grossPay + vac.totalVacationPay
@@ -152,7 +152,7 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
 
   // Signature grid: 3 columns
   const sigCols = active.map(emp => {
-    const s = empWeekSummary(emp, weekShifts, employees)
+    const s = empWeekSummary(emp, weekShifts, employees, coveragePayMode)
     const vac = vacationPayForWeek(emp, (vacByEmp && vacByEmp[emp.id]) || [], weekStart, weekEnd)
     const grossWithVac = s.grossPay + vac.totalVacationPay
     const netWithVac = Math.max(0, grossWithVac - s.retardoDesc - s.incidentDesc)
@@ -399,13 +399,13 @@ export default function PayrollPage() {
 
     await load()
     const { data: fresh } = await supabase.from('week_cuts').select('*').eq('id', cut.id).single()
-    setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp))
+    setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered'))
     setClosing(false)
   }
 
   function openReport(cut) {
     const ws = shifts.filter(s => cut.shift_ids?.includes(s.id))
-    setPrintHTML(buildReportHTML(cut, ws, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp))
+    setPrintHTML(buildReportHTML(cut, ws, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered'))
   }
 
   if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando...</div>
@@ -480,7 +480,8 @@ export default function PayrollPage() {
       <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Resumen semanal</p>
       <div className="space-y-2 mb-6">
         {emps.map(emp => {
-          const s = empWeekSummary(emp, weekShifts, emps)
+          // FIX R6: pasar coveragePayMode del tenant (antes se usaba default)
+          const s = empWeekSummary(emp, weekShifts, emps, cfg?.coveragePayMode ?? 'covered')
           const vac = vacationPayForWeek(emp, vacByEmp[emp.id] || [], weekStartStr, weekEndStr)
           const grossWithVac = s.grossPay + vac.totalVacationPay
           const netWithVac = Math.max(0, grossWithVac - s.retardoDesc - s.incidentDesc)

@@ -5,7 +5,7 @@
 // su periodo 'pending' de forma normal.
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase-server'
-import { anniversaryInfo, daysForYear } from '@/lib/vacations'
+import { anniversaryInfo } from '@/lib/vacations'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -52,14 +52,11 @@ export async function POST(req) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(hire_date)) return NextResponse.json({ error: 'Fecha de ingreso invalida' }, { status: 400 })
   if (!branch_id) return NextResponse.json({ error: 'Sucursal requerida' }, { status: 400 })
 
-  // Read current employees to compute next code + tenant config for vacation table
-  const [{ data: existing }, { data: tenant }] = await Promise.all([
-    admin.from('employees').select('employee_code').eq('tenant_id', profile.tenant_id),
-    admin.from('tenants').select('config').eq('id', profile.tenant_id).maybeSingle(),
-  ])
+  // Read current employees to compute next code
+  const { data: existing } = await admin
+    .from('employees').select('employee_code').eq('tenant_id', profile.tenant_id)
 
   const employee_code = generateEmployeeCode(existing || [])
-  const vacTable = tenant?.config?.vacation_table || tenant?.config?.vacationTable || null
 
   const payload = {
     tenant_id: profile.tenant_id,
@@ -89,42 +86,31 @@ export async function POST(req) {
     return NextResponse.json({ error: 'internal' }, { status: 500 })
   }
 
-  // Backfill historico de vacaciones si la hire_date es pasada.
-  // Decision #3: asumimos que los aniversarios pasados ya fueron tomados.
-  let backfilledPeriods = 0
+  // FIX R6: NO hacemos backfill automatico de vacation_periods historicos.
+  // Antes insertabamos filas sin start_date/end_date (invalidas) y con un
+  // warning silencioso. La decision correcta es conservadora:
+  //   - Solo se crea el empleado.
+  //   - Si la hire_date tiene antigüedad previa (yearsWorked > 0), devolvemos
+  //     un backfill_warning para que la UI lo muestre al gerente y decida si
+  //     capturar los años previos manualmente desde la ficha del empleado.
+  //   - Dejar periodos con start_date/end_date null rompe otras consultas
+  //     (widgets de dashboard, nomina, etc.), por eso preferimos no crearlos.
+  let backfillWarning = null
   try {
     const info = anniversaryInfo(hire_date, new Date())
     const yearsWorked = info?.yearsWorked || 0
     if (yearsWorked > 0) {
-      const rows = []
-      for (let year = 1; year <= yearsWorked; year++) {
-        rows.push({
-          tenant_id: profile.tenant_id,
-          branch_id,
-          employee_id: inserted.id,
-          anniversary_year: year,
-          entitled_days: daysForYear(year, vacTable),
-          prima_pct: 25.0,
-          tipo: 'tomadas',
-          status: 'completed',
-          notes: 'Histórico (empleado con antigüedad previa al alta)',
-        })
-      }
-      const { error: vpErr } = await admin.from('vacation_periods').insert(rows)
-      if (vpErr) {
-        // No revertimos el alta del empleado; solo reportamos.
-        console.error('[employees/create] backfill vacation_periods fallo:', vpErr.message)
-        return NextResponse.json({
-          employee: inserted,
-          backfilled_periods: 0,
-          warning: `Empleado creado pero no se pudo crear el histórico de vacaciones: ${vpErr.message}`,
-        })
-      }
-      backfilledPeriods = rows.length
+      backfillWarning =
+        `Se detectaron ${yearsWorked} año(s) previos al alta. No se crearon periodos automaticos. ` +
+        `Agrega manualmente los años ya tomados desde la ficha del empleado si aplica.`
     }
   } catch (e) {
-    console.error('[employees/create] backfill exception:', e)
+    console.error('[employees/create] anniversaryInfo exception:', e)
   }
 
-  return NextResponse.json({ employee: inserted, backfilled_periods: backfilledPeriods })
+  return NextResponse.json({
+    employee: inserted,
+    backfilled_periods: 0,
+    backfill_warning: backfillWarning,
+  })
 }

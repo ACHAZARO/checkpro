@@ -95,6 +95,9 @@ export default function DashboardPage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [tenantId, setTenantId] = useState(null)
+  // FIX R6: vacation_periods vivos para poder evaluar hasVacationPending
+  // con la tabla real (no contra el array legacy schedule.vacationYearsTaken).
+  const [vacPeriods, setVacPeriods] = useState([])
 
   // Vacation widgets state
   const [vacUpcoming, setVacUpcoming] = useState({ loading: true, items: [], error: null })
@@ -138,6 +141,15 @@ export default function DashboardPage() {
       // Tenant config for vacation table
       const { data: tenantData } = await supabase.from('tenants').select('config').eq('id', profile.tenant_id).single()
       const vacTable = tenantData?.config?.vacationTable || null
+
+      // FIX R6: cargar vacation_periods vivos (pending/postponed/active/completed)
+      // para pasarlos a hasVacationPending(emp, periods).
+      const { data: vpData } = await supabase
+        .from('vacation_periods')
+        .select('employee_id,anniversary_year,status')
+        .eq('tenant_id', profile.tenant_id)
+        .in('status', ['pending', 'postponed', 'active', 'completed'])
+      setVacPeriods(vpData || [])
 
       setData({
         employees: employees || [],
@@ -216,7 +228,8 @@ export default function DashboardPage() {
   // Employees with 3+ grave incidents
   const graveAlerts = employees.filter(e => countGraveIncidents(graveShifts, e.id) >= 3)
   // Employees with vacation pending
-  const vacationPending = employees.filter(e => hasVacationPending(e))
+  // FIX R6: pasar vacPeriods como 2º arg (nueva signatura de hasVacationPending)
+  const vacationPending = employees.filter(e => hasVacationPending(e, vacPeriods))
   // Upcoming birthdays in next 7 days (incluye hoy)
   const upcomingBirthdays = employees
     .filter(e => e.birth_date)
@@ -270,7 +283,8 @@ export default function DashboardPage() {
           <div className="flex flex-wrap gap-1 mt-1">
             {vacationPending.map(e => (
               <span key={e.id} className="text-[10px] font-mono bg-yellow-500/10 border border-yellow-500/20 px-2 py-0.5 rounded-full text-yellow-400">
-                {e.name} · {calcVacationDays(e.schedule?.hireDate, vacTable)}d
+                {/* FIX R6: usar e.hire_date (columna real) en lugar del legacy e.schedule?.hireDate */}
+                {e.name} · {calcVacationDays(e.hire_date || e.schedule?.hireDate, vacTable)}d
               </span>
             ))}
           </div>
@@ -426,8 +440,10 @@ export default function DashboardPage() {
                       </button>
                     </div>
                     <div className="text-[11px] text-gray-400 font-mono mt-0.5">
-                      vencieron {formatDDMM(period.expiration_date)}
-                      {period.anniversary_year ? ` · año ${period.anniversary_year}` : ''}
+                      {/* FIX R6: period.expiration_date no existe en el schema.
+                          Mostramos solo el año de aniversario (el backend ya
+                          filtra los expirados por prescripción 18m LFT). */}
+                      {period.anniversary_year ? `año ${period.anniversary_year}` : 'prescrito'}
                     </div>
                   </div>
                 ))}

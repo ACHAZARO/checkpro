@@ -95,6 +95,11 @@ export async function POST(req, { params }) {
 
   const id = params?.id
   if (!id) return NextResponse.json({ ok: false, error: 'id requerido' }, { status: 400 })
+  // FIX R6: validar UUID antes de mandar a Postgres (evita 500 por cast)
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  if (!UUID_RE.test(id)) {
+    return NextResponse.json({ ok: false, error: 'invalid_id' }, { status: 400 })
+  }
 
   const body = await req.json().catch(() => ({}))
   const start_date = String(body.start_date || '').slice(0, 10)
@@ -103,7 +108,10 @@ export async function POST(req, { params }) {
   }
 
   // FIX 3: si el cliente envió end_date, debe ser >= start_date.
-  if (body.end_date && body.end_date < body.start_date) {
+  // FIX R6: comparar contra la variable LOCAL sanitizada `start_date`
+  // (ya trimeada/validada arriba), no contra body.start_date raw.
+  const rawEndDate = String(body.end_date || '').slice(0, 10)
+  if (rawEndDate && rawEndDate < start_date) {
     return NextResponse.json({ ok: false, error: 'end_date debe ser >= start_date' }, { status: 400 });
   }
 

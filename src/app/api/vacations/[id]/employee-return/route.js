@@ -56,6 +56,23 @@ export async function POST(req, { params }) {
     if (!id) {
       return NextResponse.json({ ok: false, error: 'id requerido' }, { status: 400 })
     }
+    // FIX R6: validar UUID antes de tocar DB (evita 500 por cast fallido en PG)
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!UUID_RE.test(id)) {
+      return NextResponse.json({ ok: false, error: 'invalid_id' }, { status: 400 })
+    }
+
+    // FIX R6: rate-limit ANTES de parsear/validar body. Antes un atacante podia
+    // mandar bodies invalidos a muy alta tasa sin contar contra su bucket
+    // porque la validacion (400) retornaba antes que el rl.
+    const ip = getClientIp(req)
+    const rl = rateLimit(`vac_return:${ip}:${id}`, 5, 15 * 60_000)
+    if (!rl.ok) {
+      return NextResponse.json(
+        { ok: false, error: `Demasiados intentos. Espera ${Math.ceil(rl.retryAfter / 60)} min.` },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } }
+      )
+    }
 
     const body = await req.json().catch(() => ({}))
     const { tenantId, employeeCode, pin } = body
@@ -73,15 +90,6 @@ export async function POST(req, { params }) {
     }
     if (!PIN_RE.test(String(pin))) {
       return NextResponse.json({ ok: false, error: 'PIN invalido' }, { status: 400 })
-    }
-
-    const ip = getClientIp(req)
-    const rl = rateLimit(`vac_return:${tenantId}:${ip}:${code}`, 5, 15 * 60_000)
-    if (!rl.ok) {
-      return NextResponse.json(
-        { ok: false, error: `Demasiados intentos. Espera ${Math.ceil(rl.retryAfter / 60)} min.` },
-        { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } }
-      )
     }
 
     const admin = createServiceClient()

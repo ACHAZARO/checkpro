@@ -36,11 +36,14 @@ export async function POST(req) {
 
     const supabase = createServiceClient()
 
-    // BUG 9: incluir department y role_label — la UI del checador los
-    // mostraba como "undefined · undefined" antes de completar el PIN.
+    // FIX R6: NO leer birth_date aqui — el endpoint identify es PUBLICO
+    // (antes de validar PIN). Antes exponiamos PII (fecha de nacimiento)
+    // a cualquier atacante que conociera employee_code. Si la feature de
+    // cumpleaños lo necesita, leerlo en /api/check/punch (post-PIN) o en
+    // /api/check/session/status.
     const { data: emp } = await supabase
       .from('employees')
-      .select('id,name,birth_date,can_manage,department,role_label')
+      .select('id,name,can_manage,department,role_label')
       .eq('tenant_id', tenantId)
       .eq('employee_code', code)
       .eq('status', 'active')
@@ -71,7 +74,7 @@ export async function POST(req) {
       employee: {
         id: emp.id,
         name: emp.name,
-        birth_date: emp.birth_date,
+        // FIX R6: birth_date removido — no filtrar PII antes de validar PIN
         can_manage: emp.can_manage,
         department: emp.department,
         role_label: emp.role_label,

@@ -226,7 +226,19 @@ export default function AttendancePage() {
     const entryTime = corrForm.entryTime ? new Date(corrForm.entryTime).toISOString() : corrSheet.entry_time
     const exitTime  = corrForm.exitTime  ? new Date(corrForm.exitTime).toISOString()  : corrSheet.exit_time
     const duration  = entryTime && exitTime ? parseFloat(((new Date(exitTime)-new Date(entryTime))/3600000).toFixed(2)) : corrSheet.duration_hours
-    const corrections = [...(corrSheet.corrections || []), { ts: new Date().toISOString(), note: corrForm.note, entryTime, exitTime }]
+    // FIX R6: corrections en DB es OBJETO (punch/route.js lo guarda así con
+    // entryIp, overtime, branchId, etc.). Antes escribíamos array plano y se
+    // perdían esos campos. Guardamos las ediciones manuales bajo corrections.edits
+    // preservando todos los campos previos del objeto.
+    const prevObj = (corrSheet.corrections && !Array.isArray(corrSheet.corrections))
+      ? corrSheet.corrections
+      : {}
+    const prevEdits = Array.isArray(prevObj.edits) ? prevObj.edits
+      : (Array.isArray(corrSheet.corrections) ? corrSheet.corrections : [])
+    const corrections = {
+      ...prevObj,
+      edits: [...prevEdits, { ts: new Date().toISOString(), note: corrForm.note, entryTime, exitTime }],
+    }
     await supabase.from('shifts').update({ entry_time: entryTime, exit_time: exitTime, duration_hours: duration, status: exitTime ? 'closed' : corrSheet.status, corrections }).eq('id', corrSheet.id)
     await supabase.from('audit_log').insert({ tenant_id: tenantId, action: 'CORRECTION', employee_name: getEmpName(corrSheet.employee_id), detail: corrForm.note, success: true })
     toast.success('Corrección guardada')
@@ -306,8 +318,12 @@ export default function AttendancePage() {
   // Export filtered shifts to CSV
   function handleExportCSV(annual = false) {
     const src = annual ? shifts : filtered // annual = all loaded, filtered = current filter
-    if (src.length === 0) { toast.error('No hay registros para exportar'); return }
-    const rows = src.map(s => ({
+    // FIX R6: incluir filas virtuales de vacaciones también en el CSV — en UI
+    // se muestran como días virtuales pero antes no salían en el export. Ahora
+    // alineamos para que el gerente vea en CSV lo mismo que en pantalla.
+    const vacRows = annual ? virtualVacationRows : visibleVacationRows
+    if (src.length === 0 && vacRows.length === 0) { toast.error('No hay registros para exportar'); return }
+    const shiftRows = src.map(s => ({
       Fecha: s.date_str,
       Empleado: getEmpName(s.employee_id),
       Sucursal: (() => { const bid = empBranchMap[s.employee_id]; return bid ? branches.find(b => b.id === bid)?.name || '' : '' })(),
@@ -316,14 +332,31 @@ export default function AttendancePage() {
       Entrada: s.entry_time ? new Date(s.entry_time).toLocaleTimeString('es-MX') : '',
       Salida: s.exit_time ? new Date(s.exit_time).toLocaleTimeString('es-MX') : '',
       Horas: s.duration_hours || 0,
-      HorasExtra: s.corrections?.overtime?.hours || 0,
+      HorasExtra: (s.corrections && !Array.isArray(s.corrections)) ? (s.corrections.overtime?.hours || 0) : 0,
       Retardo: s.classification?.type === 'retardo' ? 'Sí' : 'No',
       Feriado: s.is_holiday ? 'Sí' : 'No',
       Incidencias: (s.incidents || []).map(i => i.type).join('; '),
     }))
+    const vacationRows = vacRows.map(v => ({
+      Fecha: v.date_str,
+      Empleado: getEmpName(v.employee_id),
+      Sucursal: (() => { const bid = empBranchMap[v.employee_id]; return bid ? branches.find(b => b.id === bid)?.name || '' : '' })(),
+      Estado: 'VACACIONES',
+      Clasificación: v.classification?.label || '🏖 Vacaciones',
+      Entrada: '—',
+      Salida: '—',
+      Horas: 8.00,
+      HorasExtra: 0,
+      Retardo: 'No',
+      Feriado: 'No',
+      Incidencias: '',
+    }))
+    const rows = [...shiftRows, ...vacationRows].sort((a, b) =>
+      a.Fecha === b.Fecha ? 0 : (a.Fecha < b.Fecha ? 1 : -1)
+    )
     const filename = `checkpro_asistencia_${filterFrom}_${filterTo}.csv`
     exportToCSV(rows, filename)
-    toast.success(`${src.length} registros exportados`)
+    toast.success(`${rows.length} registros exportados`)
   }
 
   return (
@@ -530,9 +563,15 @@ export default function AttendancePage() {
                           {graveCount >= 3 && ' — ALERTA GENERADA'}
                         </div>
                       )}
-                      {Array.isArray(s.corrections) && s.corrections.length > 0 && (
-                        <div className="text-xs text-yellow-500 mt-0.5">✏️ {s.corrections.length} corrección(es)</div>
-                      )}
+                      {(() => {
+                        // FIX R6: corrections puede ser array legacy o objeto nuevo con .edits
+                        const edits = Array.isArray(s.corrections)
+                          ? s.corrections
+                          : (Array.isArray(s.corrections?.edits) ? s.corrections.edits : [])
+                        return edits.length > 0 ? (
+                          <div className="text-xs text-yellow-500 mt-0.5">✏️ {edits.length} corrección(es)</div>
+                        ) : null
+                      })()}
                     </div>
                     {s.status !== 'absent' && (
                       <div className="flex gap-1.5 shrink-0">
