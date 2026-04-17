@@ -137,9 +137,14 @@ function TenantIdentityTab({ tenant, onSaved }) {
     <div className="space-y-4">
       <div className="card space-y-3">
         <div>
-          <label className="label">Nombre legal de la empresa</label>
-          <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Mi Empresa S.A. de C.V." />
-          <p className="text-[10px] text-gray-600 font-mono mt-1">Aparece en las cabeceras de reportes.</p>
+          <label className="label">Nombre de la empresa</label>
+          <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Mi Empresa" />
+          <p className="text-[10px] text-gray-600 font-mono mt-1">Nombre comercial. Cada sucursal puede elegir si usar este o el suyo en impresos.</p>
+        </div>
+        <div>
+          <label className="label">Razón social <span className="text-gray-600 font-normal">(opcional)</span></label>
+          <input className="input" value={cfg.razonSocial || ''} onChange={e => F('razonSocial', e.target.value)} placeholder="Mi Empresa S.A. de C.V." />
+          <p className="text-[10px] text-gray-600 font-mono mt-1">Solo si necesitas que aparezca el nombre legal/fiscal en impresos.</p>
         </div>
         <div>
           <label className="label">Logo principal (URL)</label>
@@ -160,15 +165,18 @@ function TenantIdentityTab({ tenant, onSaved }) {
           <textarea className="input text-xs leading-relaxed" rows={4}
             value={cfg.payrollLegend ?? DEFAULT_LEYENDA}
             onChange={e => F('payrollLegend', e.target.value)} placeholder={DEFAULT_LEYENDA} />
-          <button onClick={() => F('payrollLegend', DEFAULT_LEYENDA)}
-            className="mt-1 text-[10px] text-gray-600 hover:text-gray-400 font-mono">↻ Restaurar texto por defecto</button>
+          <div className="flex items-center justify-between mt-1">
+            <p className="text-[10px] text-gray-600 font-mono">Cada sucursal puede sobrescribirla desde su propia configuración.</p>
+            <button onClick={() => F('payrollLegend', DEFAULT_LEYENDA)}
+              className="text-[10px] text-gray-600 hover:text-gray-400 font-mono">↻ Restaurar texto por defecto</button>
+          </div>
         </div>
       </div>
 
       <div className="card">
         <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Tabla de vacaciones (LFT 2023)</p>
         <div className="flex items-center justify-between mb-3">
-          <p className="text-xs text-gray-400">Puedes aumentar los días si tu empresa da más beneficios (nunca menos).</p>
+          <p className="text-xs text-gray-400">Días sugeridos según la LFT 2023. Puedes ajustarlos; si bajas del mínimo aparecerá una advertencia al asignar vacaciones.</p>
           {cfg.vacationTable && (
             <button onClick={resetVacTableToLFT} className="shrink-0 ml-2 px-2.5 py-1 bg-dark-700 border border-dark-border rounded-lg text-[10px] font-bold text-gray-400">↻ LFT default</button>
           )}
