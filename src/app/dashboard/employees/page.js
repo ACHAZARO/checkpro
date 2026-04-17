@@ -10,6 +10,14 @@ import toast from 'react-hot-toast'
 
 const DEF_BASE = { start: '09:00', end: '18:00' }
 
+function todayISO() {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}
+
 function buildSchedule(base, overrides = {}) {
   return DAYS.reduce((a, d) => ({
     ...a, [d]: {
@@ -96,7 +104,7 @@ export default function EmployeesPage() {
     ])
     setEmps(empData || [])
     setBranches(tenantData?.config?.branches || [])
-    setVacTable(tenantData?.config?.vacationTable || null)
+    setVacTable(tenantData?.config?.vacationTable || tenantData?.config?.vacation_table || null)
     setLoading(false)
   }, [])
 
@@ -105,7 +113,15 @@ export default function EmployeesPage() {
   function openAdd() {
     const b = { ...DEF_BASE }
     setBase(b)
-    setForm({ schedule: buildSchedule(b), has_shift: true, can_manage: false, role_label: 'Empleado', payment_type: 'efectivo', birth_date: '' })
+    setForm({
+      schedule: buildSchedule(b),
+      has_shift: true,
+      can_manage: false,
+      role_label: 'Empleado',
+      payment_type: 'efectivo',
+      birth_date: '',
+      hire_date: todayISO(),
+    })
     setSheet('add')
   }
 
@@ -113,16 +129,18 @@ export default function EmployeesPage() {
     if (!form.name || !form.pin) { toast.error('Nombre y PIN son obligatorios'); return }
     if (form.pin.length !== 4 || !/^\d{4}$/.test(form.pin)) { toast.error('El PIN debe ser exactamente 4 dígitos'); return }
     if (!form.branch_id) { toast.error('Debes seleccionar una sucursal'); return }
+    if (!form.hire_date) { toast.error('La fecha de ingreso es obligatoria'); return }
 
     setSaving(true)
     const supabase = createClient()
 
     const branchObj = branches.find(b => b.id === form.branch_id)
-    // Preserve existing schedule extras (hireDate, vacationYearsTaken, etc.) + branch
+    // Preserve existing schedule extras (hireDate legacy, vacationYearsTaken, etc.) + branch
     const schedule = {
       ...(form.schedule || DEF_SCHED),
       branch: branchObj || { id: form.branch_id, name: '' },
-      hireDate: form.hireDate || form.schedule?.hireDate || null,
+      // Sync legacy schedule.hireDate with the real column for backward compat
+      hireDate: form.hire_date || form.schedule?.hireDate || null,
       vacationYearsTaken: form.schedule?.vacationYearsTaken || [],
     }
 
@@ -136,13 +154,24 @@ export default function EmployeesPage() {
       monthly_salary: parseFloat(form.monthly_salary) || 0,
       payment_type: form.payment_type || 'efectivo',
       birth_date: form.birth_date || null,
+      hire_date: form.hire_date,
       schedule,
     }
     try {
       if (sheet === 'add') {
-        const code = generateEmployeeCode(emps)
-        await supabase.from('employees').insert({ ...payload, tenant_id: tenantId, employee_code: code, status: 'active' })
-        toast.success(`Empleado ${code} creado`)
+        // Use API endpoint so service role can backfill historical vacation_periods
+        const res = await fetch('/api/employees/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, branch_id: form.branch_id }),
+        })
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          toast.error(body.error || 'Error al guardar')
+          setSaving(false)
+          return
+        }
+        toast.success(`Empleado ${body.employee?.employee_code || ''} creado`)
       } else {
         await supabase.from('employees').update({ ...payload, status: form.status || 'active' }).eq('id', form.id)
         toast.success('Empleado actualizado')
@@ -172,8 +201,9 @@ export default function EmployeesPage() {
     setForm({
       ...emp,
       schedule,
-      branch_id: emp.schedule?.branch?.id || '',
-      hireDate: emp.schedule?.hireDate || '',
+      branch_id: emp.schedule?.branch?.id || emp.branch_id || '',
+      // Prefer real column, fallback to legacy schedule.hireDate
+      hire_date: (emp.hire_date && String(emp.hire_date).slice(0, 10)) || emp.schedule?.hireDate || '',
       payment_type: emp.payment_type || 'efectivo',
       birth_date: emp.birth_date || '',
     })
@@ -182,7 +212,8 @@ export default function EmployeesPage() {
 
   // ── Mark vacation as taken for current anniversary year ───────────────────
   async function markVacationTaken(emp) {
-    const annivYear = currentAnniversaryYear(emp.schedule?.hireDate)
+    const hireDate = emp.hire_date || emp.schedule?.hireDate
+    const annivYear = currentAnniversaryYear(hireDate)
     if (!annivYear) return
     const supabase = createClient()
     const taken = emp.schedule?.vacationYearsTaken || []
@@ -225,7 +256,7 @@ export default function EmployeesPage() {
           )}
           {emps.map(emp => {
             const branchName = emp.schedule?.branch?.name || ''
-            const hireDate = emp.schedule?.hireDate
+            const hireDate = (emp.hire_date && String(emp.hire_date).slice(0, 10)) || emp.schedule?.hireDate
             const years = calcYearsWorked(hireDate)
             const vacDays = calcVacationDays(hireDate, vacTable)
             const vacPending = hasVacationPending(emp)
@@ -342,14 +373,16 @@ export default function EmployeesPage() {
                   <input className="input" value={form.department || ''} onChange={e => F('department', e.target.value)} placeholder="Cocina, Caja..." />
                 </div>
 
-                {/* Fecha de contratación */}
+                {/* Fecha de ingreso (obligatoria) */}
                 <div>
-                  <label className="label">Fecha de contratación</label>
-                  <input className="input" type="date"
-                    value={form.hireDate || form.schedule?.hireDate || ''}
-                    onChange={e => F('hireDate', e.target.value)} />
-                  <p className="text-[10px] text-gray-600 font-mono mt-1">
-                    Necesaria para calcular antigüedad y vacaciones (LFT)
+                  <label className="label">
+                    Fecha de ingreso <span className="text-red-400">*</span>
+                  </label>
+                  <input className="input" type="date" required
+                    value={form.hire_date || ''}
+                    onChange={e => F('hire_date', e.target.value)} />
+                  <p className="text-[10px] text-gray-600 font-mono mt-1 leading-snug">
+                    Si el empleado tiene antigüedad previa, el sistema asume que ya tomó las vacaciones de años anteriores. Solo contará a partir del próximo aniversario.
                   </p>
                 </div>
 
