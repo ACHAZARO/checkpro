@@ -292,16 +292,21 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
 
 // ── Component ────────────────────────────────────────────────────────────────
 export default function PayrollPage() {
-  const [emps, setEmps] = useState([])
+  // Raw data (no filtering yet)
+  const [allEmps, setAllEmps] = useState([])
   const [shifts, setShifts] = useState([])
   const [cuts, setCuts] = useState([])
   const [vacPeriods, setVacPeriods] = useState([])
-  const [cfg, setCfg] = useState(null)
   const [tenantId, setTenantId] = useState(null)
-  // FIX BUG: el corte SIEMPRE es por sucursal. Guardamos la sucursal del admin
-  // para filtrar empleados, turnos y cortes anteriores — y validar el día de cierre.
-  const [myBranchId, setMyBranchId] = useState(null)
-  const [myBranchName, setMyBranchName] = useState('')
+  const [tenantData, setTenantData] = useState(null) // { config, name }
+  // Rol + lista completa de sucursales + sucursal actualmente seleccionada.
+  // - Gerente (role='manager'): queda FIJADO a su prof.branch_id, sin selector.
+  // - Propietario (role='owner'|'super_admin'): puede cambiar la sucursal con
+  //   un selector; por defecto arranca en su branch_id si tiene, si no en la
+  //   primera activa. Cada sucursal se cierra POR SEPARADO.
+  const [role, setRole] = useState(null)
+  const [allBranches, setAllBranches] = useState([])
+  const [selectedBranchId, setSelectedBranchId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [cutNote, setCutNote] = useState('')
   const [closing, setClosing] = useState(false)
@@ -312,34 +317,29 @@ export default function PayrollPage() {
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) return
-    const { data: prof } = await supabase.from('profiles').select('tenant_id,branch_id').eq('id', session.user.id).single()
+    const { data: prof } = await supabase.from('profiles').select('tenant_id,branch_id,role').eq('id', session.user.id).single()
     if (!prof?.tenant_id) return
     setTenantId(prof.tenant_id)
+    setRole(prof.role || 'manager')
     const { data: tenant } = await supabase.from('tenants').select('config,name').eq('id', prof.tenant_id).single()
-    // FIX: cargar sucursales reales (no de config JSONB) y elegir la del usuario
-    // si tiene branch_id, si no la primera activa.
+    setTenantData(tenant || null)
+    // FIX: cargar sucursales reales (no de config JSONB).
     const { data: branchData } = await supabase
       .from('branches')
       .select('id,name,config,active')
       .eq('tenant_id', prof.tenant_id)
       .eq('active', true)
       .order('created_at')
-    const myBranch = (branchData || []).find(b => b.id === prof.branch_id) || (branchData || [])[0] || null
-    setMyBranchId(myBranch?.id || null)
-    setMyBranchName(myBranch?.name || '')
-    // Mezclar tenant.config con override de branch (branch wins)
-    // y garantizar que branchName refleje la sucursal actual (no el legacy "Mi Sucursal").
-    const mergedCfg = {
-      ...(tenant?.config || {}),
-      ...(myBranch?.config || {}),
-      // branchName: nombre real de la sucursal (no el legacy JSONB).
-      branchName: myBranch?.name || tenant?.name || tenant?.config?.branchName || '',
-      // payrollLegend: preferir branch override > tenant config > default
-      payrollLegend: (myBranch?.config?.payrollLegend
-                      || tenant?.config?.payrollLegend
-                      || DEFAULT_PAYROLL_LEGEND),
-    }
-    setCfg(mergedCfg)
+    const branchList = branchData || []
+    setAllBranches(branchList)
+    const isOwnerRole = prof.role === 'owner' || prof.role === 'super_admin'
+    // Preservar la selección actual del owner si ya estaba eligiendo una sucursal.
+    // Para gerente, siempre forzar a su branch_id (no le permitimos cambiar).
+    setSelectedBranchId(cur => {
+      if (!isOwnerRole) return prof.branch_id || branchList[0]?.id || null
+      if (cur && branchList.some(b => b.id === cur)) return cur
+      return prof.branch_id || branchList[0]?.id || null
+    })
     const [{ data: empData }, { data: shiftData }, { data: cutData }, { data: vacData }] = await Promise.all([
       supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).eq('status', 'active').eq('has_shift', true),
       supabase.from('shifts').select('*').eq('tenant_id', prof.tenant_id).order('date_str', { ascending: false }),
@@ -348,17 +348,7 @@ export default function PayrollPage() {
         .select('id,employee_id,tipo,status,start_date,end_date,prima_pct,entitled_days,compensated_days,compensated_amount,completed_at')
         .eq('tenant_id', prof.tenant_id),
     ])
-    // FIX BUG: antes traiamos TODOS los empleados del tenant y la nomina
-    // mezclaba sucursales. Ahora filtramos por la sucursal del admin (columna
-    // real branch_id, con fallback al legacy schedule.branch.id para empleados
-    // antiguos que todavia no migraron).
-    const filteredEmps = myBranch
-      ? (empData || []).filter(e => {
-          const bid = e.branch_id || e.schedule?.branch?.id
-          return bid === myBranch.id
-        })
-      : (empData || [])
-    setEmps(filteredEmps)
+    setAllEmps(empData || [])
     setShifts(shiftData || [])
     setCuts(cutData || [])
     setVacPeriods(vacData || [])
@@ -367,13 +357,37 @@ export default function PayrollPage() {
 
   useEffect(() => { load() }, [load])
 
-  const closingDay = cfg?.weekClosingDay || 'dom'
-  const range = cfg ? weekRange(new Date(), closingDay) : weekRange(new Date(), 'dom')
+  // ── Valores derivados de la sucursal seleccionada ──────────────────────────
+  const isOwner = role === 'owner' || role === 'super_admin'
+  const myBranch = allBranches.find(b => b.id === selectedBranchId) || null
+  const myBranchId = myBranch?.id || null
+  const myBranchName = myBranch?.name || ''
+  // cfg = tenant.config + branch.config override. Se recalcula al cambiar de sucursal.
+  const cfg = {
+    ...(tenantData?.config || {}),
+    ...(myBranch?.config || {}),
+    branchName: myBranch?.name || tenantData?.name || tenantData?.config?.branchName || '',
+    payrollLegend: (myBranch?.config?.payrollLegend
+                    || tenantData?.config?.payrollLegend
+                    || DEFAULT_PAYROLL_LEGEND),
+  }
+  // FIX BUG: filtrar empleados por la sucursal seleccionada (columna real
+  // branch_id con fallback legacy schedule.branch.id). Si no hay sucursal
+  // elegida y no hay sucursales en el tenant, caemos a TODOS (tenant sin
+  // migrar aún).
+  const emps = myBranch
+    ? allEmps.filter(e => {
+        const bid = e.branch_id || e.schedule?.branch?.id
+        return bid === myBranch.id
+      })
+    : (allBranches.length === 0 ? allEmps : [])
+
+  const closingDay = cfg.weekClosingDay || 'dom'
+  const range = weekRange(new Date(), closingDay)
   const weekStartStr = isoDate(range.start)
   const weekEndStr = isoDate(range.end)
-  // FIX BUG: el set de empleados YA esta filtrado por sucursal en load().
-  // Filtramos los turnos a SOLO empleados de mi sucursal (anti doble pago entre
-  // sucursales si una persona aparece en ambas por algun bug viejo).
+  // Turnos de la semana SOLO de empleados de mi sucursal (anti doble pago
+  // entre sucursales si una persona aparece en ambas por algún bug viejo).
   const myEmpIds = new Set(emps.map(e => e.id))
   const weekShifts = shifts.filter(s =>
     s.date_str >= weekStartStr &&
@@ -383,14 +397,13 @@ export default function PayrollPage() {
   const incidentShifts = weekShifts.filter(s => s.status === 'incident')
   const hasUnresolved = incidentShifts.length > 0
 
-  // FIX BUG: solo se permite cerrar el dia configurado por la sucursal.
-  // dayKey() usa la hora local del navegador (no UTC) — el gerente cierra
-  // cuando es ese dia EN SU ZONA HORARIA.
+  // FIX BUG: solo se permite cerrar el día configurado por la sucursal.
+  // dayKey() usa hora local (no UTC) — el gerente cierra cuando es ese día
+  // en su zona horaria.
   const todayKey = dayKey(new Date())
   const canCloseToday = todayKey === closingDay
 
   // Cortes anteriores: filtrar a los que tocan turnos de MI sucursal.
-  // (Antes mostraba todos los cortes del tenant sin importar sucursal.)
   const cutsForBranch = myBranchId
     ? cuts.filter(c => {
         if (!c.shift_ids || c.shift_ids.length === 0) return false
@@ -508,6 +521,20 @@ export default function PayrollPage() {
 
   if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando...</div>
 
+  // Aviso si no hay ninguna sucursal configurada para este tenant.
+  if (allBranches.length === 0) {
+    return (
+      <div className="p-4 md:p-6 max-w-2xl">
+        <h1 className="text-2xl font-extrabold text-white mb-2">Nómina</h1>
+        <div className="card text-center py-10">
+          <div className="text-4xl mb-3">🏢</div>
+          <p className="text-gray-400 text-sm mb-2">No hay sucursales configuradas.</p>
+          <p className="text-gray-600 text-xs">Ve a <span className="text-brand-400">Configuración → Sucursales</span> para crear al menos una antes de generar cortes de nómina.</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="p-4 md:p-6 max-w-2xl">
       <div className="mb-5">
@@ -515,12 +542,44 @@ export default function PayrollPage() {
         <p className="text-gray-500 text-xs font-mono mt-0.5">
           SEMANA: {isoDate(range.start)} → {isoDate(range.end)}
         </p>
-        {myBranchName && (
-          <p className="text-brand-400/80 text-xs font-mono mt-0.5">
-            🏢 {myBranchName} · CORTE: {DAY_FL[closingDay]}
-          </p>
-        )}
+        <p className="text-brand-400/80 text-xs font-mono mt-0.5">
+          🏢 {myBranchName || 'Sucursal sin nombre'} · CORTE: {DAY_FL[closingDay]}
+        </p>
       </div>
+
+      {/* ── Selector de sucursal (solo propietario con >1 sucursal) ────────── */}
+      {isOwner && allBranches.length > 1 && (
+        <div className="card mb-4">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">Sucursal a cerrar</p>
+            <span className="text-[9px] font-mono text-orange-400/80">
+              Cada sucursal se cierra por separado
+            </span>
+          </div>
+          <select
+            className="input text-sm"
+            value={selectedBranchId || ''}
+            onChange={e => setSelectedBranchId(e.target.value)}
+          >
+            {allBranches.map(b => (
+              <option key={b.id} value={b.id}>🏢 {b.name}</option>
+            ))}
+          </select>
+          <p className="text-[10px] text-gray-600 font-mono mt-1.5">
+            💡 Cambia de sucursal para generar el corte de cada una. Los empleados, turnos e incidencias se filtran automáticamente.
+          </p>
+        </div>
+      )}
+
+      {/* ── Aviso cuando el gerente no tiene sucursal asignada ──────────── */}
+      {!isOwner && !myBranchId && (
+        <div className="px-4 py-3 mb-4 bg-red-500/10 border border-red-500/30 rounded-xl">
+          <p className="text-red-400 text-sm font-bold">🚫 No tienes sucursal asignada</p>
+          <p className="text-red-400/70 text-xs mt-0.5">
+            Pídele al propietario de la empresa que te asigne una sucursal desde <span className="font-bold">Configuración → Equipo</span>.
+          </p>
+        </div>
+      )}
 
       {/* ── Revisión de incidencias (requerida antes del corte) ─────────────── */}
       {incidentShifts.length > 0 && (
