@@ -84,6 +84,23 @@ export default function OnboardingPage() {
         }
       }
 
+      // 3. Crear sucursal inicial — si no hay branches, Empleados/Asistencia/Nomina aparecen vacios
+      //    sin guia. my_tenant_id() y is_tenant_admin() ya funcionan porque profile ya se guardo.
+      const { error: bErr } = await supabase
+        .from('branches')
+        .insert({
+          tenant_id: tenant.id,
+          name: companyName.trim(),
+          slug: slug + '-main',
+          active: true,
+          config: {}
+        })
+      if (bErr) {
+        // No bloquear el flujo — el usuario puede crear la sucursal manualmente desde Config
+        console.error('[onboarding] branch insert error (non-fatal):', bErr)
+        toast('Empresa creada. Crea tu primera sucursal en Config → Sucursales.', { icon: '⚠️' })
+      }
+
       toast.success('Empresa creada — configurando...')
       // Hard reload para que el layout recargue el tenant correctamente
       window.location.href = '/dashboard'
