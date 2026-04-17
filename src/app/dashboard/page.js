@@ -5,6 +5,20 @@ import { createClient } from '@/lib/supabase'
 import { fmtTime, weekRange, isoDate, diffMin, DAYS, countGraveIncidents, hasVacationPending, calcVacationDays } from '@/lib/utils'
 import Link from 'next/link'
 
+function daysUntilBirthday(iso) {
+  if (!iso) return null
+  const parts = String(iso).split('T')[0].split('-')
+  if (parts.length !== 3) return null
+  const m = parseInt(parts[1], 10) - 1
+  const d = parseInt(parts[2], 10)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  let next = new Date(today.getFullYear(), m, d)
+  if (next < today) next = new Date(today.getFullYear() + 1, m, d)
+  const diff = Math.round((next - today) / (1000 * 60 * 60 * 24))
+  return diff
+}
+
 function StatCard({ label, value, color = 'text-white', sub }) {
   return (
     <div className="card-sm">
@@ -88,6 +102,12 @@ export default function DashboardPage() {
   const graveAlerts = employees.filter(e => countGraveIncidents(graveShifts, e.id) >= 3)
   // Employees with vacation pending
   const vacationPending = employees.filter(e => hasVacationPending(e))
+  // Upcoming birthdays in next 7 days (incluye hoy)
+  const upcomingBirthdays = employees
+    .filter(e => e.birth_date)
+    .map(e => ({ ...e, _bdDays: daysUntilBirthday(e.birth_date) }))
+    .filter(e => e._bdDays !== null && e._bdDays >= 0 && e._bdDays <= 7)
+    .sort((a, b) => a._bdDays - b._bdDays)
   const notYet = employees.filter(e => !todayShifts.some(s => s.employee_id === e.id))
   const retardos = todayShifts.filter(s => s.classification?.type === 'retardo')
   const activeNow = todayShifts.filter(s => s.status === 'open')
@@ -150,6 +170,40 @@ export default function DashboardPage() {
         <StatCard label="Sin checar" value={notYet.length} color="text-orange-400" />
         <StatCard label="Retardos" value={retardos.length} color={retardos.length > 0 ? 'text-orange-400' : 'text-white'} />
         <StatCard label="Activos ahora" value={activeNow.length} color="text-blue-400" />
+      </div>
+
+      {/* Upcoming birthdays widget */}
+      <div className="card mb-4">
+        <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">🎂 Cumpleaños esta semana</p>
+        {upcomingBirthdays.length === 0 ? (
+          <p className="text-xs text-gray-600">Sin cumpleaños en los próximos 7 días.</p>
+        ) : (
+          <div className="space-y-2">
+            {upcomingBirthdays.map(e => {
+              const d = e._bdDays
+              const label = d === 0 ? 'HOY' : d === 1 ? 'MAÑANA' : `en ${d} días`
+              const rowClass = d === 0
+                ? 'bg-pink-500/10 border-pink-400/30'
+                : d === 1
+                ? 'bg-yellow-500/10 border-yellow-400/30'
+                : 'bg-dark-700 border-dark-border'
+              const labelClass = d === 0
+                ? 'text-pink-300'
+                : d === 1
+                ? 'text-yellow-300'
+                : 'text-gray-400'
+              return (
+                <div key={e.id} className={`flex items-center justify-between px-3 py-2 border rounded-lg ${rowClass}`}>
+                  <div>
+                    <div className="text-sm text-white">{e.name}</div>
+                    <div className="text-[10px] text-gray-500 font-mono">{e.department || ''}</div>
+                  </div>
+                  <div className={`text-[10px] font-mono font-bold ${labelClass}`}>{label}</div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Active shifts */}
