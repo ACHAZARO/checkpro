@@ -1,9 +1,10 @@
 'use client'
 // src/app/dashboard/page.js
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { fmtTime, weekRange, isoDate, diffMin, DAYS, countGraveIncidents, hasVacationPending, calcVacationDays } from '@/lib/utils'
 import Link from 'next/link'
+import toast from 'react-hot-toast'
 
 function daysUntilBirthday(iso) {
   if (!iso) return null
@@ -17,6 +18,13 @@ function daysUntilBirthday(iso) {
   if (next < today) next = new Date(today.getFullYear() + 1, m, d)
   const diff = Math.round((next - today) / (1000 * 60 * 60 * 24))
   return diff
+}
+
+function formatDDMM(iso) {
+  if (!iso) return '—'
+  const s = String(iso).slice(0, 10).split('-')
+  if (s.length !== 3) return '—'
+  return `${s[2]}/${s[1]}`
 }
 
 function StatCard({ label, value, color = 'text-white', sub }) {
@@ -39,10 +47,46 @@ function ShiftBadge({ status, classification }) {
   return <span className="badge-green">Completa</span>
 }
 
+function WidgetSkeleton({ title }) {
+  return (
+    <div className="card">
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">{title}</p>
+      <div className="space-y-2">
+        <div className="h-10 bg-dark-700 rounded-lg animate-pulse" />
+        <div className="h-10 bg-dark-700 rounded-lg animate-pulse" />
+        <div className="h-10 bg-dark-700 rounded-lg animate-pulse" />
+      </div>
+    </div>
+  )
+}
+
+function WidgetError({ title, onRetry }) {
+  return (
+    <div className="card">
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">{title}</p>
+      <div className="px-3 py-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center justify-between">
+        <span className="text-xs text-red-400 font-mono">No se pudo cargar</span>
+        <button
+          onClick={onRetry}
+          className="text-xs font-bold text-red-400 underline">
+          Reintentar
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [tenantId, setTenantId] = useState(null)
+
+  // Vacation widgets state
+  const [vacUpcoming, setVacUpcoming] = useState({ loading: true, items: [], error: null })
+  const [vacActive, setVacActive] = useState({ loading: true, items: [], error: null })
+  const [vacExpired, setVacExpired] = useState({ loading: true, items: [], error: null })
+  const [reactivating, setReactivating] = useState(null)
+
   const now = new Date()
 
   useEffect(() => {
@@ -92,6 +136,62 @@ export default function DashboardPage() {
     load()
   }, [])
 
+  // ---- Vacation widgets: paralelo via API endpoints ----
+  const fetchUpcoming = useCallback(async () => {
+    setVacUpcoming(s => ({ ...s, loading: true, error: null }))
+    try {
+      const r = await fetch('/api/vacations/upcoming?days=30', { cache: 'no-store' })
+      const j = await r.json()
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`)
+      setVacUpcoming({ loading: false, items: j.items || [], error: null })
+    } catch (e) {
+      setVacUpcoming({ loading: false, items: [], error: e.message || 'error' })
+    }
+  }, [])
+
+  const fetchActive = useCallback(async () => {
+    setVacActive(s => ({ ...s, loading: true, error: null }))
+    try {
+      const r = await fetch('/api/vacations/active', { cache: 'no-store' })
+      const j = await r.json()
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`)
+      setVacActive({ loading: false, items: j.items || [], error: null })
+    } catch (e) {
+      setVacActive({ loading: false, items: [], error: e.message || 'error' })
+    }
+  }, [])
+
+  const fetchExpired = useCallback(async () => {
+    setVacExpired(s => ({ ...s, loading: true, error: null }))
+    try {
+      const r = await fetch('/api/vacations/expired', { cache: 'no-store' })
+      const j = await r.json()
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`)
+      setVacExpired({ loading: false, items: j.items || [], error: null })
+    } catch (e) {
+      setVacExpired({ loading: false, items: [], error: e.message || 'error' })
+    }
+  }, [])
+
+  useEffect(() => {
+    Promise.all([fetchUpcoming(), fetchActive(), fetchExpired()])
+  }, [fetchUpcoming, fetchActive, fetchExpired])
+
+  async function reactivatePeriod(id) {
+    setReactivating(id)
+    try {
+      const r = await fetch(`/api/vacations/${id}/reactivate`, { method: 'POST' })
+      const j = await r.json()
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`)
+      toast.success('Periodo reactivado')
+      await fetchExpired()
+    } catch (e) {
+      toast.error(e.message || 'No se pudo reactivar')
+    } finally {
+      setReactivating(null)
+    }
+  }
+
   if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando...</div>
   if (!data) return null
 
@@ -114,7 +214,7 @@ export default function DashboardPage() {
   const getEmpName = id => employees.find(e => e.id === id)?.name || id
 
   return (
-    <div className="p-4 md:p-6 max-w-2xl">
+    <div className="p-4 md:p-6 max-w-5xl">
       <div className="mb-5">
         <h1 className="text-2xl font-extrabold text-white">Hoy</h1>
         <p className="text-gray-500 text-xs font-mono mt-0.5">
@@ -172,39 +272,157 @@ export default function DashboardPage() {
         <StatCard label="Activos ahora" value={activeNow.length} color="text-blue-400" />
       </div>
 
-      {/* Upcoming birthdays widget */}
-      <div className="card mb-4">
-        <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">🎂 Cumpleaños esta semana</p>
-        {upcomingBirthdays.length === 0 ? (
-          <p className="text-xs text-gray-600">Sin cumpleaños en los próximos 7 días.</p>
-        ) : (
-          <div className="space-y-2">
-            {upcomingBirthdays.map(e => {
-              const d = e._bdDays
-              const label = d === 0 ? 'HOY' : d === 1 ? 'MAÑANA' : `en ${d} días`
-              const rowClass = d === 0
-                ? 'bg-pink-500/10 border-pink-400/30'
-                : d === 1
-                ? 'bg-yellow-500/10 border-yellow-400/30'
-                : 'bg-dark-700 border-dark-border'
-              const labelClass = d === 0
-                ? 'text-pink-300'
-                : d === 1
-                ? 'text-yellow-300'
-                : 'text-gray-400'
-              return (
-                <div key={e.id} className={`flex items-center justify-between px-3 py-2 border rounded-lg ${rowClass}`}>
-                  <div>
-                    <div className="text-sm text-white">{e.name}</div>
-                    <div className="text-[10px] text-gray-500 font-mono">{e.department || ''}</div>
+      {/* ---------- VACATIONS WIDGETS GRID ---------- */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+
+        {/* A. Cumpleaños esta semana */}
+        <div className="card">
+          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">🎂 Cumpleaños esta semana</p>
+          {upcomingBirthdays.length === 0 ? (
+            <p className="text-xs text-gray-600">No hay cumpleaños en los próximos 7 días.</p>
+          ) : (
+            <div className="space-y-2">
+              {upcomingBirthdays.map(e => {
+                const d = e._bdDays
+                const rowClass = d === 0
+                  ? 'bg-green-500/15 border-green-400/30'
+                  : d === 1
+                  ? 'bg-yellow-500/15 border-yellow-400/30'
+                  : 'bg-dark-700 border-dark-border'
+                const labelClass = d === 0
+                  ? 'text-green-300'
+                  : d === 1
+                  ? 'text-yellow-300'
+                  : 'text-gray-400'
+                const text = d === 0
+                  ? `🎉 Hoy cumple ${e.name}`
+                  : d === 1
+                  ? `Mañana cumple ${e.name}`
+                  : `${e.name} en ${d} días`
+                return (
+                  <div key={e.id} className={`flex items-center justify-between px-3 py-2 border rounded-lg ${rowClass}`}>
+                    <div className="text-sm text-white">{text}</div>
+                    <div className={`text-[10px] font-mono font-bold ${labelClass}`}>
+                      {formatDDMM(e.birth_date)}
+                    </div>
                   </div>
-                  <div className={`text-[10px] font-mono font-bold ${labelClass}`}>{label}</div>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* B. Aniversarios próximos (30 días) */}
+        {vacUpcoming.loading ? (
+          <WidgetSkeleton title="🎖️ Aniversarios próximos" />
+        ) : vacUpcoming.error ? (
+          <WidgetError title="🎖️ Aniversarios próximos" onRetry={fetchUpcoming} />
+        ) : (
+          <div className="card">
+            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">🎖️ Aniversarios próximos (30d)</p>
+            {vacUpcoming.items.length === 0 ? (
+              <p className="text-xs text-gray-600">Sin aniversarios en los próximos 30 días.</p>
+            ) : (
+              <div className="space-y-2">
+                {vacUpcoming.items.map(({ employee, info, entitled_days_next }) => {
+                  const urgent = info.daysUntilNext < 7
+                  const rowClass = urgent
+                    ? 'bg-yellow-500/15 border-yellow-400/40'
+                    : 'bg-dark-700 border-dark-border'
+                  const icon = urgent ? '⏰' : '🎖️'
+                  return (
+                    <div key={employee.id} className={`px-3 py-2 border rounded-lg ${rowClass}`}>
+                      <div className="text-sm text-white flex items-center gap-2">
+                        <span>{icon}</span>
+                        <span className="font-semibold">{employee.name}</span>
+                      </div>
+                      <div className="text-[11px] text-gray-400 font-mono mt-0.5">
+                        cumple {info.nextYear} año{info.nextYear === 1 ? '' : 's'} el {formatDDMM(info.nextAnnivDate)}
+                        {' · '}{entitled_days_next} días vac.
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
+
+        {/* C. En vacaciones hoy */}
+        {vacActive.loading ? (
+          <WidgetSkeleton title="🏖 En vacaciones hoy" />
+        ) : vacActive.error ? (
+          <WidgetError title="🏖 En vacaciones hoy" onRetry={fetchActive} />
+        ) : (
+          <div className="card">
+            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">🏖 En vacaciones hoy</p>
+            {vacActive.items.length === 0 ? (
+              <p className="text-xs text-gray-600">Nadie de vacaciones hoy.</p>
+            ) : (
+              <div className="space-y-2">
+                {vacActive.items.map(({ period, employee, coverage }) => {
+                  const coverageName = Array.isArray(coverage) && coverage.length > 0
+                    ? (coverage[0].name || coverage[0].employee_name || null)
+                    : null
+                  return (
+                    <div key={period.id} className="px-3 py-2 border rounded-lg bg-purple-500/10 border-purple-400/30">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-sm text-white font-semibold">{employee?.name || 'Empleado'}</div>
+                        <div className="text-[10px] font-mono text-purple-300">
+                          hasta {formatDDMM(period.end_date)}
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-gray-400 font-mono mt-0.5">
+                        {employee?.department || 'sucursal'}
+                        {coverageName && <> · cubre: {coverageName}</>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* D. Prescripciones (expired) */}
+        {vacExpired.loading ? (
+          <WidgetSkeleton title="⚠️ Prescripciones" />
+        ) : vacExpired.error ? (
+          <WidgetError title="⚠️ Prescripciones" onRetry={fetchExpired} />
+        ) : (
+          <div className="card">
+            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">⚠️ Prescripciones</p>
+            {vacExpired.items.length === 0 ? (
+              <p className="text-xs text-gray-600">Sin periodos prescritos.</p>
+            ) : (
+              <div className="space-y-2">
+                {vacExpired.items.map(({ period, employee }) => (
+                  <div key={period.id} className="px-3 py-2 border rounded-lg bg-red-500/10 border-red-500/20">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm text-white">
+                        <span className="font-semibold">{employee?.name || 'Empleado'}</span>
+                        {' '}tiene <span className="font-bold text-red-300">{period.entitled_days || 0}</span> días prescritos
+                      </div>
+                      <button
+                        onClick={() => reactivatePeriod(period.id)}
+                        disabled={reactivating === period.id}
+                        className="text-[10px] font-bold text-red-300 hover:text-red-200 underline disabled:opacity-50">
+                        {reactivating === period.id ? '...' : 'Reactivar'}
+                      </button>
+                    </div>
+                    <div className="text-[11px] text-gray-400 font-mono mt-0.5">
+                      vencieron {formatDDMM(period.expiration_date)}
+                      {period.anniversary_year ? ` · año ${period.anniversary_year}` : ''}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
+      {/* ---------- /VACATIONS WIDGETS ---------- */}
 
       {/* Active shifts */}
       {activeNow.length > 0 && (
