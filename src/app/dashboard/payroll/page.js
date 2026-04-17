@@ -5,6 +5,9 @@ import { createClient } from '@/lib/supabase'
 import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
+// Default legend si el usuario no guardo uno custom (espejo de settings/DEFAULT_LEYENDA)
+const DEFAULT_PAYROLL_LEGEND = 'Al firmar el presente comprobante de nómina, el trabajador acepta que los montos, horas trabajadas e incidencias registradas son correctos y conformes a su contrato laboral. Cualquier aclaración deberá presentarse por escrito en un plazo máximo de 5 días hábiles. Documento confidencial de uso interno.'
+
 // ── Calculo de salario diario para PAGO DE VACACIONES ─────────────────────
 // BUG 4: LFT art. 89 dicta salario diario = monthly_salary / 30.
 // Se usa 30 fijo (no workDaysPerWeek*52/12) para que jornadas de <5 dias
@@ -305,11 +308,32 @@ export default function PayrollPage() {
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) return
-    const { data: prof } = await supabase.from('profiles').select('tenant_id').eq('id', session.user.id).single()
+    const { data: prof } = await supabase.from('profiles').select('tenant_id,branch_id').eq('id', session.user.id).single()
     if (!prof?.tenant_id) return
     setTenantId(prof.tenant_id)
     const { data: tenant } = await supabase.from('tenants').select('config,name').eq('id', prof.tenant_id).single()
-    setCfg(tenant?.config)
+    // FIX: cargar sucursales reales (no de config JSONB) y elegir la del usuario
+    // si tiene branch_id, si no la primera activa.
+    const { data: branchData } = await supabase
+      .from('branches')
+      .select('id,name,config,active')
+      .eq('tenant_id', prof.tenant_id)
+      .eq('active', true)
+      .order('created_at')
+    const myBranch = (branchData || []).find(b => b.id === prof.branch_id) || (branchData || [])[0] || null
+    // Mezclar tenant.config con override de branch (branch wins)
+    // y garantizar que branchName refleje la sucursal actual (no el legacy "Mi Sucursal").
+    const mergedCfg = {
+      ...(tenant?.config || {}),
+      ...(myBranch?.config || {}),
+      // branchName: nombre real de la sucursal (no el legacy JSONB).
+      branchName: myBranch?.name || tenant?.name || tenant?.config?.branchName || '',
+      // payrollLegend: preferir branch override > tenant config > default
+      payrollLegend: (myBranch?.config?.payrollLegend
+                      || tenant?.config?.payrollLegend
+                      || DEFAULT_PAYROLL_LEGEND),
+    }
+    setCfg(mergedCfg)
     const [{ data: empData }, { data: shiftData }, { data: cutData }, { data: vacData }] = await Promise.all([
       supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).eq('status', 'active').eq('has_shift', true),
       supabase.from('shifts').select('*').eq('tenant_id', prof.tenant_id).order('date_str', { ascending: false }),

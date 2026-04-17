@@ -91,10 +91,12 @@ export default function AttendancePage() {
     if (!prof?.tenant_id) return
     setTenantId(prof.tenant_id)
 
-    const [{ data: empData }, { data: shiftData }, { data: tenantData }, { data: allShiftData }, { data: vacData }] = await Promise.all([
+    const [{ data: empData }, { data: shiftData }, { data: tenantData }, { data: branchData }, { data: allShiftData }, { data: vacData }] = await Promise.all([
       supabase.from('employees').select('id,name,department,monthly_salary,schedule').eq('tenant_id', prof.tenant_id).neq('status','deleted'),
       supabase.from('shifts').select('*').eq('tenant_id', prof.tenant_id).gte('date_str', filterFrom).lte('date_str', filterTo).order('date_str', { ascending: false }).order('entry_time', { ascending: false }),
       supabase.from('tenants').select('config').eq('id', prof.tenant_id).single(),
+      // FIX: leer sucursales de la tabla canonica (no del JSONB legacy)
+      supabase.from('branches').select('id,name,active').eq('tenant_id', prof.tenant_id).eq('active', true).order('created_at'),
       // Load all shifts for grave incident count (last 12 months)
       supabase.from('shifts').select('employee_id,classification,status').eq('tenant_id', prof.tenant_id)
         .gte('date_str', isoDate(new Date(Date.now() - 365 * 24 * 3600 * 1000))),
@@ -110,7 +112,8 @@ export default function AttendancePage() {
     setEmps(empData || [])
     setShifts(shiftData || [])
     setAllShifts(allShiftData || [])
-    setBranches(tenantData?.config?.branches || [])
+    // FIX: preferir tabla branches; fallback a JSONB legacy
+    setBranches((branchData && branchData.length > 0) ? branchData : (tenantData?.config?.branches || []))
     setVacationPeriods(vacData || [])
 
     // Auto-detect possible absences (excluye dias que caen en vacaciones)

@@ -108,9 +108,11 @@ export default function EmployeesPage() {
     setTenantId(prof.tenant_id)
     // FIX 8: cargar también vacation_periods vivos para poder evaluar
     // hasVacationPending contra la tabla real (no contra el array legacy).
-    const [{ data: empData }, { data: tenantData }, { data: vpData }] = await Promise.all([
+    const [{ data: empData }, { data: tenantData }, { data: branchData }, { data: vpData }] = await Promise.all([
       supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).neq('status', 'deleted').order('employee_code'),
       supabase.from('tenants').select('config').eq('id', prof.tenant_id).single(),
+      // FIX: leer sucursales de la tabla canonica (no del JSONB legacy)
+      supabase.from('branches').select('id,name,active').eq('tenant_id', prof.tenant_id).eq('active', true).order('created_at'),
       supabase
         .from('vacation_periods')
         .select('employee_id,anniversary_year,status,end_date')
@@ -118,7 +120,8 @@ export default function EmployeesPage() {
         .in('status', ['pending', 'postponed', 'active', 'completed', 'approved']),
     ])
     setEmps(empData || [])
-    setBranches(tenantData?.config?.branches || [])
+    // FIX: preferir tabla branches; si vacia fallback al array legacy por si algun tenant viejo no migro
+    setBranches((branchData && branchData.length > 0) ? branchData : (tenantData?.config?.branches || []))
     setVacTable(tenantData?.config?.vacationTable || tenantData?.config?.vacation_table || null)
     setVacPeriods(vpData || [])
     setLoading(false)
