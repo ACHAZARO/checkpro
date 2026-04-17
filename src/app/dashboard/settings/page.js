@@ -424,19 +424,14 @@ function DangerZone({ tenantName: fallbackName }) {
 
   return (
     <>
-      <div className="mt-8 p-4 border border-red-500/40 bg-red-500/5 rounded-2xl">
-        <p className="text-sm font-bold text-red-400 mb-1">⚠️ Zona de peligro</p>
-        <p className="text-xs text-gray-400 mb-3 leading-relaxed">
-          Eliminar tu cuenta borra permanentemente la empresa, todos los empleados, turnos,
-          cortes, sucursales y registros de bitácora. El email queda libre para volver a
-          registrarse. <span className="text-red-400 font-bold">Esta acción no se puede deshacer.</span>
-        </p>
+      {/* Trigger sutil: solo un link pequeño. Toda la advertencia vive en el modal. */}
+      <div className="mt-10 pt-4 border-t border-dark-border flex justify-center">
         <button
           type="button"
           onClick={openModal}
-          className="px-4 py-2 bg-red-500/20 border border-red-500/50 text-red-400 text-sm font-bold rounded-xl active:brightness-90 hover:bg-red-500/30"
+          className="text-xs font-mono text-gray-600 hover:text-red-400 transition-colors underline underline-offset-2"
         >
-          🗑️ Eliminar cuenta permanentemente
+          Eliminar cuenta
         </button>
       </div>
 
