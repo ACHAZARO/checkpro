@@ -342,18 +342,30 @@ export default function CheckPage() {
     const urlBranch = params.get('branch')
 
     async function init() {
+      // FIX: merge branch.config sobre tenant.config cuando hay urlBranch.
+      // Importante para location (GPS perimeter) — antes todas las sucursales
+      // compartian el GPS del tenant, lo que rompia geofencing multi-branch.
+      const mergeBranch = (tenantCfg, brList, bid) => {
+        if (!bid) return tenantCfg
+        const b = brList.find(x => x.id === bid)
+        if (!b) return tenantCfg
+        return { ...(tenantCfg || {}), ...(b.config || {}) }
+      }
+
       // Try URL params first (fresh QR scan)
       if (urlSlug) {
         try {
           const res = await fetch(`/api/check/tenant?slug=${encodeURIComponent(urlSlug)}`)
           if (res.ok) {
             const data = await res.json()
-            setTenantId(data.id); setCfg(data.config); setSlug(data.slug)
-            setLogoUrl(data.config?.logoUrl || null)
             // FIX: preferir data.branches (tabla real) y caer a config.branches legacy
             const brList = (Array.isArray(data.branches) && data.branches.length > 0)
               ? data.branches
               : (data.config?.branches || [])
+            setTenantId(data.id)
+            setCfg(mergeBranch(data.config, brList, urlBranch))
+            setSlug(data.slug)
+            setLogoUrl(data.config?.logoUrl || null)
             if (urlBranch) {
               const b = brList.find(b => b.id === urlBranch)
               setBranchName(b?.name || '')
@@ -369,11 +381,13 @@ export default function CheckPage() {
       if (stored) {
         try {
           const data = JSON.parse(stored)
-          setTenantId(data.id); setCfg(data.config); setSlug(data.slug)
-          setLogoUrl(data.config?.logoUrl || null)
           const brList = (Array.isArray(data.branches) && data.branches.length > 0)
             ? data.branches
             : (data.config?.branches || [])
+          setTenantId(data.id)
+          setCfg(mergeBranch(data.config, brList, urlBranch))
+          setSlug(data.slug)
+          setLogoUrl(data.config?.logoUrl || null)
           if (urlBranch) {
             const b = brList.find(b => b.id === urlBranch)
             setBranchName(b?.name || ''); setBranchId(urlBranch)
