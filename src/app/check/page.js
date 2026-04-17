@@ -180,17 +180,43 @@ function EmergencyExitModal({ onConfirm, onCancel, busy }) {
 // ── VacationModal ─────────────────────────────────────────────────────────────
 // Mostrado cuando el empleado esta en un periodo de vacaciones activo.
 // Le permite decidir si se reincorpora hoy (sigue al PIN) o cancela.
+// BUG M: soporte ESC + back button Android + a11y (role=dialog, aria-modal).
+// Ademas hacemos body scroll lock al abrir y liberamos focus al cerrar.
 function VacationModal({ period, employeeName, onAccept, onCancel }) {
+  // Hooks deben llamarse siempre antes de cualquier return (rules-of-hooks).
+  useEffect(() => {
+    if (!period) return undefined
+    function onKey(e) {
+      if (e.key === 'Escape') { e.stopPropagation(); onCancel?.() }
+    }
+    document.addEventListener('keydown', onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [period, onCancel])
+
   if (!period) return null
   const endIso = String(period.end_date || '').slice(0, 10)
   const parts = endIso.split('-')
   const fmtEnd = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : endIso
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-5">
-      <div className="bg-dark-800 border border-purple-500/30 rounded-2xl p-6 w-full max-w-sm">
+    <div
+      className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-5"
+      onClick={onCancel}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="vac-modal-title"
+        className="bg-dark-800 border border-purple-500/30 rounded-2xl p-6 w-full max-w-sm"
+        onClick={e => e.stopPropagation()}
+      >
         <div className="text-center mb-4">
           <div className="text-4xl mb-2">🏖</div>
-          <h3 className="text-white font-bold text-lg mb-1">Estás de vacaciones</h3>
+          <h3 id="vac-modal-title" className="text-white font-bold text-lg mb-1">Estás de vacaciones</h3>
           <p className="text-gray-400 text-sm">
             {employeeName ? `${employeeName}, tu` : 'Tu'} periodo de vacaciones termina el{' '}
             <span className="text-purple-300 font-semibold">{fmtEnd}</span>.
@@ -490,9 +516,11 @@ export default function CheckPage() {
       if (!data.found) { setMsg({ type: 'err', text: 'ID no encontrado.' }); setBusy(false); return }
       setFoundEmp(data.employee); setOpenShift(data.openShift); setAllEmps(data.allEmployees || [])
 
-      // Consultar estatus de vacaciones (endpoint publico). Solo si no hay turno abierto
-      // (si esta en turno abierto significa que ya se reincorporo o nunca estuvo).
-      if (!data.openShift && data.employee?.id) {
+      // BUG N: consultar estatus de vacaciones SIEMPRE despues de identify,
+      // sin importar si hay turno abierto. Antes, un shift abierto fantasma
+      // durante un periodo active impedia ver el modal y el empleado solo
+      // podia hacer 'out', corrompiendo el flujo.
+      if (data.employee?.id) {
         try {
           const vacRes = await fetch(
             `/api/vacations/check-status/${data.employee.id}?tenant_id=${encodeURIComponent(tenantId)}`
@@ -500,7 +528,21 @@ export default function CheckPage() {
           const vacJson = await vacRes.json().catch(() => ({}))
           if (vacRes.ok && vacJson?.onVacation && vacJson.period) {
             setVacationPeriod(vacJson.period)
-            setShowVacationModal(true)
+            if (data.openShift) {
+              // Estado inconsistente: active + turno abierto. No bloqueamos,
+              // solo advertimos al gerente.
+              console.warn(
+                '[check] vacation active + openShift inconsistente',
+                { employee: data.employee?.id, periodId: vacJson.period?.id }
+              )
+              toast('⚠ Turno abierto durante vacaciones — notifica al gerente', {
+                icon: '⚠️',
+                duration: 6000,
+              })
+              setShowVacationModal(false)
+            } else {
+              setShowVacationModal(true)
+            }
           } else {
             setVacationPeriod(null)
             setShowVacationModal(false)

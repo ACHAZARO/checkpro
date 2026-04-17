@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase-server'
 import { todayISOMX } from '@/lib/utils'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -62,6 +63,15 @@ export async function POST(req, { params }) {
     return NextResponse.json({ ok: false, error: 'Sin permisos' }, { status: 403 })
   }
 
+  // BUG K: rate-limit para endpoints mutables autenticados.
+  const rl = rateLimit(`vac_mut:${profile.id}`, 30, 60_000)
+  if (!rl.ok) {
+    return NextResponse.json(
+      { ok: false, error: 'Demasiadas peticiones, intenta en un minuto.' },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } }
+    )
+  }
+
   const id = params?.id
   if (!id) return NextResponse.json({ ok: false, error: 'id requerido' }, { status: 400 })
 
@@ -106,8 +116,13 @@ export async function POST(req, { params }) {
 
   const newEndISO = toISODate(addDaysLocal(returnD, -1))
 
+  // BUG T: evitar crecimiento sin bound de notes. Si ya es largo, truncamos
+  // por la izquierda (conservamos las ultimas entradas).
   const existingNotes = period.notes ? `${period.notes} | ` : ''
-  const newNotes = `${existingNotes}Reincorporación temprana ${formatDMY(return_date)}`
+  let newNotes = `${existingNotes}Reincorporación temprana ${formatDMY(return_date)}`
+  if (newNotes.length > 1000) {
+    newNotes = '…' + newNotes.slice(-999)
+  }
 
   const { data: updated, error: upErr } = await admin
     .from('vacation_periods')

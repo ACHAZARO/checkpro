@@ -59,6 +59,8 @@ function addDaysLocal(date, n) {
 // Calcula end_date sumando N dias laborales (segun schedule) a partir de start_date.
 // Incluye start_date como dia 1 si es laboral; si no, busca el primer dia laboral.
 // Si schedule no tiene ningun dia marcado como work, asume dias calendario.
+// BUG E: cap aumentado a 730 (2 anos) para cubrir part-time extremo + festivos.
+// Si se excede, devolvemos null -> el caller reporta 400.
 function computeEndDateFromSchedule(startISO, workingDays, schedule) {
   const start = parseISODateLocal(startISO)
   if (!start || !Number.isFinite(workingDays) || workingDays <= 0) return startISO
@@ -70,15 +72,18 @@ function computeEndDateFromSchedule(startISO, workingDays, schedule) {
   }
   let cursor = new Date(start)
   let counted = 0
-  // Defensa: no iteramos mas de 365 dias para evitar loops si schedule es raro.
-  for (let i = 0; i < 365; i++) {
+  // BUG E: cap 730 (2 anos). Suficiente para 28 dias LFT con jornada 2d/semana
+  // (~98 dias calendario) + buffer generoso de festivos/extensiones.
+  const CAP = 730
+  for (let i = 0; i < CAP; i++) {
     const key = DAY_KEYS[cursor.getDay()]
     const day = schedule[key]
     if (day && day.work) counted += 1
     if (counted >= workingDays) return toISODate(cursor)
     cursor = addDaysLocal(cursor, 1)
   }
-  return toISODate(cursor)
+  // No se alcanzaron los dias solicitados dentro del cap -> schedule invalido.
+  return null
 }
 
 export async function POST(req) {
@@ -192,6 +197,16 @@ export async function POST(req) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
       // Calcular a partir de schedule + festivos
       const prelim = computeEndDateFromSchedule(start_date, entitled_days, employee.schedule)
+      // BUG E: si excede el cap, reportar error claro.
+      if (!prelim) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'No se pudo calcular end_date — revisa el schedule (muy pocos dias laborales o entitled_days excesivo).',
+          },
+          { status: 400 }
+        )
+      }
       end_date = extendForHolidays(start_date, prelim, holidays)
     }
     const today = todayISOMX()
@@ -225,6 +240,17 @@ export async function POST(req) {
       || employee.payment_type
       || (employee.schedule && employee.schedule.payment_type)
       || 'efectivo'
+    // BUG H: validar contra el CHECK constraint de la tabla antes del INSERT
+    // para evitar el 500 generico de Postgres cuando llega un valor invalido.
+    if (!['efectivo', 'transferencia'].includes(payment_type)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `payment_type invalido: "${payment_type}". Debe ser "efectivo" o "transferencia".`,
+        },
+        { status: 400 }
+      )
+    }
     const comp = computeCompensationAmount(employee, compensated_days)
     row.compensated_days = compensated_days
     row.compensated_amount = comp.amount

@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase-server'
 import { extendForHolidays } from '@/lib/vacations'
 import { todayISOMX } from '@/lib/utils'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -77,6 +78,15 @@ export async function POST(req, { params }) {
     return NextResponse.json({ ok: false, error: 'Sin permisos' }, { status: 403 })
   }
 
+  // BUG K: rate-limit para endpoints mutables autenticados.
+  const rl = rateLimit(`vac_mut:${profile.id}`, 30, 60_000)
+  if (!rl.ok) {
+    return NextResponse.json(
+      { ok: false, error: 'Demasiadas peticiones, intenta en un minuto.' },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } }
+    )
+  }
+
   const id = params?.id
   if (!id) return NextResponse.json({ ok: false, error: 'id requerido' }, { status: 400 })
 
@@ -84,6 +94,20 @@ export async function POST(req, { params }) {
   const start_date = String(body.start_date || '').slice(0, 10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
     return NextResponse.json({ ok: false, error: 'start_date requerido' }, { status: 400 })
+  }
+
+  // BUG C: rechazar start_date en el pasado. Si el gerente quiere registrar
+  // vacaciones historicas (p.ej. para reconstruir el libro), debe usar
+  // POST /api/vacations/create con fechas del pasado, que crea el periodo
+  // directo en status 'completed'. Resume solo reanuda para hoy o futuro.
+  if (start_date < todayISOMX()) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'Fecha de inicio en el pasado. Usa POST /create para registrar vacaciones historicas o usa fechas futuras.',
+      },
+      { status: 400 }
+    )
   }
 
   const { data: period, error: pErr } = await admin

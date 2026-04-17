@@ -44,7 +44,11 @@ export async function GET() {
     .eq('status', 'expired')
     .order('updated_at', { ascending: false, nullsFirst: false })
 
-  if (profile.role === 'manager' && profile.branch_id) {
+  // BUG J: manager sin branch_id NO debe ver todo el tenant.
+  if (profile.role === 'manager') {
+    if (!profile.branch_id) {
+      return NextResponse.json({ ok: true, items: [], count: 0 })
+    }
     q = q.eq('branch_id', profile.branch_id)
   }
 

@@ -181,6 +181,10 @@ export default function AttendancePage() {
     for (const d of rangeDates) {
       if (d < s || d > e) continue
       if (shiftsByEmpDate.has(`${emp.id}_${d}`)) continue // prevalece la asistencia real
+      // BUG L: filtrar dias donde el empleado no trabaja segun schedule.
+      // Mostrar filas moradas en domingos o descansos confunde visualmente.
+      const dk = dayKey(d + 'T12:00:00')
+      if (!emp.schedule?.[dk]?.work) continue
       virtualVacationRows.push({
         _virtual: 'vacation',
         id: `vac_${p.id}_${d}`,

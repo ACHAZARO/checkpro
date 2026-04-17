@@ -2,6 +2,8 @@
 // Cancela un periodo de vacaciones (pending | active | postponed -> cancelled).
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase-server'
+import { rateLimit } from '@/lib/rate-limit'
+import { todayISOMX } from '@/lib/utils'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -28,6 +30,15 @@ export async function POST(req, { params }) {
     return NextResponse.json({ ok: false, error: 'Sin permisos' }, { status: 403 })
   }
 
+  // BUG K: rate-limit para endpoints mutables autenticados.
+  const rl = rateLimit(`vac_mut:${profile.id}`, 30, 60_000)
+  if (!rl.ok) {
+    return NextResponse.json(
+      { ok: false, error: 'Demasiadas peticiones, intenta en un minuto.' },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } }
+    )
+  }
+
   const id = params?.id
   if (!id) return NextResponse.json({ ok: false, error: 'id requerido' }, { status: 400 })
 
@@ -45,6 +56,23 @@ export async function POST(req, { params }) {
       ok: false,
       error: `No se puede cancelar un periodo ${period.status}`,
     }, { status: 400 })
+  }
+
+  // BUG I: si el periodo ya esta en curso (active y hoy >= start_date), el
+  // gerente debe usar early-return en lugar de cancelar. Cancelar borraria
+  // el rastro de los dias ya consumidos y corrompe el balance.
+  if (period.status === 'active' && period.start_date) {
+    const today = todayISOMX()
+    const startStr = String(period.start_date).slice(0, 10)
+    if (today >= startStr) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Usa POST /early-return para cerrar periodos en curso.',
+        },
+        { status: 400 }
+      )
+    }
   }
 
   const { data: updated, error: upErr } = await admin

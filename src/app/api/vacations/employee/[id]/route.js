@@ -61,19 +61,25 @@ export async function GET(req, { params }) {
 
   const annivInfo = employee.hire_date ? anniversaryInfo(employee.hire_date, new Date()) : null
 
-  // Balance: dias pendientes (pending) y pospuestos (postponed)
+  // BUG D: exponer los 4 contadores por separado (pending, postponed,
+  // active, expired). La UI los muestra explicitos para evitar ambiguedad.
   let pendingDays = 0
   let pospuestasDays = 0
+  let activeDays = 0
+  let expiredDays = 0
   for (const p of periods || []) {
-    if (p.status === 'pending') pendingDays += Number(p.entitled_days) || 0
-    else if (p.status === 'postponed') pospuestasDays += Number(p.entitled_days) || 0
+    const days = Number(p.entitled_days) || 0
+    if (p.status === 'pending') pendingDays += days
+    else if (p.status === 'postponed') pospuestasDays += days
+    else if (p.status === 'active') activeDays += days
+    else if (p.status === 'expired') expiredDays += days
   }
 
   return NextResponse.json({
     ok: true,
     employee,
     anniversaryInfo: annivInfo,
-    balance: { pendingDays, pospuestasDays },
+    balance: { pendingDays, pospuestasDays, activeDays, expiredDays },
     periods: periods || [],
   })
 }

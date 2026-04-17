@@ -3,6 +3,7 @@
 // Si no tiene start_date -> 'postponed' (vuelve al pool de pospuestas).
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase-server'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -27,6 +28,15 @@ export async function POST(req, { params }) {
   const { profile, admin } = ctx
   if (!['owner', 'manager', 'super_admin'].includes(profile.role)) {
     return NextResponse.json({ ok: false, error: 'Sin permisos' }, { status: 403 })
+  }
+
+  // BUG K: rate-limit para endpoints mutables autenticados.
+  const rl = rateLimit(`vac_mut:${profile.id}`, 30, 60_000)
+  if (!rl.ok) {
+    return NextResponse.json(
+      { ok: false, error: 'Demasiadas peticiones, intenta en un minuto.' },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } }
+    )
   }
 
   const id = params?.id

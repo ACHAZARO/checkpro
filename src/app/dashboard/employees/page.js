@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import {
-  DAYS, DAY_L, monthlyToHourly, generateEmployeeCode,
-  calcYearsWorked, calcVacationDays, hasVacationPending, currentAnniversaryYear
+  DAYS, DAY_L, monthlyToHourly,
+  calcYearsWorked, calcVacationDays, hasVacationPending
 } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
@@ -211,19 +211,11 @@ export default function EmployeesPage() {
     setSheet('edit')
   }
 
-  // ── Mark vacation as taken for current anniversary year ───────────────────
-  async function markVacationTaken(emp) {
-    const hireDate = emp.hire_date || emp.schedule?.hireDate
-    const annivYear = currentAnniversaryYear(hireDate)
-    if (!annivYear) return
-    const supabase = createClient()
-    const taken = emp.schedule?.vacationYearsTaken || []
-    if (taken.includes(annivYear)) { toast('Ya marcado este año'); return }
-    const newSchedule = { ...emp.schedule, vacationYearsTaken: [...taken, annivYear] }
-    await supabase.from('employees').update({ schedule: newSchedule }).eq('id', emp.id)
-    toast.success(`Vacaciones ${annivYear} marcadas como tomadas ✓`)
-    await load()
-  }
+  // BUG F: markVacationTaken eliminado. La gestion correcta de vacaciones
+  // ocurre en /dashboard/employees/[id] (crea vacation_periods reales con
+  // status 'completed'). El array legacy schedule.vacationYearsTaken ya no
+  // se actualiza desde aqui para evitar desincronizacion con la tabla
+  // vacation_periods.
 
   const hasBranches = branches.length > 0
 
@@ -314,7 +306,8 @@ export default function EmployeesPage() {
                   </div>
                 </div>
 
-                {/* Vacation pending action */}
+                {/* BUG F: boton "Tomadas" eliminado (escribia al array legacy y no
+                    creaba vacation_periods reales). Gestion en "Ver detalle". */}
                 {vacPending && (
                   <div className="mt-3 flex items-center justify-between gap-3 px-3 py-2.5 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
                     <div>
@@ -323,11 +316,11 @@ export default function EmployeesPage() {
                         Corresponden {vacDays} días por {years} año{years !== 1 ? 's' : ''} de antigüedad (LFT 2023)
                       </p>
                     </div>
-                    <button
-                      onClick={() => markVacationTaken(emp)}
+                    <Link
+                      href={`/dashboard/employees/${emp.id}`}
                       className="shrink-0 px-3 py-1.5 bg-yellow-500/20 border border-yellow-500/40 rounded-lg text-yellow-400 text-xs font-bold active:bg-yellow-500/30 whitespace-nowrap">
-                      ✓ Tomadas
-                    </button>
+                      Gestionar →
+                    </Link>
                   </div>
                 )}
               </div>
@@ -350,11 +343,11 @@ export default function EmployeesPage() {
 
                 {/* Sucursal (requerida) */}
                 <div>
-                  <label className="label">
+                  <label className="label" htmlFor="emp-branch">
                     Sucursal <span className="text-red-400">*</span>
                   </label>
                   {hasBranches ? (
-                    <select className="input" value={form.branch_id || ''} onChange={e => F('branch_id', e.target.value)}>
+                    <select id="emp-branch" className="input" value={form.branch_id || ''} onChange={e => F('branch_id', e.target.value)}>
                       <option value="">— Selecciona una sucursal —</option>
                       {branches.map(b => (
                         <option key={b.id} value={b.id}>{b.name}</option>
@@ -368,21 +361,23 @@ export default function EmployeesPage() {
                 </div>
 
                 <div>
-                  <label className="label">Nombre completo</label>
-                  <input className="input" value={form.name || ''} onChange={e => F('name', e.target.value)} placeholder="Juan Pérez" />
+                  <label className="label" htmlFor="emp-name">Nombre completo</label>
+                  <input id="emp-name" className="input" value={form.name || ''} onChange={e => F('name', e.target.value)} placeholder="Juan Pérez" />
                 </div>
 
                 <div>
-                  <label className="label">Departamento</label>
-                  <input className="input" value={form.department || ''} onChange={e => F('department', e.target.value)} placeholder="Cocina, Caja..." />
+                  <label className="label" htmlFor="emp-department">Departamento</label>
+                  <input id="emp-department" className="input" value={form.department || ''} onChange={e => F('department', e.target.value)} placeholder="Cocina, Caja..." />
                 </div>
 
                 {/* Fecha de ingreso (obligatoria) */}
                 <div>
-                  <label className="label">
+                  <label className="label" htmlFor="emp-hire-date">
                     Fecha de ingreso <span className="text-red-400">*</span>
                   </label>
-                  <input className="input" type="date" required
+                  {/* BUG Q: no aceptar fechas futuras para hire_date */}
+                  <input id="emp-hire-date" className="input" type="date" required
+                    max={todayISO()}
                     value={form.hire_date || ''}
                     onChange={e => F('hire_date', e.target.value)} />
                   <p className="text-[10px] text-gray-600 font-mono mt-1 leading-snug">
@@ -391,18 +386,18 @@ export default function EmployeesPage() {
                 </div>
 
                 <div>
-                  <label className="label">PIN (4 dígitos)</label>
-                  <input className="input" inputMode="numeric" maxLength={4} value={form.pin || ''} onChange={e => F('pin', e.target.value)} placeholder="1234" />
+                  <label className="label" htmlFor="emp-pin">PIN (4 dígitos)</label>
+                  <input id="emp-pin" className="input" inputMode="numeric" maxLength={4} value={form.pin || ''} onChange={e => F('pin', e.target.value)} placeholder="1234" />
                 </div>
 
                 <div>
-                  <label className="label">Salario mensual ($)</label>
-                  <input className="input" type="number" inputMode="decimal" value={form.monthly_salary || ''} onChange={e => F('monthly_salary', e.target.value)} placeholder="15000" />
+                  <label className="label" htmlFor="emp-salary">Salario mensual ($)</label>
+                  <input id="emp-salary" className="input" type="number" inputMode="decimal" value={form.monthly_salary || ''} onChange={e => F('monthly_salary', e.target.value)} placeholder="15000" />
                 </div>
 
                 <div>
-                  <label className="label">Tipo de pago</label>
-                  <select className="input" value={form.payment_type || 'efectivo'} onChange={e => F('payment_type', e.target.value)}>
+                  <label className="label" htmlFor="emp-payment-type">Tipo de pago</label>
+                  <select id="emp-payment-type" className="input" value={form.payment_type || 'efectivo'} onChange={e => F('payment_type', e.target.value)}>
                     <option value="efectivo">Efectivo</option>
                     <option value="transferencia">Transferencia</option>
                   </select>
@@ -410,14 +405,17 @@ export default function EmployeesPage() {
                 </div>
 
                 <div>
-                  <label className="label">Fecha de nacimiento <span className="text-gray-600 font-normal">(opcional)</span></label>
-                  <input className="input" type="date" value={form.birth_date || ''} onChange={e => F('birth_date', e.target.value)} />
+                  <label className="label" htmlFor="emp-birth-date">Fecha de nacimiento <span className="text-gray-600 font-normal">(opcional)</span></label>
+                  {/* BUG Q: birth_date no puede ser futura */}
+                  <input id="emp-birth-date" className="input" type="date"
+                    max={todayISO()}
+                    value={form.birth_date || ''} onChange={e => F('birth_date', e.target.value)} />
                   <p className="text-[10px] text-gray-600 font-mono mt-1">Se usa para felicitarlo el día de su cumpleaños.</p>
                 </div>
 
                 <div>
-                  <label className="label">Etiqueta de rol</label>
-                  <input className="input" value={form.role_label || ''} onChange={e => F('role_label', e.target.value)} placeholder="Empleado, Cajero, Chef..." />
+                  <label className="label" htmlFor="emp-role-label">Etiqueta de rol</label>
+                  <input id="emp-role-label" className="input" value={form.role_label || ''} onChange={e => F('role_label', e.target.value)} placeholder="Empleado, Cajero, Chef..." />
                 </div>
 
                 <div className="flex items-center justify-between py-2">
@@ -444,8 +442,8 @@ export default function EmployeesPage() {
 
                 {sheet === 'edit' && (
                   <div>
-                    <label className="label">Estatus</label>
-                    <select className="input" value={form.status || 'active'} onChange={e => F('status', e.target.value)}>
+                    <label className="label" htmlFor="emp-status">Estatus</label>
+                    <select id="emp-status" className="input" value={form.status || 'active'} onChange={e => F('status', e.target.value)}>
                       <option value="active">Activo</option>
                       <option value="inactive">Inactivo</option>
                     </select>

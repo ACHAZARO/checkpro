@@ -4,7 +4,7 @@
 // Consume GET /api/vacations/employee/[id] y expone 3 acciones:
 // Tomar, Posponer, Compensar (via POST /api/vacations/create).
 // También permite cancelar, reanudar, reincorporación temprana, reactivar.
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
@@ -97,19 +97,110 @@ const TIPO_ICON = { tomadas: '🏖️', pospuestas: '📅', compensadas: '💰' 
 const TIPO_LABEL = { tomadas: 'Tomadas', pospuestas: 'Pospuestas', compensadas: 'Compensadas' }
 
 // ── modal wrapper (mismo patrón que employees/page.js) ──────────────────────
+// BUG O: a11y. role=dialog, aria-modal, ESC para cerrar, click backdrop cierra,
+// body scroll lock, foco inicial al primer input del sheet.
 function BottomSheet({ open, title, onClose, children }) {
+  const panelRef = useRef(null)
+  const titleId = useRef('bs-title-' + Math.random().toString(36).slice(2, 9)).current
+
+  useEffect(() => {
+    if (!open) return undefined
+    function onKey(e) {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose?.() }
+    }
+    document.addEventListener('keydown', onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    // Foco inicial al primer input/select/textarea del panel
+    const t = setTimeout(() => {
+      const first = panelRef.current?.querySelector('input, select, textarea, button')
+      first?.focus?.()
+    }, 30)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+      clearTimeout(t)
+    }
+  }, [open, onClose])
+
   if (!open) return null
   return (
-    <div className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end" style={{ touchAction: 'none' }}>
-      <div className="bg-dark-800 rounded-t-2xl overflow-y-scroll no-scrollbar"
-        style={{ maxHeight: '90vh', touchAction: 'pan-y' }}>
+    <div
+      className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end"
+      style={{ touchAction: 'none' }}
+      onClick={onClose}
+    >
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="bg-dark-800 rounded-t-2xl overflow-y-scroll no-scrollbar"
+        style={{ maxHeight: '90vh', touchAction: 'pan-y' }}
+        onClick={e => e.stopPropagation()}
+      >
         <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-4" />
         <div className="px-5 pb-10">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-bold text-white">{title}</h3>
-            <button onClick={onClose} className="text-gray-500 text-2xl leading-none active:text-white">×</button>
+            <h3 id={titleId} className="text-lg font-bold text-white">{title}</h3>
+            <button
+              onClick={onClose}
+              aria-label="Cerrar"
+              className="text-gray-500 text-2xl leading-none active:text-white">×</button>
           </div>
           {children}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// BUG P: reemplaza confirm()/alert() nativos. Estilo dark consistente, no
+// bloquea el hilo en iOS PWA. Uso: setConfirmState({ title, message, onConfirm })
+// y render <ConfirmSheet state={confirmState} onCancel={() => setConfirmState(null)} />
+function ConfirmSheet({ state, onCancel }) {
+  const open = !!state
+  useEffect(() => {
+    if (!open) return undefined
+    function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); onCancel?.() } }
+    document.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prev
+    }
+  }, [open, onCancel])
+  if (!open) return null
+  return (
+    <div
+      className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-5"
+      onClick={onCancel}
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="cs-title"
+        className="bg-dark-800 border border-dark-border rounded-2xl p-5 w-full max-w-sm"
+        onClick={e => e.stopPropagation()}
+      >
+        <h3 id="cs-title" className="text-white font-bold text-base mb-2">{state.title || 'Confirmar'}</h3>
+        <p className="text-gray-400 text-sm mb-5">{state.message}</p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { state.onConfirm?.(); onCancel?.() }}
+            className={`flex-1 py-2.5 rounded-xl font-bold text-sm border active:brightness-90 ${
+              state.danger
+                ? 'bg-red-500/20 border-red-500/40 text-red-300'
+                : 'bg-brand-400 border-brand-400 text-black'
+            }`}>
+            {state.confirmLabel || 'Confirmar'}
+          </button>
+          <button
+            onClick={onCancel}
+            className="flex-1 py-2.5 bg-dark-700 border border-dark-border rounded-xl text-gray-400 font-bold text-sm active:bg-dark-600">
+            {state.cancelLabel || 'Cancelar'}
+          </button>
         </div>
       </div>
     </div>
@@ -129,6 +220,7 @@ export default function EmployeeDetailPage() {
   const [sheetCtx, setSheetCtx] = useState({}) // contexto: period seleccionado
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
+  const [confirmState, setConfirmState] = useState(null) // BUG P: reemplaza confirm()
 
   const F = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -173,7 +265,8 @@ export default function EmployeeDetailPage() {
   // ── derivados ──────────────────────────────────────────────────────────────
   const employee = data?.employee || null
   const anniv = data?.anniversaryInfo || null
-  const balance = data?.balance || { pendingDays: 0, pospuestasDays: 0 }
+  // BUG G: balance ahora incluye los 4 contadores (pending, postponed, active, expired).
+  const balance = data?.balance || { pendingDays: 0, pospuestasDays: 0, activeDays: 0, expiredDays: 0 }
   const periods = data?.periods || []
   const expiredPeriods = periods.filter(p => p.status === 'expired')
   const pendingOrPostponed = periods.filter(p => ['pending', 'postponed'].includes(p.status))
@@ -371,8 +464,8 @@ export default function EmployeeDetailPage() {
     finally { setSaving(false) }
   }
 
-  async function doCancel(period) {
-    if (!confirm(`¿Cancelar este periodo (${TIPO_LABEL[period.tipo]} ${period.anniversary_year})?`)) return
+  // BUG P: reemplazamos confirm()/alert() nativos por <ConfirmSheet>.
+  async function performCancel(period) {
     try {
       const res = await fetch(`/api/vacations/${period.id}/cancel`, { method: 'POST' })
       const body = await res.json().catch(() => ({}))
@@ -382,8 +475,18 @@ export default function EmployeeDetailPage() {
     } catch { toast.error('Error de red') }
   }
 
-  async function doReactivate(period) {
-    if (!confirm(`¿Reactivar este periodo prescrito (${period.anniversary_year})?`)) return
+  function doCancel(period) {
+    setConfirmState({
+      title: 'Cancelar periodo',
+      message: `¿Cancelar este periodo (${TIPO_LABEL[period.tipo]} ${period.anniversary_year})?`,
+      confirmLabel: 'Cancelar periodo',
+      cancelLabel: 'No',
+      danger: true,
+      onConfirm: () => performCancel(period),
+    })
+  }
+
+  async function performReactivate(period) {
     try {
       const res = await fetch(`/api/vacations/${period.id}/reactivate`, { method: 'POST' })
       const body = await res.json().catch(() => ({}))
@@ -391,6 +494,16 @@ export default function EmployeeDetailPage() {
       toast.success('Periodo reactivado')
       await load()
     } catch { toast.error('Error de red') }
+  }
+
+  function doReactivate(period) {
+    setConfirmState({
+      title: 'Reactivar periodo prescrito',
+      message: `¿Reactivar este periodo prescrito (año ${period.anniversary_year})? Volverá a ${period.start_date ? 'pendiente' : 'pospuesto'}.`,
+      confirmLabel: 'Reactivar',
+      cancelLabel: 'Cancelar',
+      onConfirm: () => performReactivate(period),
+    })
   }
 
   // ── render ─────────────────────────────────────────────────────────────────
@@ -488,30 +601,36 @@ export default function EmployeeDetailPage() {
           )}
         </div>
 
-        {/* Balance actual */}
+        {/* Balance actual — BUG G: 4 contadores explicitos */}
         <div className="card-sm">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-2">
             <span className="text-base">🏖️</span>
             <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">Balance actual</p>
           </div>
-          <div className="flex items-baseline gap-4 flex-wrap">
+          <div className="grid grid-cols-4 gap-2">
             <div>
-              <p className="text-2xl font-extrabold text-brand-400 leading-none">{balance.pendingDays}</p>
-              <p className="text-[10px] text-gray-500 font-mono mt-0.5">días pendientes</p>
+              <p className="text-xl font-extrabold text-blue-400 leading-none">{balance.pendingDays}</p>
+              <p className="text-[9px] text-gray-500 font-mono mt-0.5 leading-tight">Pendientes</p>
             </div>
-            {balance.pospuestasDays > 0 && (
-              <div>
-                <p className="text-2xl font-extrabold text-orange-400 leading-none">{balance.pospuestasDays}</p>
-                <p className="text-[10px] text-gray-500 font-mono mt-0.5">días pospuestos</p>
-              </div>
-            )}
+            <div>
+              <p className="text-xl font-extrabold text-yellow-400 leading-none">{balance.pospuestasDays}</p>
+              <p className="text-[9px] text-gray-500 font-mono mt-0.5 leading-tight">Pospuestos</p>
+            </div>
+            <div>
+              <p className="text-xl font-extrabold text-green-400 leading-none">{balance.activeDays || 0}</p>
+              <p className="text-[9px] text-gray-500 font-mono mt-0.5 leading-tight">Activos hoy</p>
+            </div>
+            <div>
+              <p className="text-xl font-extrabold text-red-400 leading-none">{balance.expiredDays || 0}</p>
+              <p className="text-[9px] text-gray-500 font-mono mt-0.5 leading-tight">Prescritos</p>
+            </div>
           </div>
           {expiredPeriods.length > 0 && (
             <div className="mt-2 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg">
               <p className="text-red-400 text-[11px] font-bold">
                 ⚠ {expiredPeriods.length} periodo{expiredPeriods.length !== 1 ? 's' : ''} prescrito{expiredPeriods.length !== 1 ? 's' : ''}
               </p>
-              <p className="text-red-400/70 text-[10px] mt-0.5">Revisa el histórico abajo para reactivar.</p>
+              <p className="text-red-400/70 text-[10px] mt-0.5">Revisa el histórico abajo — puedes reactivar con el botón rojo.</p>
             </div>
           )}
         </div>
@@ -637,9 +756,9 @@ export default function EmployeeDetailPage() {
       <BottomSheet open={sheet === 'tomar'} title="🏖️ Tomar vacaciones ahora" onClose={closeSheet}>
         <div className="space-y-3">
           <div>
-            <label className="label">Aniversario</label>
+            <label className="label" htmlFor="vac-anniv">Aniversario</label>
             {pendingOrPostponed.filter(p => p.tipo !== 'compensadas').length > 0 ? (
-              <select className="input" value={form.anniversary_year || ''}
+              <select id="vac-anniv" className="input" value={form.anniversary_year || ''}
                 onChange={e => {
                   const y = Number(e.target.value)
                   const found = periods.find(p => p.anniversary_year === y && ['pending','postponed'].includes(p.status))
@@ -668,20 +787,26 @@ export default function EmployeeDetailPage() {
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="label">Fecha inicio</label>
-              <input type="date" className="input" value={form.start_date || ''}
+              <label className="label" htmlFor="vac-start-date">Fecha inicio</label>
+              {/* BUG Q: start_date no puede ser pasado al crear nuevo periodo */}
+              <input id="vac-start-date" type="date" className="input"
+                min={todayISO()}
+                value={form.start_date || ''}
                 onChange={e => F('start_date', e.target.value)} />
             </div>
             <div>
-              <label className="label">Fecha fin</label>
-              <input type="date" className="input" value={form.end_date || ''}
+              <label className="label" htmlFor="vac-end-date">Fecha fin</label>
+              {/* BUG Q: end_date no puede ser antes de start_date */}
+              <input id="vac-end-date" type="date" className="input"
+                min={form.start_date || todayISO()}
+                value={form.end_date || ''}
                 onChange={e => F('end_date', e.target.value)} />
             </div>
           </div>
 
           <div>
-            <label className="label">Prima vacacional (%)</label>
-            <input type="number" step="0.01" min="0" className="input" value={form.prima_pct ?? 25}
+            <label className="label" htmlFor="vac-prima-pct">Prima vacacional (%)</label>
+            <input id="vac-prima-pct" type="number" step="0.01" min="0" className="input" value={form.prima_pct ?? 25}
               onChange={e => F('prima_pct', e.target.value)} />
             {Number(form.prima_pct) < 25 && (
               <p className="text-[10px] text-yellow-400 font-mono mt-1">⚠ La LFT exige mínimo 25%.</p>
@@ -689,8 +814,8 @@ export default function EmployeeDetailPage() {
           </div>
 
           <div>
-            <label className="label">Notas (opcional)</label>
-            <textarea className="input min-h-[70px]" rows={3} value={form.notes || ''}
+            <label className="label" htmlFor="vac-notes">Notas (opcional)</label>
+            <textarea id="vac-notes" className="input min-h-[70px]" rows={3} value={form.notes || ''}
               onChange={e => F('notes', e.target.value)} placeholder="Detalles del periodo…" />
           </div>
 
@@ -710,8 +835,8 @@ export default function EmployeeDetailPage() {
             Se pospondrá el periodo del aniversario {form.anniversary_year || anniv?.yearsWorked || 1}. La LFT permite posponer hasta la fecha de prescripción (18 meses tras el aniversario).
           </div>
           <div>
-            <label className="label">Notas (por qué se pospone)</label>
-            <textarea className="input min-h-[90px]" rows={4} value={form.notes || ''}
+            <label className="label" htmlFor="vac-posp-notes">Notas (por qué se pospone)</label>
+            <textarea id="vac-posp-notes" className="input min-h-[90px]" rows={4} value={form.notes || ''}
               onChange={e => F('notes', e.target.value)} placeholder="Ej: temporada alta, acuerdo con empleado…" />
           </div>
           <div className="flex gap-2 pt-2">
@@ -727,8 +852,8 @@ export default function EmployeeDetailPage() {
       <BottomSheet open={sheet === 'compensar'} title="💰 Compensar vacaciones" onClose={closeSheet}>
         <div className="space-y-3">
           <div>
-            <label className="label">Aniversario</label>
-            <input type="number" className="input" value={form.anniversary_year ?? 1}
+            <label className="label" htmlFor="vac-comp-anniv">Aniversario</label>
+            <input id="vac-comp-anniv" type="number" className="input" value={form.anniversary_year ?? 1}
               onChange={e => F('anniversary_year', e.target.value)} />
             <p className="text-[10px] text-gray-600 font-mono mt-1">
               El API toma el periodo pendiente correspondiente.
@@ -736,14 +861,14 @@ export default function EmployeeDetailPage() {
           </div>
 
           <div>
-            <label className="label">Días a compensar</label>
-            <input type="number" min="1" className="input" value={form.compensated_days ?? ''}
+            <label className="label" htmlFor="vac-comp-days">Días a compensar</label>
+            <input id="vac-comp-days" type="number" min="1" className="input" value={form.compensated_days ?? ''}
               onChange={e => F('compensated_days', e.target.value)} />
           </div>
 
           <div>
-            <label className="label">Tipo de pago</label>
-            <select className="input" value={form.payment_type || 'efectivo'}
+            <label className="label" htmlFor="vac-comp-payment">Tipo de pago</label>
+            <select id="vac-comp-payment" className="input" value={form.payment_type || 'efectivo'}
               onChange={e => F('payment_type', e.target.value)}>
               <option value="efectivo">Efectivo</option>
               <option value="transferencia">Transferencia</option>
@@ -754,8 +879,8 @@ export default function EmployeeDetailPage() {
           </div>
 
           <div>
-            <label className="label">Prima vacacional (%)</label>
-            <input type="number" step="0.01" min="0" className="input" value={form.prima_pct ?? 25}
+            <label className="label" htmlFor="vac-comp-prima">Prima vacacional (%)</label>
+            <input id="vac-comp-prima" type="number" step="0.01" min="0" className="input" value={form.prima_pct ?? 25}
               onChange={e => F('prima_pct', e.target.value)} />
           </div>
 
@@ -768,8 +893,8 @@ export default function EmployeeDetailPage() {
           </div>
 
           <div>
-            <label className="label">Notas (opcional)</label>
-            <textarea className="input min-h-[70px]" rows={3} value={form.notes || ''}
+            <label className="label" htmlFor="vac-comp-notes">Notas (opcional)</label>
+            <textarea id="vac-comp-notes" className="input min-h-[70px]" rows={3} value={form.notes || ''}
               onChange={e => F('notes', e.target.value)} />
           </div>
 
@@ -789,13 +914,18 @@ export default function EmployeeDetailPage() {
             Año {sheetCtx.period?.anniversary_year} · {sheetCtx.period?.entitled_days} días
           </div>
           <div>
-            <label className="label">Fecha inicio</label>
-            <input type="date" className="input" value={form.start_date || ''}
+            <label className="label" htmlFor="vac-resume-start">Fecha inicio</label>
+            {/* BUG C + Q: resume rechaza pasado; limitar min a hoy */}
+            <input id="vac-resume-start" type="date" className="input"
+              min={todayISO()}
+              value={form.start_date || ''}
               onChange={e => F('start_date', e.target.value)} />
           </div>
           <div>
-            <label className="label">Fecha fin (opcional)</label>
-            <input type="date" className="input" value={form.end_date || ''}
+            <label className="label" htmlFor="vac-resume-end">Fecha fin (opcional)</label>
+            <input id="vac-resume-end" type="date" className="input"
+              min={form.start_date || todayISO()}
+              value={form.end_date || ''}
               onChange={e => F('end_date', e.target.value)} />
             <p className="text-[10px] text-gray-600 font-mono mt-1">
               Si se omite, el API calcula automáticamente según días disponibles.
@@ -817,8 +947,11 @@ export default function EmployeeDetailPage() {
             Cerrarás este periodo en la fecha indicada. El empleado regresa a trabajar.
           </div>
           <div>
-            <label className="label">Fecha de reincorporación</label>
-            <input type="date" className="input" value={form.return_date || ''}
+            <label className="label" htmlFor="vac-return-date">Fecha de reincorporación</label>
+            <input id="vac-return-date" type="date" className="input"
+              min={sheetCtx.period?.start_date ? addDaysISO(sheetCtx.period.start_date, 1) : undefined}
+              max={sheetCtx.period?.end_date ? addDaysISO(sheetCtx.period.end_date, 1) : undefined}
+              value={form.return_date || ''}
               onChange={e => F('return_date', e.target.value)} />
           </div>
           <div className="flex gap-2 pt-2">
@@ -829,6 +962,9 @@ export default function EmployeeDetailPage() {
           </div>
         </div>
       </BottomSheet>
+
+      {/* BUG P: ConfirmSheet reutilizable (reemplaza confirm()/alert()) */}
+      <ConfirmSheet state={confirmState} onCancel={() => setConfirmState(null)} />
     </div>
   )
 }

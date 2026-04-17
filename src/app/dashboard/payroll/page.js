@@ -32,6 +32,14 @@ function daysIntersect(aStart, aEnd, bStart, bEnd) {
 // Para un empleado, con sus periodos y rango de semana (weekStart, weekEnd):
 // - tomadas (active o completed): dias en rango * dailyRate + prima.
 // - compensadas con completed_at en rango: suma compensated_amount.
+//
+// BUG S (TODO P3): el corte semanal NO rastrea los vacation_period_ids pagados,
+// solo shift_ids. Si se re-abre un corte pagado y se mueve la fecha del periodo,
+// o si el completed_at de un periodo cae dos veces en rangos de cortes distintos
+// (edge case de re-apertura), se pagaria doble. Fix real requiere migracion SQL
+// agregando week_cuts.vacation_period_ids + enganche en closeWeek. Por ahora,
+// dejamos la logica tal cual: el flujo normal (cortes inmutables una vez
+// cerrados) no tiene el problema. Revisar cuando agreguemos edicion de cortes.
 function vacationPayForWeek(emp, periodsForEmp, weekStart, weekEnd) {
   const dailyRate = computeDailyRate(emp)
   let daysInRange = 0

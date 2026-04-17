@@ -166,8 +166,12 @@ export async function POST(req, { params }) {
 
     const newEndISO = toISODate(addDaysLocal(returnD, -1))
 
+    // BUG T: cap en longitud de notes para evitar crecimiento sin bound.
     const existingNotes = period.notes ? `${period.notes} | ` : ''
-    const newNotes = `${existingNotes}Reincorporacion temprana ${formatDMY(return_date)} (desde checador)`
+    let newNotes = `${existingNotes}Reincorporacion temprana ${formatDMY(return_date)} (desde checador)`
+    if (newNotes.length > 1000) {
+      newNotes = '…' + newNotes.slice(-999)
+    }
 
     const { data: updated, error: upErr } = await admin
       .from('vacation_periods')
