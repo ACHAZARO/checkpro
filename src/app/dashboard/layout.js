@@ -74,7 +74,8 @@ export default function DashboardLayout({ children }) {
       <aside className="hidden md:flex flex-col w-56 bg-dark-800 border-r border-dark-border shrink-0">
         <div className="p-5 border-b border-dark-border">
           <div className="text-brand-400 font-mono text-xs font-bold tracking-widest">⬡ CHECKPRO</div>
-          <div className="text-white font-bold text-sm mt-1 truncate">{tenant?.config?.branchName || tenant?.name || '—'}</div>
+          {/* FIX: mostrar nombre de la EMPRESA (tenant.name) — el nombre de sucursal se ve dentro de cada pagina */}
+          <div className="text-white font-bold text-sm mt-1 truncate">{tenant?.name || tenant?.config?.branchName || '—'}</div>
           <div className="text-gray-500 text-xs mt-0.5 truncate">{profile?.name}</div>
         </div>
         <nav className="flex-1 py-3">
@@ -104,7 +105,7 @@ export default function DashboardLayout({ children }) {
         <div className="md:hidden sticky top-0 z-30 bg-dark-900/92 backdrop-blur border-b border-dark-border px-4 py-3 flex items-center justify-between">
           <div>
             <div className="text-xs font-mono text-brand-400 tracking-widest">⬡ CHECKPRO</div>
-            <div className="text-sm font-bold text-white">{tenant?.config?.branchName || tenant?.name}</div>
+            <div className="text-sm font-bold text-white">{tenant?.name || tenant?.config?.branchName}</div>
           </div>
           <button onClick={signOut} className="text-xs text-gray-500 font-mono px-2 py-1 rounded border border-dark-border active:bg-dark-700">
             Salir

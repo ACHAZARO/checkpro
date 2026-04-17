@@ -350,12 +350,16 @@ export default function CheckPage() {
             const data = await res.json()
             setTenantId(data.id); setCfg(data.config); setSlug(data.slug)
             setLogoUrl(data.config?.logoUrl || null)
-            if (urlBranch && data.config?.branches) {
-              const b = data.config.branches.find(b => b.id === urlBranch)
+            // FIX: preferir data.branches (tabla real) y caer a config.branches legacy
+            const brList = (Array.isArray(data.branches) && data.branches.length > 0)
+              ? data.branches
+              : (data.config?.branches || [])
+            if (urlBranch) {
+              const b = brList.find(b => b.id === urlBranch)
               setBranchName(b?.name || '')
               setBranchId(urlBranch)
             }
-            localStorage.setItem('checkpro_tenant', JSON.stringify({ id: data.id, config: data.config, slug: data.slug }))
+            localStorage.setItem('checkpro_tenant', JSON.stringify({ id: data.id, config: data.config, slug: data.slug, branches: brList }))
             return
           }
         } catch {}
@@ -367,8 +371,11 @@ export default function CheckPage() {
           const data = JSON.parse(stored)
           setTenantId(data.id); setCfg(data.config); setSlug(data.slug)
           setLogoUrl(data.config?.logoUrl || null)
-          if (urlBranch && data.config?.branches) {
-            const b = data.config.branches.find(b => b.id === urlBranch)
+          const brList = (Array.isArray(data.branches) && data.branches.length > 0)
+            ? data.branches
+            : (data.config?.branches || [])
+          if (urlBranch) {
+            const b = brList.find(b => b.id === urlBranch)
             setBranchName(b?.name || ''); setBranchId(urlBranch)
           }
         } catch {}

@@ -77,6 +77,22 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Tenant no encontrado' }, { status: 404 })
     }
 
+    // FIX: resolver nombre de sucursal desde la tabla branches (fuente canonica)
+    // y sobrescribir tenant.config.branchName antes de pasar a los builders.
+    const { data: branchRows } = await supabase
+      .from('branches')
+      .select('name,active,created_at')
+      .eq('tenant_id', tenantId)
+      .eq('active', true)
+      .order('created_at')
+      .limit(1)
+    const firstBranchName = branchRows?.[0]?.name
+    if (firstBranchName) {
+      tenant.config = { ...(tenant.config || {}), branchName: firstBranchName }
+    } else if (!tenant.config?.branchName) {
+      tenant.config = { ...(tenant.config || {}), branchName: tenant.name }
+    }
+
     const { data: employees } = await supabase
       .from('employees')
       .select('id,name,employee_code,department,role_label')

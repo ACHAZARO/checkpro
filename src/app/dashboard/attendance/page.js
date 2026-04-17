@@ -242,7 +242,14 @@ export default function AttendancePage() {
       ...prevObj,
       edits: [...prevEdits, { ts: new Date().toISOString(), note: corrForm.note, entryTime, exitTime }],
     }
-    await supabase.from('shifts').update({ entry_time: entryTime, exit_time: exitTime, duration_hours: duration, status: exitTime ? 'closed' : corrSheet.status, corrections }).eq('id', corrSheet.id)
+    // FIX: antes se swallowed el error silently. Ahora surface al usuario.
+    const { error: uErr } = await supabase.from('shifts').update({ entry_time: entryTime, exit_time: exitTime, duration_hours: duration, status: exitTime ? 'closed' : corrSheet.status, corrections }).eq('id', corrSheet.id)
+    if (uErr) {
+      console.error('[attendance] correction update error:', uErr)
+      toast.error(`No se pudo guardar la corrección: ${uErr.message}`)
+      setSaving(false)
+      return
+    }
     await supabase.from('audit_log').insert({ tenant_id: tenantId, action: 'CORRECTION', employee_name: getEmpName(corrSheet.employee_id), detail: corrForm.note, success: true })
     toast.success('Corrección guardada')
     setSaving(false); setCorrSheet(null); await load()
@@ -252,7 +259,13 @@ export default function AttendancePage() {
     setSaving(true)
     const supabase = createClient()
     const incidents = [...(flagSheet.incidents || []), { id: crypto.randomUUID(), ts: new Date().toISOString(), type: flagForm.type, note: flagForm.note }]
-    await supabase.from('shifts').update({ status: 'incident', incidents }).eq('id', flagSheet.id)
+    const { error: uErr } = await supabase.from('shifts').update({ status: 'incident', incidents }).eq('id', flagSheet.id)
+    if (uErr) {
+      console.error('[attendance] flag update error:', uErr)
+      toast.error(`No se pudo registrar la incidencia: ${uErr.message}`)
+      setSaving(false)
+      return
+    }
     await supabase.from('audit_log').insert({ tenant_id: tenantId, action: 'INCIDENT', employee_name: getEmpName(flagSheet.employee_id), detail: flagForm.type, success: true })
     toast.success('Incidencia registrada')
     setSaving(false); setFlagSheet(null); await load()
@@ -272,7 +285,8 @@ export default function AttendancePage() {
     const label = typeLabels[absenceForm.type] || absenceForm.type
     const isGrave = absenceForm.type === 'falta_injustificada'
 
-    await supabase.from('shifts').insert({
+    // FIX: antes se swallowed el error silently. Ahora surface al usuario.
+    const { error: insErr } = await supabase.from('shifts').insert({
       tenant_id: tenantId,
       employee_id: emp.id,
       date_str: dateStr,
@@ -284,6 +298,12 @@ export default function AttendancePage() {
       incidents: isGrave ? [{ type: 'grave', note: absenceForm.note || 'Falta injustificada registrada por gerente', ts: new Date().toISOString() }] : [],
       corrections: {},
     })
+    if (insErr) {
+      console.error('[attendance] absence insert error:', insErr)
+      toast.error(`No se pudo registrar la falta: ${insErr.message}`)
+      setSaving(false)
+      return
+    }
 
     await supabase.from('audit_log').insert({
       tenant_id: tenantId, action: 'ABSENCE',
