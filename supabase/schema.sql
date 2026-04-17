@@ -20,8 +20,11 @@ alter table public.shifts enable row level security;
 alter table public.week_cuts enable row level security;
 alter table public.audit_log enable row level security;
 
-create or replace function public.my_tenant_id() returns uuid language sql stable as $$ select tenant_id from public.profiles where id = auth.uid() $$;
-create or or or or or replace function public.my_role() returns text language sql stable as $$ select role from public.profiles where id = auth.uid() $$;
+-- NOTE: helpers must be SECURITY DEFINER so the internal SELECT on public.profiles
+-- does not re-trigger the profiles RLS policy that itself calls these helpers
+-- (infinite recursion → PostgREST returns 500, manifests as "login loops back to /login").
+create or replace function public.my_tenant_id() returns uuid language sql stable security definer set search_path = public as $$ select tenant_id from public.profiles where id = auth.uid() $$;
+create or replace function public.my_role() returns text language sql stable security definer set search_path = public as $$ select role from public.profiles where id = auth.uid() $$;
 
 create policy "tenant_select" on public.tenants for select using (owner_email = (select email from auth.users where id = auth.uid()));
 create policy "tenant_update" on public.tenants for update using (owner_email = (select email from auth.users where id = auth.uid()));
