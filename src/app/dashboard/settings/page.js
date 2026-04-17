@@ -132,12 +132,36 @@ function TenantIdentityTab({ tenant, onSaved }) {
     setSaving(true)
     const supabase = createClient()
     // Timeout de 15s: si Supabase se cuelga (RLS recursivo, red, etc.) no dejamos el boton atascado
+    let timedOut = false
     const timeoutId = setTimeout(() => {
+      timedOut = true
       toast.error('El guardado esta tardando demasiado. Revisa tu conexion.')
       setSaving(false)
     }, 15000)
     try {
-      const payload = { name: name.trim() || tenant.name, config: cfg }
+      // Validar sesion ANTES de tocar supabase — si no hay session, update() puede colgarse o throw opaco
+      const { data: { session }, error: sessErr } = await supabase.auth.getSession()
+      if (sessErr || !session) {
+        clearTimeout(timeoutId)
+        if (timedOut) return
+        console.error('[settings] no session:', sessErr)
+        toast.error('Tu sesion expiro. Vuelve a iniciar sesion.')
+        setTimeout(() => { window.location.href = '/login' }, 1500)
+        return
+      }
+
+      // Sanitizar cfg — si tiene valores undefined o circular refs, PostgREST throwea sin detalle
+      let cleanCfg
+      try {
+        cleanCfg = JSON.parse(JSON.stringify(cfg || {}))
+      } catch (jsonErr) {
+        clearTimeout(timeoutId)
+        console.error('[settings] cfg no serializable:', jsonErr, cfg)
+        toast.error('Configuracion invalida (JSON).')
+        return
+      }
+
+      const payload = { name: name.trim() || tenant.name, config: cleanCfg }
       // .select() fuerza a PostgREST a devolver la fila — asi detectamos si RLS filtro 0 filas
       const { data, error } = await supabase
         .from('tenants')
@@ -145,9 +169,11 @@ function TenantIdentityTab({ tenant, onSaved }) {
         .eq('id', tenant.id)
         .select()
       clearTimeout(timeoutId)
+      if (timedOut) return
       if (error) {
         console.error('[settings] update tenant error:', error)
-        toast.error(error.message || 'No se pudo guardar la empresa')
+        const msg = error.message || error.details || error.hint || 'No se pudo guardar'
+        toast.error(`Error: ${msg}`)
         return
       }
       if (!data || data.length === 0) {
@@ -159,10 +185,12 @@ function TenantIdentityTab({ tenant, onSaved }) {
       try { await onSaved?.() } catch (e) { console.error('[settings] onSaved error:', e) }
     } catch (e) {
       clearTimeout(timeoutId)
+      if (timedOut) return
       console.error('[settings] save unexpected:', e)
-      toast.error('Error inesperado al guardar')
+      const msg = e?.message || e?.error_description || e?.details || (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 150)
+      toast.error(`Error: ${msg}`)
     } finally {
-      setSaving(false)
+      if (!timedOut) setSaving(false)
     }
   }
 
