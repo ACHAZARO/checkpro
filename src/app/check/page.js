@@ -177,6 +177,46 @@ function EmergencyExitModal({ onConfirm, onCancel, busy }) {
   )
 }
 
+// ── VacationModal ─────────────────────────────────────────────────────────────
+// Mostrado cuando el empleado esta en un periodo de vacaciones activo.
+// Le permite decidir si se reincorpora hoy (sigue al PIN) o cancela.
+function VacationModal({ period, employeeName, onAccept, onCancel }) {
+  if (!period) return null
+  const endIso = String(period.end_date || '').slice(0, 10)
+  const parts = endIso.split('-')
+  const fmtEnd = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : endIso
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-5">
+      <div className="bg-dark-800 border border-purple-500/30 rounded-2xl p-6 w-full max-w-sm">
+        <div className="text-center mb-4">
+          <div className="text-4xl mb-2">🏖</div>
+          <h3 className="text-white font-bold text-lg mb-1">Estás de vacaciones</h3>
+          <p className="text-gray-400 text-sm">
+            {employeeName ? `${employeeName}, tu` : 'Tu'} periodo de vacaciones termina el{' '}
+            <span className="text-purple-300 font-semibold">{fmtEnd}</span>.
+          </p>
+          <p className="text-gray-400 text-sm mt-2">
+            ¿Quieres reincorporarte hoy?
+          </p>
+          <p className="text-xs text-gray-500 font-mono mt-2">
+            Al confirmar, tu periodo se cerrará hoy y podrás registrar tu entrada con tu PIN.
+          </p>
+        </div>
+        <div className="space-y-2">
+          <button onClick={onAccept}
+            className="w-full py-3 bg-purple-500/20 border border-purple-500/40 rounded-xl text-purple-300 font-bold text-sm active:bg-purple-500/30 transition-all">
+            Sí, reincorporarme
+          </button>
+          <button onClick={onCancel}
+            className="w-full py-3 bg-dark-700 border border-dark-border rounded-xl text-gray-400 font-bold text-sm active:bg-dark-600 transition-all">
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── isBirthday helper (parses YYYY-MM-DD avoiding UTC drift) ─────────────────
 function isBirthday(iso) {
   if (!iso) return false
@@ -214,6 +254,11 @@ export default function CheckPage() {
   const [allEmps, setAllEmps]   = useState([])
   const [msg, setMsg]           = useState(null)
   const [busy, setBusy]         = useState(false)
+
+  // Vacation flow: periodo activo detectado tras identify
+  const [vacationPeriod, setVacationPeriod] = useState(null)  // { id, start_date, end_date, ... } | null
+  const [showVacationModal, setShowVacationModal] = useState(false)
+  const [vacationAccepted, setVacationAccepted] = useState(false) // true cuando el empleado acepto reincorporarse
 
   // GPS
   const [gps, setGps]           = useState({ status: 'idle', valid: false, simulated: false })
@@ -427,6 +472,7 @@ export default function CheckPage() {
   const reset = () => {
     setStep('id'); setEmpCode(''); setFoundEmp(null); setOpenShift(null)
     setMsg(null); setCoverMode(false); setCoverTarget('')
+    setVacationPeriod(null); setShowVacationModal(false); setVacationAccepted(false)
     setMonitor({ outsideSince: null, outsideReason: null, minsLeft: ABANDON_MINUTES })
   }
 
@@ -443,6 +489,32 @@ export default function CheckPage() {
       const data = await res.json()
       if (!data.found) { setMsg({ type: 'err', text: 'ID no encontrado.' }); setBusy(false); return }
       setFoundEmp(data.employee); setOpenShift(data.openShift); setAllEmps(data.allEmployees || [])
+
+      // Consultar estatus de vacaciones (endpoint publico). Solo si no hay turno abierto
+      // (si esta en turno abierto significa que ya se reincorporo o nunca estuvo).
+      if (!data.openShift && data.employee?.id) {
+        try {
+          const vacRes = await fetch(
+            `/api/vacations/check-status/${data.employee.id}?tenant_id=${encodeURIComponent(tenantId)}`
+          )
+          const vacJson = await vacRes.json().catch(() => ({}))
+          if (vacRes.ok && vacJson?.onVacation && vacJson.period) {
+            setVacationPeriod(vacJson.period)
+            setShowVacationModal(true)
+          } else {
+            setVacationPeriod(null)
+            setShowVacationModal(false)
+          }
+        } catch {
+          // Si falla el endpoint, no bloqueamos el flujo: se permite checar.
+          setVacationPeriod(null)
+          setShowVacationModal(false)
+        }
+      } else {
+        setVacationPeriod(null)
+        setShowVacationModal(false)
+      }
+
       setStep('pin'); setMsg(null)
     } catch { setMsg({ type: 'err', text: 'Error de conexión.' }) }
     finally { setBusy(false) }
@@ -454,6 +526,32 @@ export default function CheckPage() {
     setBusy(true)
     const action = openShift ? 'out' : 'in'
     try {
+      // Si el empleado esta en vacaciones y acepto reincorporarse,
+      // primero cerramos su periodo de vacaciones (autenticado con el mismo PIN).
+      if (vacationPeriod && vacationAccepted && action === 'in') {
+        const retRes = await fetch(`/api/vacations/${vacationPeriod.id}/employee-return`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenantId,
+            employeeCode: empCode.trim().toUpperCase(),
+            pin,
+          }),
+        })
+        const retJson = await retRes.json().catch(() => ({}))
+        if (!retRes.ok || !retJson?.ok) {
+          const errMsg = retJson?.error || 'No se pudo cerrar el periodo de vacaciones.'
+          setMsg({ type: 'err', text: errMsg })
+          toast.error(errMsg)
+          setBusy(false)
+          return
+        }
+        // Limpiar estado de vacaciones; el punch continua normal.
+        setVacationPeriod(null)
+        setVacationAccepted(false)
+        toast.success('Vacaciones cerradas. Registrando entrada...')
+      }
+
       const res = await fetch('/api/check/punch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -545,6 +643,22 @@ export default function CheckPage() {
           onConfirm={handleEmergencyExit}
           onCancel={() => setShowEmergency(false)}
           busy={emergencyBusy}
+        />
+      )}
+
+      {/* Vacation modal (pedir confirmacion de reincorporacion) */}
+      {showVacationModal && vacationPeriod && (
+        <VacationModal
+          period={vacationPeriod}
+          employeeName={foundEmp?.name}
+          onAccept={() => {
+            setVacationAccepted(true)
+            setShowVacationModal(false)
+          }}
+          onCancel={() => {
+            setShowVacationModal(false)
+            reset()
+          }}
         />
       )}
 
@@ -687,6 +801,10 @@ export default function CheckPage() {
                   <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 bg-brand-400/10 border border-brand-400/20 rounded-full text-brand-400 text-xs font-semibold">
                     <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
                     Jornada desde {fmtTime(openShift.entry_time)}
+                  </div>
+                ) : vacationAccepted ? (
+                  <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 bg-purple-500/10 border border-purple-500/20 rounded-full text-purple-300 text-xs font-semibold">
+                    🏖 Reincorporándote desde vacaciones
                   </div>
                 ) : (
                   <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 bg-dark-700 border border-dark-border rounded-full text-gray-400 text-xs">
