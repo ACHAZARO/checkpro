@@ -85,7 +85,8 @@ export async function POST(req) {
     .select('*')
     .single()
   if (insErr) {
-    return NextResponse.json({ error: insErr.message || 'Error al crear empleado' }, { status: 500 })
+    console.error('[employees/create] db error', insErr)
+    return NextResponse.json({ error: 'internal' }, { status: 500 })
   }
 
   // Backfill historico de vacaciones si la hire_date es pasada.

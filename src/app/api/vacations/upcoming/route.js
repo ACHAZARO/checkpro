@@ -48,7 +48,10 @@ export async function GET(req) {
   }
 
   const { data: employees, error: eErr } = await q
-  if (eErr) return NextResponse.json({ ok: false, error: eErr.message }, { status: 500 })
+  if (eErr) {
+    console.error('[vacations/upcoming] db error', eErr)
+    return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 })
+  }
 
   const { data: tenant } = await admin
     .from('tenants')

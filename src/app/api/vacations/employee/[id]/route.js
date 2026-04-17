@@ -57,7 +57,10 @@ export async function GET(req, { params }) {
     .eq('employee_id', id)
     .order('anniversary_year', { ascending: false })
     .order('created_at', { ascending: false })
-  if (perErr) return NextResponse.json({ ok: false, error: perErr.message }, { status: 500 })
+  if (perErr) {
+    console.error('[vacations/employee] db error', perErr)
+    return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 })
+  }
 
   const annivInfo = employee.hire_date ? anniversaryInfo(employee.hire_date, new Date()) : null
 

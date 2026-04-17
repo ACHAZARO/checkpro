@@ -43,6 +43,8 @@ export default function EmployeesPage() {
   const [emps, setEmps] = useState([])
   const [branches, setBranches] = useState([])
   const [vacTable, setVacTable] = useState(null) // custom vacation table from config
+  // FIX 8: periodos vivos por empleado, usados por hasVacationPending().
+  const [vacPeriods, setVacPeriods] = useState([])
   const [loading, setLoading] = useState(true)
   const [tenantId, setTenantId] = useState(null)
   const [sheet, setSheet] = useState(null)
@@ -99,13 +101,21 @@ export default function EmployeesPage() {
     const { data: prof } = await supabase.from('profiles').select('tenant_id').eq('id', session.user.id).single()
     if (!prof?.tenant_id) return
     setTenantId(prof.tenant_id)
-    const [{ data: empData }, { data: tenantData }] = await Promise.all([
+    // FIX 8: cargar también vacation_periods vivos para poder evaluar
+    // hasVacationPending contra la tabla real (no contra el array legacy).
+    const [{ data: empData }, { data: tenantData }, { data: vpData }] = await Promise.all([
       supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).neq('status', 'deleted').order('employee_code'),
-      supabase.from('tenants').select('config').eq('id', prof.tenant_id).single()
+      supabase.from('tenants').select('config').eq('id', prof.tenant_id).single(),
+      supabase
+        .from('vacation_periods')
+        .select('employee_id,anniversary_year,status')
+        .eq('tenant_id', prof.tenant_id)
+        .in('status', ['pending', 'postponed', 'active', 'completed']),
     ])
     setEmps(empData || [])
     setBranches(tenantData?.config?.branches || [])
     setVacTable(tenantData?.config?.vacationTable || tenantData?.config?.vacation_table || null)
+    setVacPeriods(vpData || [])
     setLoading(false)
   }, [])
 
@@ -252,7 +262,7 @@ export default function EmployeesPage() {
             const hireDate = (emp.hire_date && String(emp.hire_date).slice(0, 10)) || emp.schedule?.hireDate
             const years = calcYearsWorked(hireDate)
             const vacDays = calcVacationDays(hireDate, vacTable)
-            const vacPending = hasVacationPending(emp)
+            const vacPending = hasVacationPending(emp, vacPeriods)
 
             return (
               <div key={emp.id} className="card">

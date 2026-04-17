@@ -100,6 +100,14 @@ function vacationPayForWeek(emp, periodsForEmp, weekStart, weekEnd) {
   }
 }
 
+// FIX 10: escape HTML en todas las interpolaciones de datos del cliente
+// dentro del HTML del reporte (corre en un iframe same-origin). Previene XSS
+// si un gerente pega algo como "<img src=x onerror=...>" en notas del corte,
+// nombres de empleado, departamentos o la leyenda.
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+
 // ── Compact single-page report ───────────────────────────────────────────────
 function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrollLegend, vacByEmp) {
   const active = employees.filter(e => e.has_shift)
@@ -131,8 +139,8 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     if (vac.compensationPay > 0) badges.push(`<span style="background:#e9d8fd;color:#553c9a;padding:1px 5px;border-radius:3px;font-size:7pt">comp.</span>`)
 
     return `<tr>
-      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;font-weight:600">${emp.name}</td>
-      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;color:#555">${emp.department || '—'}</td>
+      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;font-weight:600">${escapeHtml(emp.name)}</td>
+      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;color:#555">${emp.department ? escapeHtml(emp.department) : '—'}</td>
       <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;text-align:center">${daysWorked}d / ${s.totalH}h${s.otHours > 0 ? `<br/><span style="font-size:7pt;color:#0c5460">+${s.otHours}h HE</span>` : ''}</td>
       <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;text-align:center">${badges.join(' ') || '<span style="color:#198754">✓</span>'}</td>
       <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;text-align:right">$${grossWithVac.toFixed(2)}</td>
@@ -150,8 +158,8 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     const netWithVac = Math.max(0, grossWithVac - s.retardoDesc - s.incidentDesc)
     return `<div style="padding:8px 4px">
       <div style="border-top:1px solid #000;padding-top:4px">
-        <div style="font-size:8pt;font-weight:600">${emp.name}</div>
-        <div style="font-size:7.5pt;color:#555">${emp.employee_code} · Neto: $${netWithVac.toFixed(2)}</div>
+        <div style="font-size:8pt;font-weight:600">${escapeHtml(emp.name)}</div>
+        <div style="font-size:7.5pt;color:#555">${escapeHtml(emp.employee_code)} · Neto: $${netWithVac.toFixed(2)}</div>
         <div style="font-size:7pt;color:#999;margin-top:2px">Firma de conformidad</div>
       </div>
     </div>`
@@ -164,19 +172,19 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     for (const d of vac.details) {
       if (d.type === 'tomadas') {
         vacLines.push(`<tr>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt">${emp.name}</td>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt">${escapeHtml(emp.name)}</td>
           <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt">Vacaciones</td>
           <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:center">${d.days}d</td>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:7.5pt;color:#666">${d.rangeStart} → ${d.rangeEnd}</td>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:7.5pt;color:#666">${escapeHtml(d.rangeStart)} → ${escapeHtml(d.rangeEnd)}</td>
           <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:right">$${d.normalPay.toFixed(2)}</td>
           <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:right;color:#553c9a">$${d.primaPay.toFixed(2)}<br/><span style="font-size:6.5pt;color:#999">prima ${d.primaPct}%</span></td>
         </tr>`)
       } else if (d.type === 'compensadas') {
         vacLines.push(`<tr>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt">${emp.name}</td>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt">${escapeHtml(emp.name)}</td>
           <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt">Compensación</td>
           <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:center">${d.days}d</td>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:7.5pt;color:#666">finalizado ${d.completedAt}</td>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:7.5pt;color:#666">finalizado ${escapeHtml(d.completedAt)}</td>
           <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:right">—</td>
           <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:right;color:#553c9a">$${d.amount.toFixed(2)}<br/><span style="font-size:6.5pt;color:#999">pago doble</span></td>
         </tr>`)
@@ -203,7 +211,7 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     : ''
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
-    <title>Nómina ${cut.start_date}</title>
+    <title>Nómina ${escapeHtml(cut.start_date)}</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { font-family: Arial, sans-serif; font-size: 9pt; color: #000; }
@@ -220,17 +228,17 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     <!-- Header -->
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
       <div style="display:flex;align-items:flex-start;gap:12px">
-        ${logoUrl ? `<img src="${logoUrl}" alt="Logo" style="height:44px;width:auto;object-fit:contain;border-radius:4px"/>` : ''}
+        ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="Logo" style="height:44px;width:auto;object-fit:contain;border-radius:4px"/>` : ''}
         <div>
-          <div style="font-size:16pt;font-weight:bold">${branchName || 'Nómina Semanal'}</div>
+          <div style="font-size:16pt;font-weight:bold">${escapeHtml(branchName || 'Nómina Semanal')}</div>
           <div style="font-size:9pt;color:#555;margin-top:2px">Reporte de Asistencia y Pago</div>
         </div>
       </div>
       <div style="text-align:right;font-size:8pt;color:#666">
-        <div><b>Período:</b> ${cut.start_date} al ${cut.end_date}</div>
-        <div><b>Emitido:</b> ${new Date(cut.created_at).toLocaleDateString('es-MX')}</div>
-        <div><b>Por:</b> ${cut.closed_by_name}</div>
-        ${cut.notes ? `<div style="color:#888"><i>${cut.notes}</i></div>` : ''}
+        <div><b>Período:</b> ${escapeHtml(cut.start_date)} al ${escapeHtml(cut.end_date)}</div>
+        <div><b>Emitido:</b> ${escapeHtml(new Date(cut.created_at).toLocaleDateString('es-MX'))}</div>
+        <div><b>Por:</b> ${escapeHtml(cut.closed_by_name)}</div>
+        ${cut.notes ? `<div style="color:#888"><i>${escapeHtml(cut.notes)}</i></div>` : ''}
       </div>
     </div>
 
@@ -270,10 +278,10 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
 
     ${payrollLegend ? `
     <div style="margin-top:14px;padding:8px 10px;border:1px solid #e0e0e0;border-radius:4px;background:#fafafa">
-      <div style="font-size:6.5pt;color:#666;line-height:1.4">${payrollLegend}</div>
+      <div style="font-size:6.5pt;color:#666;line-height:1.4">${escapeHtml(payrollLegend)}</div>
     </div>` : ''}
     <div style="margin-top:8px;font-size:7pt;color:#bbb;border-top:1px solid #eee;padding-top:6px">
-      CheckPro · ${branchName} · Semana ${cut.start_date} / ${cut.end_date} · Documento interno confidencial
+      CheckPro · ${escapeHtml(branchName || '')} · Semana ${escapeHtml(cut.start_date)} / ${escapeHtml(cut.end_date)} · Documento interno confidencial
     </div>
 
   </div></body></html>`

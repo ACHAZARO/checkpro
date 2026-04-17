@@ -80,13 +80,19 @@ function GpsStatus({ gps, onVerify, simMode, setSimMode }) {
 }
 
 // ── PinPad ────────────────────────────────────────────────────────────────────
-function PinPad({ onComplete, onClear }) {
+// FIX 5: prop `busy` bloquea auto-submit y captura de teclas para evitar
+// que el usuario dispare un segundo handlePinComplete mientras el flujo async
+// (punch + vacation return) sigue corriendo.
+function PinPad({ onComplete, onClear, busy }) {
   const [pin, setPin] = useState('')
   const ref = useRef(null)
   useEffect(() => { ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }, [])
-  useEffect(() => { if (pin.length === 4) { onComplete(pin); setTimeout(() => setPin(''), 200) } }, [pin, onComplete])
-  const num = d => { if (pin.length < 4) setPin(p => p + d) }
-  const del = () => setPin(p => p.slice(0, -1))
+  useEffect(() => {
+    if (busy) return
+    if (pin.length === 4) { onComplete(pin); setTimeout(() => setPin(''), 200) }
+  }, [pin, onComplete, busy])
+  const num = d => { if (busy) return; if (pin.length < 4) setPin(p => p + d) }
+  const del = () => { if (busy) return; setPin(p => p.slice(0, -1)) }
   return (
     <div ref={ref} className="text-center">
       <p className="text-xs font-mono text-gray-500 uppercase tracking-widest mb-3">PIN de acceso</p>
@@ -300,6 +306,11 @@ export default function CheckPage() {
   // Emergency exit
   const [showEmergency, setShowEmergency] = useState(false)
   const [emergencyBusy, setEmergencyBusy] = useState(false)
+
+  // FIX 6: guard síncrono contra double-submit de handlePinComplete.
+  // setBusy(true) corre async vía setState, no protege contra el segundo
+  // auto-submit del PinPad — este ref sí es inmediato.
+  const submittingRef = useRef(false)
 
   // ── Init deviceId on mount ────────────────────────────────────────────────
   useEffect(() => {
@@ -564,78 +575,85 @@ export default function CheckPage() {
 
   // ── PIN complete → punch ──────────────────────────────────────────────────
   async function handlePinComplete(pin) {
-    if (!gps.valid) { setMsg({ type: 'warn', text: 'Verifica tu ubicación GPS primero.' }); return }
-    setBusy(true)
-    const action = openShift ? 'out' : 'in'
+    // FIX 6: guard síncrono contra double-submit.
+    if (submittingRef.current) return
+    submittingRef.current = true
     try {
-      // Si el empleado esta en vacaciones y acepto reincorporarse,
-      // primero cerramos su periodo de vacaciones (autenticado con el mismo PIN).
-      if (vacationPeriod && vacationAccepted && action === 'in') {
-        const retRes = await fetch(`/api/vacations/${vacationPeriod.id}/employee-return`, {
+      if (!gps.valid) { setMsg({ type: 'warn', text: 'Verifica tu ubicación GPS primero.' }); return }
+      setBusy(true)
+      const action = openShift ? 'out' : 'in'
+      try {
+        // Si el empleado esta en vacaciones y acepto reincorporarse,
+        // primero cerramos su periodo de vacaciones (autenticado con el mismo PIN).
+        if (vacationPeriod && vacationAccepted && action === 'in') {
+          const retRes = await fetch(`/api/vacations/${vacationPeriod.id}/employee-return`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tenantId,
+              employeeCode: empCode.trim().toUpperCase(),
+              pin,
+            }),
+          })
+          const retJson = await retRes.json().catch(() => ({}))
+          if (!retRes.ok || !retJson?.ok) {
+            const errMsg = retJson?.error || 'No se pudo cerrar el periodo de vacaciones.'
+            setMsg({ type: 'err', text: errMsg })
+            toast.error(errMsg)
+            setBusy(false)
+            return
+          }
+          // Limpiar estado de vacaciones; el punch continua normal.
+          setVacationPeriod(null)
+          setVacationAccepted(false)
+          toast.success('Vacaciones cerradas. Registrando entrada...')
+        }
+
+        const res = await fetch('/api/check/punch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            tenantId,
-            employeeCode: empCode.trim().toUpperCase(),
-            pin,
-          }),
+            tenantId, employeeCode: empCode.trim().toUpperCase(), pin, action,
+            coveringEmployeeId: coverMode && coverTarget ? coverTarget : null,
+            geo: { lat: gps.lat, lng: gps.lng, dist: gps.dist, accuracy: gps.accuracy, simulated: gps.simulated, valid: gps.valid },
+            sessionToken: session?.token || null,
+            deviceId,
+          })
         })
-        const retJson = await retRes.json().catch(() => ({}))
-        if (!retRes.ok || !retJson?.ok) {
-          const errMsg = retJson?.error || 'No se pudo cerrar el periodo de vacaciones.'
-          setMsg({ type: 'err', text: errMsg })
-          toast.error(errMsg)
+        const data = await res.json()
+        // BUG 3: si el servidor detecta en el punch un periodo de vacaciones
+        // activo (race con el check-status inicial), responde 409 on_vacation.
+        // Reabrimos el modal de vacaciones con el periodo recibido para que el
+        // empleado pueda aceptar la reincorporación y volver a intentar el PIN.
+        if (res.status === 409 && data?.error === 'on_vacation') {
+          setVacationPeriod(data.period || null)
+          setVacationAccepted(false)
+          setShowVacationModal(true)
+          setStep('pin')
+          setMsg({ type: 'warn', text: data.msg || 'Estás en vacaciones. Confirma tu reincorporación antes de checar.' })
+          if (data.msg) toast(data.msg, { icon: '🏖️', duration: 5000 })
           setBusy(false)
           return
         }
-        // Limpiar estado de vacaciones; el punch continua normal.
-        setVacationPeriod(null)
-        setVacationAccepted(false)
-        toast.success('Vacaciones cerradas. Registrando entrada...')
-      }
-
-      const res = await fetch('/api/check/punch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenantId, employeeCode: empCode.trim().toUpperCase(), pin, action,
-          coveringEmployeeId: coverMode && coverTarget ? coverTarget : null,
-          geo: { lat: gps.lat, lng: gps.lng, dist: gps.dist, accuracy: gps.accuracy, simulated: gps.simulated, valid: gps.valid },
-          sessionToken: session?.token || null,
-          deviceId,
-        })
-      })
-      const data = await res.json()
-      // BUG 3: si el servidor detecta en el punch un periodo de vacaciones
-      // activo (race con el check-status inicial), responde 409 on_vacation.
-      // Reabrimos el modal de vacaciones con el periodo recibido para que el
-      // empleado pueda aceptar la reincorporación y volver a intentar el PIN.
-      if (res.status === 409 && data?.error === 'on_vacation') {
-        setVacationPeriod(data.period || null)
-        setVacationAccepted(false)
-        setShowVacationModal(true)
-        setStep('pin')
-        setMsg({ type: 'warn', text: data.msg || 'Estás en vacaciones. Confirma tu reincorporación antes de checar.' })
-        if (data.msg) toast(data.msg, { icon: '🏖️', duration: 5000 })
-        setBusy(false)
-        return
-      }
-      if (data.ok) {
-        setMsg({ type: 'ok', text: data.msg })
-        toast.success(data.msg)
-        if (action === 'in') {
-          setStep('done')
-          setOpenShift({ employee_id: foundEmp?.id, entry_time: new Date().toISOString() })
+        if (data.ok) {
+          setMsg({ type: 'ok', text: data.msg })
+          toast.success(data.msg)
+          if (action === 'in') {
+            setStep('done')
+            setOpenShift({ employee_id: foundEmp?.id, entry_time: new Date().toISOString() })
+          } else {
+            setStep('done')
+            setOpenShift(null)
+            setTimeout(reset, 4000)
+          }
         } else {
-          setStep('done')
-          setOpenShift(null)
-          setTimeout(reset, 4000)
+          setMsg({ type: 'err', text: data.msg }); toast.error(data.msg)
         }
-      } else {
-        setMsg({ type: 'err', text: data.msg }); toast.error(data.msg)
-      }
-    } catch { setMsg({ type: 'err', text: 'Error de conexión.' }); toast.error('Error de conexión') }
-    finally { setBusy(false) }
+      } catch { setMsg({ type: 'err', text: 'Error de conexión.' }); toast.error('Error de conexión') }
+      finally { setBusy(false) }
+    } finally {
+      submittingRef.current = false
+    }
   }
 
   // ── Manual abandon (from countdown) ──────────────────────────────────────
@@ -897,7 +915,7 @@ export default function CheckPage() {
                 </div>
               )}
 
-              <PinPad onComplete={handlePinComplete} onClear={() => setMsg(null)} />
+              <PinPad onComplete={handlePinComplete} onClear={() => setMsg(null)} busy={busy} />
 
               {!gps.valid && (
                 <div className="mt-4 px-4 py-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl text-yellow-400 text-xs font-semibold">

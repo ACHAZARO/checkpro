@@ -52,7 +52,10 @@ export async function GET() {
   }
 
   const { data: periods, error: pErr } = await q
-  if (pErr) return NextResponse.json({ ok: false, error: pErr.message }, { status: 500 })
+  if (pErr) {
+    console.error('[vacations/active] db error', pErr)
+    return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 })
+  }
 
   const empIds = [...new Set((periods || []).map(p => p.employee_id).filter(Boolean))]
   let employeesById = {}

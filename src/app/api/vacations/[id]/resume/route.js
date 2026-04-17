@@ -102,6 +102,11 @@ export async function POST(req, { params }) {
     return NextResponse.json({ ok: false, error: 'start_date requerido' }, { status: 400 })
   }
 
+  // FIX 3: si el cliente envió end_date, debe ser >= start_date.
+  if (body.end_date && body.end_date < body.start_date) {
+    return NextResponse.json({ ok: false, error: 'end_date debe ser >= start_date' }, { status: 400 });
+  }
+
   // BUG C: rechazar start_date en el pasado. Si el gerente quiere registrar
   // vacaciones historicas (p.ej. para reconstruir el libro), debe usar
   // POST /api/vacations/create con fechas del pasado, que crea el periodo
@@ -168,7 +173,10 @@ export async function POST(req, { params }) {
     .eq('id', id)
     .select('*')
     .single()
-  if (upErr) return NextResponse.json({ ok: false, error: upErr.message }, { status: 500 })
+  if (upErr) {
+    console.error('[vacations/resume] update error', upErr)
+    return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 })
+  }
 
   try {
     const { data: emp } = await admin

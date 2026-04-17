@@ -112,15 +112,22 @@ export async function POST(req) {
     return NextResponse.json({ ok: false, error: 'Empleado no encontrado' }, { status: 404 })
   }
   if (tenErr) {
-    return NextResponse.json({ ok: false, error: tenErr.message }, { status: 500 })
+    console.error('[vacations/create] tenant fetch error', tenErr)
+    return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 })
   }
 
   const vacTable = tenant?.config?.vacation_table || tenant?.config?.vacationTable || null
   const holidays = Array.isArray(tenant?.config?.holidays) ? tenant.config.holidays : []
 
   // anniversary_year: tolerar number o string numerico
+  // FIX 2: clamp a rango valido [1, 99] cuando viene del cliente.
   const annivRaw = Number(body.anniversary_year)
-  let anniversary_year = Number.isFinite(annivRaw) && annivRaw > 0 ? Math.floor(annivRaw) : null
+  let anniversary_year = null
+  if (body.anniversary_year !== undefined && body.anniversary_year !== null && body.anniversary_year !== '') {
+    const annivYear = Number.isFinite(+body.anniversary_year) ? Math.max(1, Math.min(99, Math.trunc(+body.anniversary_year))) : null;
+    if (!annivYear) return NextResponse.json({ ok: false, error: 'anniversary_year inválido' }, { status: 400 });
+    anniversary_year = annivYear
+  }
   if (!anniversary_year) {
     const info = anniversaryInfo(employee.hire_date, new Date())
     anniversary_year = (info?.yearsWorked || 0) + 1
@@ -275,7 +282,11 @@ export async function POST(req) {
     .select('*')
     .single()
   if (insErr) {
-    return NextResponse.json({ ok: false, error: insErr.message }, { status: 500 })
+    if (insErr.code === '23505') {
+      return NextResponse.json({ ok: false, error: 'already_exists' }, { status: 409 });
+    }
+    console.error('[vacations/create] insert error', insErr);
+    return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 });
   }
 
   // Audit

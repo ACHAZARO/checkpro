@@ -123,13 +123,25 @@ export const LFT_VACATION_TABLE = [
   { fromYear: 25, toYear: 999, days: 28 },
 ]
 
+// FIX 7: parseLocalDate TZ-safe para evitar drift en hire_date "YYYY-MM-DD".
+// new Date("2024-03-15") lo interpreta como UTC y en Vercel (UTC) vs navegador
+// (America/Mexico_City, -6h) puede caer al día anterior.
+function parseLocalDate(isoStr) {
+  // "YYYY-MM-DD" → Date local midnight
+  if (!isoStr) return null;
+  const [y, m, d] = String(isoStr).slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
+}
+
 export function calcYearsWorked(hireDate) {
-  if (!hireDate) return 0
-  const hire = new Date(hireDate); const now = new Date()
-  let years = now.getFullYear() - hire.getFullYear()
-  const m = now.getMonth() - hire.getMonth()
-  if (m < 0 || (m === 0 && now.getDate() < hire.getDate())) years--
-  return Math.max(0, years)
+  const d = parseLocalDate(hireDate);
+  if (!d) return 0;
+  const now = new Date();
+  let years = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) years--;
+  return Math.max(0, years);
 }
 
 export function calcVacationDays(hireDate, customTable = null) {
@@ -147,14 +159,26 @@ export function currentAnniversaryYear(hireDate) {
   return thisYearAnniv <= now ? now.getFullYear() : now.getFullYear() - 1
 }
 
-export function hasVacationPending(employee) {
-  const hireDate = employee.schedule?.hireDate
+// FIX 8: ya no leemos schedule.vacationYearsTaken (legacy). Ahora recibimos
+// los vacation_periods reales del empleado y computamos "pending" como
+// "no existe un periodo vivo para el año de aniversario actual".
+// `periods` debe ser un array con al menos { employee_id, anniversary_year, status }.
+// Retrocompatible: si no viene `periods` no podemos determinarlo, devolvemos false
+// (preferible a reportar mal; la UI debería pasarlos explícitos).
+export function hasVacationPending(employee, periods = []) {
+  const hireDate = employee?.hire_date || employee?.schedule?.hireDate
   if (!hireDate) return false
   const years = calcYearsWorked(hireDate)
   if (years < 1) return false
-  const annivYear = currentAnniversaryYear(hireDate)
-  const taken = employee.schedule?.vacationYearsTaken || []
-  return !taken.includes(annivYear)
+  // currentAnniversaryYear devuelve el año calendario del último aniversario;
+  // como anniversary_year en la tabla representa el ordinal (1,2,3...),
+  // usamos el ordinal actual (=years) como año de aniversario pendiente.
+  const currentYear = years
+  if (currentYear <= 0) return false
+  const alive = (periods || []).filter(
+    p => p.employee_id === employee.id && !['cancelled', 'expired'].includes(p.status)
+  )
+  return !alive.some(p => p.anniversary_year === currentYear)
 }
 
 function resolvePayEmployee(employee, coveringEmployee, coveragePayMode) {
