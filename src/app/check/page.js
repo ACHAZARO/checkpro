@@ -177,6 +177,17 @@ function EmergencyExitModal({ onConfirm, onCancel, busy }) {
   )
 }
 
+// ── isBirthday helper (parses YYYY-MM-DD avoiding UTC drift) ─────────────────
+function isBirthday(iso) {
+  if (!iso) return false
+  const parts = String(iso).split('T')[0].split('-')
+  if (parts.length !== 3) return false
+  const m = parseInt(parts[1], 10)
+  const d = parseInt(parts[2], 10)
+  const now = new Date()
+  return (m - 1) === now.getMonth() && d === now.getDate()
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function CheckPage() {
   const [cfg, setCfg]           = useState(null)
@@ -584,6 +595,15 @@ export default function CheckPage() {
                 <p className="text-white font-bold text-sm mb-1">Para registrar tu salida:</p>
                 <p className="text-gray-400 text-xs">Escanea de nuevo el código QR de la sucursal con tu celular.</p>
               </div>
+
+              {/* Birthday greeting */}
+              {foundEmp?.birth_date && isBirthday(foundEmp.birth_date) && (
+                <div className="w-full mb-3 px-4 py-3 bg-gradient-to-br from-pink-500/10 via-yellow-500/10 to-brand-400/10 border border-yellow-400/30 rounded-xl text-center">
+                  <div className="text-2xl mb-1">🎂 🎉</div>
+                  <div className="text-yellow-300 text-sm font-bold">¡Feliz cumpleaños, {foundEmp.name?.split(' ')[0]}!</div>
+                  <div className="text-gray-400 text-xs mt-0.5 font-mono">Que tengas un excelente día.</div>
+                </div>
+              )}
 
               {/* Manager: quick access to dashboard (opens in new tab so kiosk stays on /check) */}
               {foundEmp?.can_manage && (
