@@ -45,6 +45,15 @@ function dateRange(from, to) {
   return dates
 }
 
+// Check si una fecha (YYYY-MM-DD) cae en un periodo de vacaciones (start/end inclusivos)
+function dateInPeriod(dateStr, period) {
+  if (!dateStr || !period) return false
+  const s = String(period.start_date || '').slice(0, 10)
+  const e = String(period.end_date || '').slice(0, 10)
+  if (!s || !e) return false
+  return dateStr >= s && dateStr <= e
+}
+
 export default function AttendancePage() {
   const [shifts, setShifts] = useState([])
   const [allShifts, setAllShifts] = useState([]) // all shifts (for grave count)
@@ -67,6 +76,9 @@ export default function AttendancePage() {
   const [absenceForm, setAbsenceForm] = useState({ type: 'falta_injustificada', note: '' })
   const [saving, setSaving] = useState(false)
 
+  // Vacation periods que tocan el rango visible.
+  const [vacationPeriods, setVacationPeriods] = useState([])
+
   // Suggested absences: employees who had scheduled workday but no shift record
   const [suggestedAbsences, setSuggestedAbsences] = useState([]) // { emp, dateStr }
   const [dismissedSuggestions, setDismissedSuggestions] = useState(new Set())
@@ -79,29 +91,45 @@ export default function AttendancePage() {
     if (!prof?.tenant_id) return
     setTenantId(prof.tenant_id)
 
-    const [{ data: empData }, { data: shiftData }, { data: tenantData }, { data: allShiftData }] = await Promise.all([
+    const [{ data: empData }, { data: shiftData }, { data: tenantData }, { data: allShiftData }, { data: vacData }] = await Promise.all([
       supabase.from('employees').select('id,name,department,monthly_salary,schedule').eq('tenant_id', prof.tenant_id).neq('status','deleted'),
       supabase.from('shifts').select('*').eq('tenant_id', prof.tenant_id).gte('date_str', filterFrom).lte('date_str', filterTo).order('date_str', { ascending: false }).order('entry_time', { ascending: false }),
       supabase.from('tenants').select('config').eq('id', prof.tenant_id).single(),
       // Load all shifts for grave incident count (last 12 months)
       supabase.from('shifts').select('employee_id,classification,status').eq('tenant_id', prof.tenant_id)
-        .gte('date_str', isoDate(new Date(Date.now() - 365 * 24 * 3600 * 1000)))
+        .gte('date_str', isoDate(new Date(Date.now() - 365 * 24 * 3600 * 1000))),
+      // Periodos de vacaciones que tocan el rango [filterFrom, filterTo]
+      // Solo status active/completed (no pending, no cancelled).
+      supabase.from('vacation_periods')
+        .select('id,employee_id,start_date,end_date,status,tipo,entitled_days')
+        .eq('tenant_id', prof.tenant_id)
+        .in('status', ['active', 'completed'])
+        .lte('start_date', filterTo)
+        .gte('end_date', filterFrom),
     ])
     setEmps(empData || [])
     setShifts(shiftData || [])
     setAllShifts(allShiftData || [])
     setBranches(tenantData?.config?.branches || [])
+    setVacationPeriods(vacData || [])
 
-    // Auto-detect possible absences
+    // Auto-detect possible absences (excluye dias que caen en vacaciones)
     const dates = dateRange(filterFrom, filterTo)
     const shiftsByEmpDate = new Set((shiftData || []).map(s => `${s.employee_id}_${s.date_str}`))
+    const vacByEmp = {}
+    for (const p of vacData || []) {
+      if (!vacByEmp[p.employee_id]) vacByEmp[p.employee_id] = []
+      vacByEmp[p.employee_id].push(p)
+    }
     const suggestions = []
     for (const emp of (empData || [])) {
+      const empVacs = vacByEmp[emp.id] || []
       for (const dateStr of dates) {
         const dk = dayKey(new Date(dateStr + 'T12:00:00'))
         const shouldWork = emp.schedule?.[dk]?.work === true
         const hasRecord = shiftsByEmpDate.has(`${emp.id}_${dateStr}`)
-        if (shouldWork && !hasRecord) {
+        const onVac = empVacs.some(p => dateInPeriod(dateStr, p))
+        if (shouldWork && !hasRecord && !onVac) {
           suggestions.push({ emp, dateStr })
         }
       }
@@ -117,11 +145,71 @@ export default function AttendancePage() {
   // Build a map of employeeId → branchId for quick lookup
   const empBranchMap = Object.fromEntries(emps.map(e => [e.id, e.schedule?.branch?.id || null]))
 
+  // Mapas auxiliares: periodos por empleado (para lookup rapido) y
+  // dias del rango que caen en vacaciones (para pintar "rows virtuales").
+  const vacByEmp = {}
+  for (const p of vacationPeriods) {
+    if (!vacByEmp[p.employee_id]) vacByEmp[p.employee_id] = []
+    vacByEmp[p.employee_id].push(p)
+  }
+
+  // Shifts filtrados (como antes). Ademas marcamos cada uno con si ese dia
+  // esta dentro de un periodo de vacaciones del empleado (prevalece asistencia
+  // registrada; solo usamos la marca para informar visualmente).
   const filtered = shifts.filter(s => {
     if (filterEmp !== 'all' && s.employee_id !== filterEmp) return false
     if (filterStatus !== 'all' && s.status !== filterStatus) return false
     if (filterBranch !== 'all' && empBranchMap[s.employee_id] !== filterBranch) return false
     return true
+  })
+
+  // Dias virtuales de vacaciones: para cada periodo visible, generar una fila por dia
+  // en el rango [filterFrom, filterTo] que caiga en (start_date, end_date) del periodo,
+  // SIEMPRE QUE no haya un shift registrado ese dia para ese empleado
+  // (si checo, prevalece la asistencia real).
+  const shiftsByEmpDate = new Set(shifts.map(s => `${s.employee_id}_${s.date_str}`))
+  const virtualVacationRows = []
+  for (const p of vacationPeriods) {
+    if (filterEmp !== 'all' && p.employee_id !== filterEmp) continue
+    const emp = emps.find(e => e.id === p.employee_id)
+    if (!emp) continue
+    if (filterBranch !== 'all' && empBranchMap[p.employee_id] !== filterBranch) continue
+    // Solo active prevalece sobre falta. completed si cayo en rango tambien lo mostramos.
+    const rangeDates = dateRange(filterFrom, filterTo)
+    const s = String(p.start_date).slice(0, 10)
+    const e = String(p.end_date).slice(0, 10)
+    for (const d of rangeDates) {
+      if (d < s || d > e) continue
+      if (shiftsByEmpDate.has(`${emp.id}_${d}`)) continue // prevalece la asistencia real
+      virtualVacationRows.push({
+        _virtual: 'vacation',
+        id: `vac_${p.id}_${d}`,
+        employee_id: emp.id,
+        date_str: d,
+        status: 'vacation',
+        classification: { type: 'vacation', label: `🏖 Vacaciones${p.tipo ? ' (' + p.tipo + ')' : ''}` },
+        period: p,
+      })
+    }
+  }
+
+  // Filtrar por status si aplica (vacation cuenta como un status virtual "vacation")
+  const visibleVacationRows = filterStatus === 'all' || filterStatus === 'vacation'
+    ? virtualVacationRows
+    : []
+
+  // Combinar shifts reales + filas virtuales de vacaciones, ordenado descendiente por fecha
+  const combined = [
+    ...filtered.map(s => ({ ...s, _virtual: null })),
+    ...visibleVacationRows,
+  ].sort((a, b) => {
+    if (a.date_str === b.date_str) {
+      // shifts reales primero
+      if (a._virtual && !b._virtual) return 1
+      if (!a._virtual && b._virtual) return -1
+      return 0
+    }
+    return a.date_str < b.date_str ? 1 : -1
   })
 
   const getEmpName = id => emps.find(e => e.id === id)?.name || id
@@ -321,6 +409,7 @@ export default function AttendancePage() {
               <option value="closed">Cerradas</option>
               <option value="incident">Incidencias</option>
               <option value="absent">Faltas</option>
+              <option value="vacation">Vacaciones</option>
             </select>
           </div>
         </div>
@@ -340,22 +429,74 @@ export default function AttendancePage() {
 
       {loading ? <p className="text-gray-500 font-mono text-sm">Cargando...</p> : (
         <>
-          <p className="text-xs text-gray-600 font-mono mb-3">{filtered.length} registro(s)</p>
+          <p className="text-xs text-gray-600 font-mono mb-3">
+            {combined.length} registro(s)
+            {visibleVacationRows.length > 0 && (
+              <span className="ml-2 text-purple-400">· {visibleVacationRows.length} día(s) de vacaciones</span>
+            )}
+          </p>
           <div className="space-y-2">
-            {filtered.length === 0 && <div className="card text-center py-10 text-gray-500 font-mono text-sm">Sin registros en este período</div>}
-            {filtered.map(s => {
+            {combined.length === 0 && <div className="card text-center py-10 text-gray-500 font-mono text-sm">Sin registros en este período</div>}
+            {combined.map(s => {
+              // ── Fila VIRTUAL de vacaciones ───────────────────────────────
+              if (s._virtual === 'vacation') {
+                const emp = emps.find(e => e.id === s.employee_id)
+                const bid = empBranchMap[s.employee_id]
+                const bn = bid ? branches.find(b => b.id === bid)?.name : null
+                return (
+                  <div key={s.id}
+                    className="card-sm border-l-4 border-l-purple-400 bg-purple-500/10">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-sm text-white">{emp?.name || s.employee_id}</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/20 border border-purple-500/30 text-purple-300">
+                            🏖 Vacaciones
+                          </span>
+                          {s.period?.status === 'completed' && (
+                            <span className="px-1.5 py-0.5 bg-dark-700 border border-dark-border rounded-full text-gray-400 text-[9px] font-mono">
+                              completado
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-500 font-mono mt-1">
+                          {s.date_str}
+                          {s.period?.start_date && s.period?.end_date && (
+                            <> · Periodo {s.period.start_date} → {s.period.end_date}</>
+                          )}
+                        </div>
+                        <div className="text-xs text-purple-300/80 mt-0.5">{s.classification.label}</div>
+                        {bn && <div className="text-[10px] text-gray-600 font-mono mt-0.5">🏢 {bn}</div>}
+                      </div>
+                    </div>
+                  </div>
+                )
+              }
+
+              // ── Fila normal de shift ───────────────────────────────
               const bid = empBranchMap[s.employee_id]
               const bn = bid ? branches.find(b => b.id === bid)?.name : null
               const graveCount = s.status === 'absent' && s.classification?.type === 'falta_injustificada'
                 ? countGraveIncidents(allShifts, s.employee_id)
                 : 0
+              // Si el empleado esta cubriendo a otro, resaltar en cyan
+              const isCovering = !!s.covering_employee_id
               return (
-                <div key={s.id} className={`card-sm ${s.status==='incident'||s.status==='absent'?'border-red-500/20':''}`}>
+                <div key={s.id}
+                  className={`card-sm
+                    ${s.status==='incident'||s.status==='absent' ? 'border-red-500/20' : ''}
+                    ${isCovering ? 'border-l-4 border-l-cyan-400 bg-cyan-500/10' : ''}
+                  `}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-sm text-white">{getEmpName(s.employee_id)}</span>
                         <ShiftBadge status={s.status} classification={s.classification} />
+                        {isCovering && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/20 border border-cyan-500/30 text-cyan-300">
+                            🔄 Cobertura
+                          </span>
+                        )}
                         {s.is_holiday && <span className="badge-orange text-[9px]">FERIADO ×3</span>}
                         {s.corrections?.overtime?.hours > 0 && (
                           <span className="px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-400 text-[9px] font-mono">
@@ -373,7 +514,7 @@ export default function AttendancePage() {
                       )}
                       {bn && <div className="text-[10px] text-gray-600 font-mono mt-0.5">🏢 {bn}</div>}
                       {s.covering_employee_id && (
-                        <div className="text-xs text-blue-400 font-mono mt-0.5">Cubriendo: {getEmpName(s.covering_employee_id)}</div>
+                        <div className="text-xs text-cyan-300 font-mono mt-0.5">Cubriendo: {getEmpName(s.covering_employee_id)}</div>
                       )}
                       {s.incidents?.length > 0 && s.incidents.map((inc,i) => (
                         <div key={i} className="text-xs text-red-400 mt-1">🚩 {inc.type} — {inc.note}</div>

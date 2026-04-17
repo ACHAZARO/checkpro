@@ -5,16 +5,122 @@ import { createClient } from '@/lib/supabase'
 import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
+// ── Calculo de salario diario a partir del schedule del empleado ──────────
+// Usamos el mismo criterio que lib/vacations.js computeCompensationAmount:
+// workDaysPerMonth = round(workDaysPerWeek * 52 / 12), fallback 22.
+function computeDailyRate(emp) {
+  if (!emp) return 0
+  const salary = Number(emp.monthly_salary) || 0
+  let workDaysPerWeek = 0
+  const sched = emp.schedule
+  if (sched && typeof sched === 'object') {
+    for (const k of Object.keys(sched)) {
+      const day = sched[k]
+      if (day && day.work) workDaysPerWeek += 1
+    }
+  }
+  const workDaysPerMonth = workDaysPerWeek > 0
+    ? Math.round((workDaysPerWeek * 52) / 12)
+    : 22
+  return workDaysPerMonth > 0 ? salary / workDaysPerMonth : 0
+}
+
+// Numero de dias entre dos fechas ISO (inclusive) que intersectan [aStart, aEnd]
+// con [bStart, bEnd]. Todos como strings YYYY-MM-DD.
+function daysIntersect(aStart, aEnd, bStart, bEnd) {
+  if (!aStart || !aEnd || !bStart || !bEnd) return 0
+  const s = aStart > bStart ? aStart : bStart
+  const e = aEnd < bEnd ? aEnd : bEnd
+  if (s > e) return 0
+  // Diferencia en dias inclusive
+  const d1 = new Date(s + 'T12:00:00')
+  const d2 = new Date(e + 'T12:00:00')
+  return Math.round((d2 - d1) / (24 * 3600 * 1000)) + 1
+}
+
+// ── Resumen de vacaciones que impactan el corte semanal ────────────────────
+// Para un empleado, con sus periodos y rango de semana (weekStart, weekEnd):
+// - tomadas (active o completed): dias en rango * dailyRate + prima.
+// - compensadas con completed_at en rango: suma compensated_amount.
+function vacationPayForWeek(emp, periodsForEmp, weekStart, weekEnd) {
+  const dailyRate = computeDailyRate(emp)
+  let daysInRange = 0
+  let normalPay = 0
+  let primaPay = 0
+  let compensationPay = 0
+  const details = []
+
+  for (const p of periodsForEmp || []) {
+    const tipo = p.tipo || 'tomadas'
+    const status = p.status
+    if (tipo === 'tomadas' && (status === 'active' || status === 'completed')) {
+      const startStr = String(p.start_date || '').slice(0, 10)
+      const endStr = String(p.end_date || '').slice(0, 10)
+      const days = daysIntersect(startStr, endStr, weekStart, weekEnd)
+      if (days > 0) {
+        const pct = Number(p.prima_pct) || 0
+        const baseNormal = days * dailyRate
+        const basePrima = baseNormal * (pct / 100)
+        daysInRange += days
+        normalPay += baseNormal
+        primaPay += basePrima
+        details.push({
+          type: 'tomadas',
+          periodId: p.id,
+          days,
+          rangeStart: startStr,
+          rangeEnd: endStr,
+          primaPct: pct,
+          normalPay: baseNormal,
+          primaPay: basePrima,
+        })
+      }
+    } else if (tipo === 'compensadas') {
+      const completedAt = p.completed_at ? String(p.completed_at).slice(0, 10) : null
+      if (completedAt && completedAt >= weekStart && completedAt <= weekEnd) {
+        const amt = Number(p.compensated_amount) || 0
+        compensationPay += amt
+        details.push({
+          type: 'compensadas',
+          periodId: p.id,
+          days: Number(p.compensated_days) || 0,
+          completedAt,
+          amount: amt,
+        })
+      }
+    }
+  }
+
+  return {
+    dailyRate: Math.round(dailyRate * 100) / 100,
+    daysInRange,
+    normalPay: Math.round(normalPay * 100) / 100,
+    primaPay: Math.round(primaPay * 100) / 100,
+    compensationPay: Math.round(compensationPay * 100) / 100,
+    totalVacationPay: Math.round((normalPay + primaPay + compensationPay) * 100) / 100,
+    details,
+  }
+}
+
 // ── Compact single-page report ───────────────────────────────────────────────
-function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrollLegend) {
+function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrollLegend, vacByEmp) {
   const active = employees.filter(e => e.has_shift)
   let totalNet = 0
   let totalGross = 0
+  let totalVac = 0
+
+  const weekStart = cut.start_date
+  const weekEnd = cut.end_date
 
   const rows = active.map(emp => {
     const s = empWeekSummary(emp, weekShifts, employees)
-    totalGross += s.grossPay
-    totalNet += s.netPay
+    const vac = vacationPayForWeek(emp, (vacByEmp && vacByEmp[emp.id]) || [], weekStart, weekEnd)
+    // Para la UI del reporte, sumamos la paga de vacaciones al neto/bruto.
+    const grossWithVac = s.grossPay + vac.totalVacationPay
+    const netWithVac = Math.max(0, grossWithVac - s.retardoDesc - s.incidentDesc)
+    totalGross += grossWithVac
+    totalNet += netWithVac
+    totalVac += vac.totalVacationPay
     const daysWorked = s.shifts.filter(sh => ['closed', 'incident'].includes(sh.status)).length
     const deductions = s.retardoDesc + s.incidentDesc
 
@@ -23,15 +129,17 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     if (s.incidents > 0) badges.push(`<span style="background:#f8d7da;color:#842029;padding:1px 5px;border-radius:3px;font-size:7pt">${s.incidents} inc.</span>`)
     if (s.faltasInjustificadas > 0) badges.push(`<span style="background:#f8d7da;color:#842029;padding:1px 5px;border-radius:3px;font-size:7pt">${s.faltasInjustificadas} f.inj.</span>`)
     if (s.otHours > 0) badges.push(`<span style="background:#d1ecf1;color:#0c5460;padding:1px 5px;border-radius:3px;font-size:7pt">${s.otHours}h HE</span>`)
+    if (vac.daysInRange > 0) badges.push(`<span style="background:#e9d8fd;color:#553c9a;padding:1px 5px;border-radius:3px;font-size:7pt">${vac.daysInRange}d vac.</span>`)
+    if (vac.compensationPay > 0) badges.push(`<span style="background:#e9d8fd;color:#553c9a;padding:1px 5px;border-radius:3px;font-size:7pt">comp.</span>`)
 
     return `<tr>
       <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;font-weight:600">${emp.name}</td>
       <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;color:#555">${emp.department || '—'}</td>
       <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;text-align:center">${daysWorked}d / ${s.totalH}h${s.otHours > 0 ? `<br/><span style="font-size:7pt;color:#0c5460">+${s.otHours}h HE</span>` : ''}</td>
       <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;text-align:center">${badges.join(' ') || '<span style="color:#198754">✓</span>'}</td>
-      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;text-align:right">$${s.grossPay.toFixed(2)}</td>
+      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;text-align:right">$${grossWithVac.toFixed(2)}</td>
       <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;text-align:right;color:${deductions > 0 ? '#c60' : '#aaa'}">${deductions > 0 ? '-$' + deductions.toFixed(2) : '—'}</td>
-      <td style="border:1px solid #ddd;padding:5px 7px;font-size:9pt;text-align:right;font-weight:700">$${s.netPay.toFixed(2)}</td>
+      <td style="border:1px solid #ddd;padding:5px 7px;font-size:9pt;text-align:right;font-weight:700">$${netWithVac.toFixed(2)}</td>
       <td style="border:1px solid #ddd;padding:5px 7px;width:80px"></td>
     </tr>`
   }).join('')
@@ -39,14 +147,62 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
   // Signature grid: 3 columns
   const sigCols = active.map(emp => {
     const s = empWeekSummary(emp, weekShifts, employees)
+    const vac = vacationPayForWeek(emp, (vacByEmp && vacByEmp[emp.id]) || [], weekStart, weekEnd)
+    const grossWithVac = s.grossPay + vac.totalVacationPay
+    const netWithVac = Math.max(0, grossWithVac - s.retardoDesc - s.incidentDesc)
     return `<div style="padding:8px 4px">
       <div style="border-top:1px solid #000;padding-top:4px">
         <div style="font-size:8pt;font-weight:600">${emp.name}</div>
-        <div style="font-size:7.5pt;color:#555">${emp.employee_code} · Neto: $${s.netPay.toFixed(2)}</div>
+        <div style="font-size:7.5pt;color:#555">${emp.employee_code} · Neto: $${netWithVac.toFixed(2)}</div>
         <div style="font-size:7pt;color:#999;margin-top:2px">Firma de conformidad</div>
       </div>
     </div>`
   }).join('')
+
+  // Desglose de vacaciones y compensaciones que impactan este corte.
+  const vacLines = []
+  for (const emp of active) {
+    const vac = vacationPayForWeek(emp, (vacByEmp && vacByEmp[emp.id]) || [], weekStart, weekEnd)
+    for (const d of vac.details) {
+      if (d.type === 'tomadas') {
+        vacLines.push(`<tr>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt">${emp.name}</td>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt">Vacaciones</td>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:center">${d.days}d</td>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:7.5pt;color:#666">${d.rangeStart} → ${d.rangeEnd}</td>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:right">$${d.normalPay.toFixed(2)}</td>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:right;color:#553c9a">$${d.primaPay.toFixed(2)}<br/><span style="font-size:6.5pt;color:#999">prima ${d.primaPct}%</span></td>
+        </tr>`)
+      } else if (d.type === 'compensadas') {
+        vacLines.push(`<tr>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt">${emp.name}</td>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt">Compensación</td>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:center">${d.days}d</td>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:7.5pt;color:#666">finalizado ${d.completedAt}</td>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:right">—</td>
+          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:right;color:#553c9a">$${d.amount.toFixed(2)}<br/><span style="font-size:6.5pt;color:#999">pago doble</span></td>
+        </tr>`)
+      }
+    }
+  }
+
+  const vacSection = vacLines.length > 0
+    ? `<div style="margin-top:16px">
+        <div style="font-size:9pt;font-weight:bold;margin-bottom:4px;color:#553c9a">🏖 Vacaciones y compensaciones</div>
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:#f5f0ff">
+            <th style="border:1px solid #ddd;padding:4px 6px;font-size:8pt;text-align:left">Empleado</th>
+            <th style="border:1px solid #ddd;padding:4px 6px;font-size:8pt;text-align:left">Tipo</th>
+            <th style="border:1px solid #ddd;padding:4px 6px;font-size:8pt">Días</th>
+            <th style="border:1px solid #ddd;padding:4px 6px;font-size:8pt;text-align:left">Período</th>
+            <th style="border:1px solid #ddd;padding:4px 6px;font-size:8pt;text-align:right">Pago base</th>
+            <th style="border:1px solid #ddd;padding:4px 6px;font-size:8pt;text-align:right">Prima / Comp.</th>
+          </tr></thead>
+          <tbody>${vacLines.join('')}</tbody>
+        </table>
+        <div style="margin-top:4px;font-size:7.5pt;color:#666">Total vacaciones y compensaciones: <b>$${totalVac.toFixed(2)}</b></div>
+       </div>`
+    : ''
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
     <title>Nómina ${cut.start_date}</title>
@@ -99,6 +255,7 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
         <tr>
           <td colspan="4" style="border:1px solid #ccc;padding:5px 7px;font-size:8.5pt">
             <b>TOTALES</b> · ${active.length} empleado${active.length !== 1 ? 's' : ''}
+            ${totalVac > 0 ? `<span style="color:#553c9a;font-size:7.5pt">· incluye $${totalVac.toFixed(2)} de vacaciones/comp.</span>` : ''}
           </td>
           <td style="border:1px solid #ccc;padding:5px 7px;text-align:right;font-size:9pt">$${totalGross.toFixed(2)}</td>
           <td style="border:1px solid #ccc;padding:5px 7px;text-align:right;font-size:9pt;color:#c60">—</td>
@@ -107,6 +264,8 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
         </tr>
       </tfoot>
     </table>
+
+    ${vacSection}
 
     <!-- Signatures -->
     <div class="sig-grid">${sigCols}</div>
@@ -127,6 +286,7 @@ export default function PayrollPage() {
   const [emps, setEmps] = useState([])
   const [shifts, setShifts] = useState([])
   const [cuts, setCuts] = useState([])
+  const [vacPeriods, setVacPeriods] = useState([])
   const [cfg, setCfg] = useState(null)
   const [tenantId, setTenantId] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -144,23 +304,36 @@ export default function PayrollPage() {
     setTenantId(prof.tenant_id)
     const { data: tenant } = await supabase.from('tenants').select('config,name').eq('id', prof.tenant_id).single()
     setCfg(tenant?.config)
-    const [{ data: empData }, { data: shiftData }, { data: cutData }] = await Promise.all([
+    const [{ data: empData }, { data: shiftData }, { data: cutData }, { data: vacData }] = await Promise.all([
       supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).eq('status', 'active').eq('has_shift', true),
       supabase.from('shifts').select('*').eq('tenant_id', prof.tenant_id).order('date_str', { ascending: false }),
       supabase.from('week_cuts').select('*').eq('tenant_id', prof.tenant_id).order('created_at', { ascending: false }),
+      supabase.from('vacation_periods')
+        .select('id,employee_id,tipo,status,start_date,end_date,prima_pct,entitled_days,compensated_days,compensated_amount,completed_at')
+        .eq('tenant_id', prof.tenant_id),
     ])
     setEmps(empData || [])
     setShifts(shiftData || [])
     setCuts(cutData || [])
+    setVacPeriods(vacData || [])
     setLoading(false)
   }, [])
 
   useEffect(() => { load() }, [load])
 
   const range = cfg ? weekRange(new Date(), cfg.weekClosingDay || 'dom') : weekRange(new Date(), 'dom')
-  const weekShifts = shifts.filter(s => s.date_str >= isoDate(range.start) && s.date_str <= isoDate(range.end))
+  const weekStartStr = isoDate(range.start)
+  const weekEndStr = isoDate(range.end)
+  const weekShifts = shifts.filter(s => s.date_str >= weekStartStr && s.date_str <= weekEndStr)
   const incidentShifts = weekShifts.filter(s => s.status === 'incident')
   const hasUnresolved = incidentShifts.length > 0
+
+  // Agrupa vacation_periods por employee_id para lookup rapido
+  const vacByEmp = {}
+  for (const p of vacPeriods) {
+    if (!vacByEmp[p.employee_id]) vacByEmp[p.employee_id] = []
+    vacByEmp[p.employee_id].push(p)
+  }
 
   // ── Resolve an incident shift ─────────────────────────────────────────────
   async function resolveIncident(shiftId, action) {
@@ -220,13 +393,13 @@ export default function PayrollPage() {
 
     await load()
     const { data: fresh } = await supabase.from('week_cuts').select('*').eq('id', cut.id).single()
-    setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend))
+    setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp))
     setClosing(false)
   }
 
   function openReport(cut) {
     const ws = shifts.filter(s => cut.shift_ids?.includes(s.id))
-    setPrintHTML(buildReportHTML(cut, ws, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend))
+    setPrintHTML(buildReportHTML(cut, ws, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp))
   }
 
   if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando...</div>
@@ -302,6 +475,9 @@ export default function PayrollPage() {
       <div className="space-y-2 mb-6">
         {emps.map(emp => {
           const s = empWeekSummary(emp, weekShifts, emps)
+          const vac = vacationPayForWeek(emp, vacByEmp[emp.id] || [], weekStartStr, weekEndStr)
+          const grossWithVac = s.grossPay + vac.totalVacationPay
+          const netWithVac = Math.max(0, grossWithVac - s.retardoDesc - s.incidentDesc)
           return (
             <div key={emp.id} className="card">
               <div className="flex items-start justify-between mb-2">
@@ -310,22 +486,40 @@ export default function PayrollPage() {
                   <div className="text-xs text-gray-500">{emp.department} · ${monthlyToHourly(emp).toFixed(2)}/h</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-xl font-extrabold text-brand-400 font-mono">${s.netPay.toFixed(0)}</div>
+                  <div className="text-xl font-extrabold text-brand-400 font-mono">${netWithVac.toFixed(0)}</div>
                   <div className="text-[9px] text-gray-600 font-mono">NETO EST.</div>
                 </div>
               </div>
               <div className="flex flex-wrap gap-3 text-xs text-gray-500 font-mono mb-2">
                 <span>{s.totalH}h trabajadas</span>
                 {s.otHours > 0 && <span className="text-blue-400">+{s.otHours}h extra (×2)</span>}
-                <span>Bruto: ${s.grossPay.toFixed(2)}</span>
+                <span>Bruto: ${grossWithVac.toFixed(2)}</span>
                 {s.retardoDesc > 0 && <span className="text-orange-400">-${s.retardoDesc.toFixed(2)} retardos</span>}
                 {s.incidentDesc > 0 && <span className="text-red-400">-${s.incidentDesc.toFixed(2)} incid.</span>}
+                {vac.daysInRange > 0 && (
+                  <span className="text-purple-300">🏖 {vac.daysInRange}d vac. (${(vac.normalPay + vac.primaPay).toFixed(2)})</span>
+                )}
+                {vac.compensationPay > 0 && (
+                  <span className="text-purple-300">💰 comp. ${vac.compensationPay.toFixed(2)}</span>
+                )}
               </div>
               <div className="flex gap-1.5 flex-wrap">
                 {s.retardos > 0 && <span className="badge-orange">{s.retardos} retardo{s.retardos > 1 ? 's' : ''}</span>}
                 {s.incidents > 0 && <span className="badge-red">{s.incidents} incidencia{s.incidents > 1 ? 's' : ''}</span>}
                 {s.otHours > 0 && <span className="px-2 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-400 text-[10px] font-semibold">{s.otHours}h extra</span>}
-                {s.retardos === 0 && s.incidents === 0 && s.otHours === 0 && <span className="badge-green">Sin incidencias ✓</span>}
+                {vac.daysInRange > 0 && (
+                  <span className="px-2 py-0.5 bg-purple-500/10 border border-purple-500/30 rounded-full text-purple-300 text-[10px] font-semibold">
+                    🏖 {vac.daysInRange}d vacaciones · prima ${vac.primaPay.toFixed(0)}
+                  </span>
+                )}
+                {vac.compensationPay > 0 && (
+                  <span className="px-2 py-0.5 bg-purple-500/10 border border-purple-500/30 rounded-full text-purple-300 text-[10px] font-semibold">
+                    💰 Compensación ×2 = ${vac.compensationPay.toFixed(0)}
+                  </span>
+                )}
+                {s.retardos === 0 && s.incidents === 0 && s.otHours === 0 && vac.daysInRange === 0 && vac.compensationPay === 0 && (
+                  <span className="badge-green">Sin incidencias ✓</span>
+                )}
               </div>
             </div>
           )
