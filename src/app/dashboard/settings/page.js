@@ -26,17 +26,44 @@ export default function SettingsPage() {
 
   const load = useCallback(async () => {
     const supabase = createClient()
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) return
-    const { data: prof } = await supabase.from('profiles').select('*').eq('id', session.user.id).single()
+    const { data: { session }, error: sErr } = await supabase.auth.getSession()
+    if (sErr || !session) {
+      console.error('[settings] no session:', sErr)
+      setLoading(false)
+      return
+    }
+    const { data: prof, error: pErr } = await supabase.from('profiles').select('*').eq('id', session.user.id).single()
+    if (pErr) {
+      console.error('[settings] profiles error:', pErr)
+      toast.error(`No se pudo cargar tu perfil: ${pErr.message}`)
+      setLoading(false)
+      return
+    }
     setProfile(prof)
-    if (!prof?.tenant_id) { setLoading(false); return }
-    const { data: ten } = await supabase.from('tenants').select('*').eq('id', prof.tenant_id).single()
+    if (!prof?.tenant_id) {
+      console.error('[settings] profile sin tenant_id', prof)
+      toast.error('Tu perfil no tiene empresa asignada.')
+      setLoading(false)
+      return
+    }
+    const { data: ten, error: tErr } = await supabase.from('tenants').select('*').eq('id', prof.tenant_id).single()
+    if (tErr || !ten) {
+      console.error('[settings] tenants select error:', tErr, 'tenant_id:', prof.tenant_id)
+      toast.error(tErr?.message ? `Error cargando empresa: ${tErr.message}` : 'No se pudo cargar tu empresa (RLS?)')
+      setLoading(false)
+      return
+    }
     setTenant(ten)
-    const r = await fetch('/api/branches')
-    if (r.ok) {
-      const { branches: list } = await r.json()
-      setBranches(list || [])
+    try {
+      const r = await fetch('/api/branches')
+      if (r.ok) {
+        const { branches: list } = await r.json()
+        setBranches(list || [])
+      } else {
+        console.error('[settings] /api/branches failed:', r.status)
+      }
+    } catch (e) {
+      console.error('[settings] /api/branches threw:', e)
     }
     setLoading(false)
   }, [])
@@ -89,7 +116,20 @@ export default function SettingsPage() {
       </div>
 
       {tab === 'empresa' && isOwner && (
-        <TenantIdentityTab tenant={tenant} onSaved={async () => { await load() }} />
+        tenant
+          ? <TenantIdentityTab tenant={tenant} onSaved={async () => { await load() }} />
+          : (
+            <div className="card text-center py-8">
+              <div className="text-3xl mb-2">⚠️</div>
+              <p className="text-sm text-red-400 font-bold mb-1">No se pudo cargar la empresa</p>
+              <p className="text-xs text-gray-500 font-mono mb-4">
+                Tu perfil se cargo pero la empresa vinculada no se pudo leer (posiblemente RLS o sesion expirada).
+              </p>
+              <button onClick={() => load()} className="px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90">
+                🔄 Reintentar
+              </button>
+            </div>
+          )
       )}
 
       {tab === 'sucursales' && (
@@ -129,6 +169,13 @@ function TenantIdentityTab({ tenant, onSaved }) {
 
   async function save() {
     if (saving) return
+    // Bail out defensivo: si el tenant nunca cargo (RLS, network, o carrera de load),
+    // tenant.id explota con "null is not an object". Mejor mensaje claro que reventar.
+    if (!tenant || !tenant.id) {
+      console.error('[settings] save() llamado sin tenant cargado', { tenant })
+      toast.error('No se pudo cargar tu empresa. Recarga la pagina y vuelve a intentar.')
+      return
+    }
     setSaving(true)
     const supabase = createClient()
     // Timeout de 15s: si Supabase se cuelga (RLS recursivo, red, etc.) no dejamos el boton atascado
