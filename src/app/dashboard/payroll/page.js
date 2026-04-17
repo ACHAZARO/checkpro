@@ -370,10 +370,18 @@ export default function PayrollPage() {
     setResolvingId(shiftId)
     const supabase = createClient()
     const note = action === 'approve' ? 'Aprobado por gerente' : 'Descuento aplicado por gerente'
-    await supabase.from('shifts').update({
+    // FIX: antes se swallowed el error silently — si RLS bloqueaba la update
+    // el toast de exito salia igual y el gerente no se enteraba.
+    const { error: uErr } = await supabase.from('shifts').update({
       status: 'closed',
       incidents: [{ resolved: true, action, note, resolvedAt: new Date().toISOString() }]
     }).eq('id', shiftId)
+    if (uErr) {
+      console.error('[payroll] resolveIncident error:', uErr)
+      toast.error(`No se pudo resolver: ${uErr.message}`)
+      setResolvingId(null)
+      return
+    }
     toast.success(action === 'approve' ? 'Incidencia aprobada ✓' : 'Descuento aplicado')
     setResolvingId(null)
     await load()

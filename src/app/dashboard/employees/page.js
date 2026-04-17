@@ -199,7 +199,15 @@ export default function EmployeesPage() {
           )
         }
       } else {
-        await supabase.from('employees').update({ ...payload, status: form.status || 'active' }).eq('id', form.id)
+        // FIX: antes se swallowed el error silently y el toast decia "actualizado"
+        // aunque la update fallara por RLS o constraint.
+        const { error: upErr } = await supabase.from('employees').update({ ...payload, status: form.status || 'active' }).eq('id', form.id)
+        if (upErr) {
+          console.error('[employees] update error:', upErr)
+          toast.error(`No se pudo actualizar: ${upErr.message}`)
+          setSaving(false)
+          return
+        }
         toast.success('Empleado actualizado')
       }
       await load()
