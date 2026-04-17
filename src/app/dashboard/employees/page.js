@@ -275,7 +275,7 @@ export default function EmployeesPage() {
   const hasBranches = branches.length > 0
 
   return (
-    <div className="p-4 md:p-6 max-w-2xl">
+    <div className="p-5 md:p-6 max-w-2xl mx-auto">
       <div className="flex items-end justify-between mb-5">
         <div>
           <h1 className="text-2xl font-extrabold text-white">Empleados</h1>

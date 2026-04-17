@@ -242,7 +242,7 @@ export default function DashboardPage() {
   const getEmpName = id => employees.find(e => e.id === id)?.name || id
 
   return (
-    <div className="p-4 md:p-6 max-w-5xl">
+    <div className="p-5 md:p-6 max-w-5xl mx-auto">
       <div className="mb-5">
         <h1 className="text-2xl font-extrabold text-white">Hoy</h1>
         <p className="text-gray-500 text-xs font-mono mt-0.5">

@@ -524,7 +524,7 @@ export default function PayrollPage() {
   // Aviso si no hay ninguna sucursal configurada para este tenant.
   if (allBranches.length === 0) {
     return (
-      <div className="p-4 md:p-6 max-w-2xl">
+      <div className="p-5 md:p-6 max-w-2xl mx-auto">
         <h1 className="text-2xl font-extrabold text-white mb-2">Nómina</h1>
         <div className="card text-center py-10">
           <div className="text-4xl mb-3">🏢</div>
@@ -536,7 +536,7 @@ export default function PayrollPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 max-w-2xl">
+    <div className="p-5 md:p-6 max-w-2xl mx-auto">
       <div className="mb-5">
         <h1 className="text-2xl font-extrabold text-white">Nómina</h1>
         <p className="text-gray-500 text-xs font-mono mt-0.5">

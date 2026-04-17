@@ -98,7 +98,7 @@ export default function SettingsPage() {
   if (!isOwner && tab !== 'sucursales') setTab('sucursales')
 
   return (
-    <div className="p-4 md:p-6 max-w-3xl">
+    <div className="p-5 md:p-6 max-w-3xl mx-auto">
       <div className="mb-5">
         <h1 className="text-2xl font-extrabold text-white">Configuración</h1>
         <p className="text-gray-500 text-xs font-mono mt-0.5">PARÁMETROS DEL SISTEMA</p>
@@ -693,7 +693,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(checkUrl)}&size=200x200&bgcolor=0d0d0d&color=3DFFA0&qzone=2`
 
   return (
-    <div className="p-4 md:p-6 max-w-3xl">
+    <div className="p-5 md:p-6 max-w-3xl mx-auto">
       <div className="flex items-center justify-between mb-4 gap-2">
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white">
           ← Volver a sucursales

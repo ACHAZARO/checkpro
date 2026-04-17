@@ -427,7 +427,7 @@ export default function EmployeeDetailPage() {
   // ── render ─────────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="p-4 md:p-6 max-w-3xl">
+      <div className="p-5 md:p-6 max-w-3xl mx-auto">
         <div className="card animate-pulse h-24 mb-3" />
         <div className="card animate-pulse h-20 mb-3" />
         <div className="card animate-pulse h-40" />
@@ -437,7 +437,7 @@ export default function EmployeeDetailPage() {
 
   if (err || !employee) {
     return (
-      <div className="p-4 md:p-6 max-w-3xl">
+      <div className="p-5 md:p-6 max-w-3xl mx-auto">
         <Link href="/dashboard/employees" className="text-brand-400 text-sm font-mono">← Volver a empleados</Link>
         <div className="card mt-4 text-center py-10">
           <div className="text-4xl mb-3">⚠️</div>
@@ -454,7 +454,7 @@ export default function EmployeeDetailPage() {
   const compMonto = compDays * dr * 2 // doble pago según spec
 
   return (
-    <div className="p-4 md:p-6 max-w-3xl">
+    <div className="p-5 md:p-6 max-w-3xl mx-auto">
       {/* Back + título */}
       <div className="mb-4">
         <Link href="/dashboard/employees" className="text-brand-400 text-xs font-mono active:brightness-90">← Empleados</Link>

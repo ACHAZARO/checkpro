@@ -102,7 +102,7 @@ export default function DashboardLayout({ children }) {
       {/* Main content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Mobile top bar */}
-        <div className="md:hidden sticky top-0 z-30 bg-dark-900/92 backdrop-blur border-b border-dark-border px-4 py-3 flex items-center justify-between">
+        <div className="md:hidden sticky top-0 z-30 bg-dark-900/92 backdrop-blur border-b border-dark-border px-5 py-3 flex items-center justify-between">
           <div>
             <div className="text-xs font-mono text-brand-400 tracking-widest">⬡ CHECKPRO</div>
             <div className="text-sm font-bold text-white">{tenant?.name || tenant?.config?.branchName}</div>
