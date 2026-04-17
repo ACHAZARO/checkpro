@@ -123,11 +123,16 @@ export default function SettingsPage() {
               <div className="text-3xl mb-2">⚠️</div>
               <p className="text-sm text-red-400 font-bold mb-1">No se pudo cargar la empresa</p>
               <p className="text-xs text-gray-500 font-mono mb-4">
-                Tu perfil se cargo pero la empresa vinculada no se pudo leer (posiblemente RLS o sesion expirada).
+                La empresa vinculada a tu cuenta no esta disponible. Puedes crear una nueva o reintentar.
               </p>
-              <button onClick={() => load()} className="px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90">
-                🔄 Reintentar
-              </button>
+              <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                <button onClick={() => load()} className="px-4 py-2 bg-dark-700 border border-dark-border text-gray-300 text-sm font-bold rounded-xl active:brightness-90">
+                  🔄 Reintentar
+                </button>
+                <button onClick={() => { window.location.href = '/onboarding' }} className="px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90">
+                  ＋ Crear empresa nueva
+                </button>
+              </div>
             </div>
           )
       )}
