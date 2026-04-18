@@ -12,6 +12,7 @@ const NAV = [
   { href: '/dashboard/attendance', label: 'Asistencia', icon: '📅' },
   { href: '/dashboard/payroll',    label: 'Nómina',     icon: '💰' },
   { href: '/dashboard/settings',   label: 'Config',     icon: '⚙️' },
+  { href: '/dashboard/help',       label: 'Ayuda',      icon: '❔' },
 ]
 
 export default function DashboardLayout({ children }) {
@@ -92,6 +93,14 @@ export default function DashboardLayout({ children }) {
             className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500 hover:text-brand-400 transition-colors rounded-lg hover:bg-dark-700">
             📍 Abrir checador
           </Link>
+          {['owner','manager','super_admin'].includes(profile?.role) && (
+            <Link href="/dashboard/bugs"
+              className={`flex items-center gap-2 px-3 py-2 text-xs transition-colors rounded-lg hover:bg-dark-700 ${
+                pathname === '/dashboard/bugs' ? 'text-brand-400' : 'text-gray-500 hover:text-brand-400'
+              }`}>
+              🔧 Bugs y mejoras
+            </Link>
+          )}
           <button onClick={signOut}
             className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500 hover:text-red-400 transition-colors w-full rounded-lg hover:bg-dark-700">
             🚪 Cerrar sesión
