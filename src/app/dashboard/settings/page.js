@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { DAYS, DAY_L, DAY_FL, LFT_VACATION_TABLE } from '@/lib/utils'
 import toast from 'react-hot-toast'
+import HelpCenter from '@/components/HelpCenter'
 
 const DEFAULT_LEYENDA = 'Al firmar el presente comprobante de nómina, el trabajador acepta que los montos, horas trabajadas e incidencias registradas son correctos y conformes a su contrato laboral. Cualquier aclaración deberá presentarse por escrito en un plazo máximo de 5 días hábiles. Documento confidencial de uso interno.'
 const FALLBACK_URL = 'https://checkpro-self.vercel.app'
@@ -91,11 +92,11 @@ export default function SettingsPage() {
   }
 
   const TABS = isOwner
-    ? [['empresa','Empresa'],['sucursales','Sucursales'],['equipo','Equipo']]
-    : [['sucursales','Mi sucursal']]
+    ? [['empresa','Empresa'],['sucursales','Sucursales'],['equipo','Equipo'],['ayuda','Ayuda']]
+    : [['sucursales','Mi sucursal'],['ayuda','Ayuda']]
 
-  // Manager can't see Empresa/Equipo tabs; default to sucursales
-  if (!isOwner && tab !== 'sucursales') setTab('sucursales')
+  // Manager can't see Empresa/Equipo tabs; default to sucursales (Ayuda sí la ven)
+  if (!isOwner && tab !== 'sucursales' && tab !== 'ayuda') setTab('sucursales')
 
   return (
     <div className="p-5 md:p-6 max-w-3xl mx-auto">
@@ -149,6 +150,10 @@ export default function SettingsPage() {
 
       {tab === 'equipo' && isOwner && (
         <TeamTab branches={branches} onChanged={load} />
+      )}
+
+      {tab === 'ayuda' && (
+        <HelpCenter />
       )}
     </div>
   )

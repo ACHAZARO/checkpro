@@ -12,7 +12,6 @@ const NAV = [
   { href: '/dashboard/attendance', label: 'Asistencia', icon: '📅' },
   { href: '/dashboard/payroll',    label: 'Nómina',     icon: '💰' },
   { href: '/dashboard/settings',   label: 'Config',     icon: '⚙️' },
-  { href: '/dashboard/help',       label: 'Ayuda',      icon: '❔' },
 ]
 
 export default function DashboardLayout({ children }) {
