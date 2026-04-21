@@ -13,11 +13,13 @@ function ShiftBadge({ status, classification }) {
     if (t === 'falta_injustificada') return <span className="badge-red">Falta injustificada</span>
     if (t === 'falta_justificada_pagada') return <span className="badge-orange">Falta justif. pagada</span>
     if (t === 'falta_justificada_no_pagada') return <span className="badge-orange">Falta justif. s/pago</span>
+    if (t === 'dia_libre_autorizado') return <span className="px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-300 text-[10px] font-mono">Día libre autorizado</span>
     return <span className="badge-red">Falta</span>
   }
   const t = classification?.type
   if (t === 'retardo') return <span className="badge-orange">Retardo</span>
   if (t === 'tolerancia') return <span className="badge-orange">Tolerancia</span>
+  if (t === 'no_planificado') return <span className="px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/20 rounded-full text-yellow-300 text-[10px] font-mono">No planificado</span>
   return <span className="badge-green">Completa</span>
 }
 
@@ -82,6 +84,7 @@ export default function AttendancePage() {
   // Suggested absences: employees who had scheduled workday but no shift record
   const [suggestedAbsences, setSuggestedAbsences] = useState([]) // { emp, dateStr }
   const [dismissedSuggestions, setDismissedSuggestions] = useState(new Set())
+  const [shiftPlans, setShiftPlans] = useState([]) // feat/mixed-schedule
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -91,8 +94,10 @@ export default function AttendancePage() {
     if (!prof?.tenant_id) return
     setTenantId(prof.tenant_id)
 
-    const [{ data: empData }, { data: shiftData }, { data: tenantData }, { data: branchData }, { data: allShiftData }, { data: vacData }] = await Promise.all([
-      supabase.from('employees').select('id,name,department,monthly_salary,schedule').eq('tenant_id', prof.tenant_id).neq('status','deleted'),
+    const [{ data: empData }, { data: shiftData }, { data: tenantData }, { data: branchData }, { data: allShiftData }, { data: vacData }, { data: planData }] = await Promise.all([
+      // feat/mixed-schedule: traer is_mixed y daily_hours para detectar ausencias
+      // y calcular pagos correctamente.
+      supabase.from('employees').select('id,name,department,monthly_salary,schedule,is_mixed,daily_hours').eq('tenant_id', prof.tenant_id).neq('status','deleted'),
       supabase.from('shifts').select('*').eq('tenant_id', prof.tenant_id).gte('date_str', filterFrom).lte('date_str', filterTo).order('date_str', { ascending: false }).order('entry_time', { ascending: false }),
       supabase.from('tenants').select('config').eq('id', prof.tenant_id).single(),
       // FIX: leer sucursales de la tabla canonica (no del JSONB legacy)
@@ -108,6 +113,14 @@ export default function AttendancePage() {
         .in('status', ['active', 'completed'])
         .lte('start_date', filterTo)
         .gte('end_date', filterFrom),
+      // feat/mixed-schedule: planes de turnos que tocan el rango. Se usan para
+      // detectar faltas de mixtos (agendado sin check-in) y para mostrar el
+      // horario planeado en la tabla.
+      supabase.from('shift_plans')
+        .select('employee_id,date_str,entry_time_str,duration_hours,exit_time_str')
+        .eq('tenant_id', prof.tenant_id)
+        .gte('date_str', filterFrom)
+        .lte('date_str', filterTo),
     ])
     setEmps(empData || [])
     setShifts(shiftData || [])
@@ -115,6 +128,7 @@ export default function AttendancePage() {
     // FIX: preferir tabla branches; fallback a JSONB legacy
     setBranches((branchData && branchData.length > 0) ? branchData : (tenantData?.config?.branches || []))
     setVacationPeriods(vacData || [])
+    setShiftPlans(planData || [])
 
     // Auto-detect possible absences (excluye dias que caen en vacaciones)
     const dates = dateRange(filterFrom, filterTo)
@@ -124,12 +138,20 @@ export default function AttendancePage() {
       if (!vacByEmp[p.employee_id]) vacByEmp[p.employee_id] = []
       vacByEmp[p.employee_id].push(p)
     }
+    // feat/mixed-schedule: indice plan por empleado+fecha para decidir "debe
+    // trabajar" en mixtos. Solo cuenta como agendado si hay entry_time_str.
+    const planByEmpDate = new Set(
+      (planData || [])
+        .filter(p => p?.entry_time_str)
+        .map(p => `${p.employee_id}_${p.date_str}`)
+    )
     const suggestions = []
     for (const emp of (empData || [])) {
       const empVacs = vacByEmp[emp.id] || []
       for (const dateStr of dates) {
-        const dk = dayKey(new Date(dateStr + 'T12:00:00'))
-        const shouldWork = emp.schedule?.[dk]?.work === true
+        const shouldWork = emp.is_mixed
+          ? planByEmpDate.has(`${emp.id}_${dateStr}`)
+          : (emp.schedule?.[dayKey(new Date(dateStr + 'T12:00:00'))]?.work === true)
         const hasRecord = shiftsByEmpDate.has(`${emp.id}_${dateStr}`)
         const onVac = empVacs.some(p => dateInPeriod(dateStr, p))
         if (shouldWork && !hasRecord && !onVac) {
@@ -281,6 +303,10 @@ export default function AttendancePage() {
       falta_injustificada: 'Falta injustificada',
       falta_justificada_pagada: 'Falta justificada (con goce de sueldo)',
       falta_justificada_no_pagada: 'Falta justificada (sin goce de sueldo)',
+      // feat/mixed-schedule: post-hoc justification — el gerente autorizo
+      // que el mixto no viniera ese dia. No cuenta como falta ni como
+      // descuento; simplemente registra que ese dia no trabajo.
+      dia_libre_autorizado: 'Día libre autorizado',
     }
     const label = typeLabels[absenceForm.type] || absenceForm.type
     const isGrave = absenceForm.type === 'falta_injustificada'
@@ -337,6 +363,45 @@ export default function AttendancePage() {
   const visibleSuggestions = suggestedAbsences.filter(s =>
     !dismissedSuggestions.has(`${s.emp.id}_${s.dateStr}`)
   )
+
+  // feat/mixed-schedule: reclasificar falta de mixto a dia libre autorizado.
+  // Limpia incidents de tipo 'grave' y actualiza classification. La fila
+  // sigue con status='absent' pero ya no pesa en nomina ni en faltas graves.
+  async function reclassifyAsDayOff(shift) {
+    if (!shift?.id) return
+    if (!confirm('¿Marcar esta falta como "Día libre autorizado"? No se pagará, pero dejará de contar como falta.')) return
+    setSaving(true)
+    const supabase = createClient()
+    const prevIncidents = Array.isArray(shift.incidents) ? shift.incidents : []
+    const cleanIncidents = prevIncidents.filter(i => i?.type !== 'grave')
+    const { error } = await supabase.from('shifts').update({
+      classification: { type: 'dia_libre_autorizado', label: 'Día libre autorizado' },
+      incidents: cleanIncidents,
+      corrections: {
+        ...(shift.corrections || {}),
+        reclassified: {
+          from: shift.classification?.type || null,
+          to: 'dia_libre_autorizado',
+          at: new Date().toISOString(),
+        },
+      },
+    }).eq('id', shift.id)
+    if (error) {
+      console.error('[attendance] reclassify error:', error)
+      toast.error(`No se pudo reclasificar: ${error.message}`)
+      setSaving(false)
+      return
+    }
+    await supabase.from('audit_log').insert({
+      tenant_id: tenantId, action: 'ABSENCE_RECLASS',
+      employee_id: shift.employee_id, employee_name: getEmpName(shift.employee_id),
+      detail: `Falta ${shift.date_str} reclasificada a "Día libre autorizado" (mixto)`,
+      success: true,
+    })
+    toast.success('Día libre autorizado')
+    setSaving(false)
+    await load()
+  }
 
   // Export filtered shifts to CSV
   function handleExportCSV(annual = false) {
@@ -606,6 +671,17 @@ export default function AttendancePage() {
                         )}
                       </div>
                     )}
+                    {/* feat/mixed-schedule: justificar post-hoc falta de mixto como dia libre */}
+                    {s.status === 'absent'
+                      && (emps.find(e => e.id === s.employee_id)?.is_mixed)
+                      && s.classification?.type !== 'dia_libre_autorizado' && (
+                      <div className="shrink-0">
+                        <button onClick={() => reclassifyAsDayOff(s)} disabled={saving}
+                          className="px-2 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg text-[10px] text-blue-300 active:bg-blue-500/20 disabled:opacity-50">
+                          Día libre
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               )
@@ -645,11 +721,23 @@ export default function AttendancePage() {
                       desc: 'Falta con justificante pero sin pago del día.',
                       color: 'orange'
                     },
+                    // feat/mixed-schedule: post-hoc para mixtos cuyo gerente
+                    // autorizo el descanso despues del hecho. No se paga, no
+                    // es grave. Se ve igual en historial.
+                    ...(absenceSheet.emp.is_mixed ? [{
+                      value: 'dia_libre_autorizado',
+                      label: 'Día libre autorizado',
+                      desc: 'Autorizaste que no viniera ese día. No cuenta como falta y no afecta su nómina.',
+                      color: 'blue'
+                    }] : []),
                   ].map(opt => (
                     <label key={opt.value}
                       className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors
                         ${absenceForm.type === opt.value
-                          ? opt.color === 'red' ? 'bg-red-500/10 border-red-500/30' : opt.color === 'green' ? 'bg-green-500/10 border-green-500/30' : 'bg-orange-500/10 border-orange-500/30'
+                          ? opt.color === 'red' ? 'bg-red-500/10 border-red-500/30'
+                            : opt.color === 'green' ? 'bg-green-500/10 border-green-500/30'
+                            : opt.color === 'blue' ? 'bg-blue-500/10 border-blue-500/30'
+                            : 'bg-orange-500/10 border-orange-500/30'
                           : 'bg-dark-700 border-dark-border'
                         }`}>
                       <input type="radio" name="absenceType" value={opt.value}

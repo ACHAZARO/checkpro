@@ -6,13 +6,15 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 
-const NAV = [
+const NAV_BASE = [
   { href: '/dashboard',            label: 'Hoy',        icon: '🏠' },
   { href: '/dashboard/employees',  label: 'Personal',   icon: '👥' },
   { href: '/dashboard/attendance', label: 'Asistencia', icon: '📅' },
   { href: '/dashboard/payroll',    label: 'Nómina',     icon: '💰' },
-  { href: '/dashboard/settings',   label: 'Config',     icon: '⚙️' },
 ]
+
+const NAV_SETTINGS = { href: '/dashboard/settings', label: 'Config', icon: '⚙️' }
+const NAV_PLANNING = { href: '/dashboard/planning', label: 'Planificador', icon: '📋' }
 
 export default function DashboardLayout({ children }) {
   const router = useRouter()
@@ -67,6 +69,16 @@ export default function DashboardLayout({ children }) {
       <div className="text-brand-400 font-mono text-sm animate-pulse">⬡ Cargando CheckPro...</div>
     </div>
   )
+
+  // Mostrar el Planificador sólo si el tenant tiene horario mixto activado
+  // Y sólo a roles owner / manager / super_admin.
+  const mixedEnabled = !!tenant?.config?.mixedSchedule?.enabled
+  const canManage = ['owner','manager','super_admin'].includes(profile?.role)
+  const NAV = [
+    ...NAV_BASE,
+    ...(mixedEnabled && canManage ? [NAV_PLANNING] : []),
+    NAV_SETTINGS,
+  ]
 
   return (
     <div className="flex min-h-dvh bg-dark-900">

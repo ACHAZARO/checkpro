@@ -19,6 +19,8 @@ export const TEMPLATE_COLUMNS = [
   'tipo_pago',
   'fecha_ingreso',
   'fecha_nacimiento',
+  'horario_mixto',      // feat/mixed-schedule: marca al empleado como mixto
+  'horas_diarias',      // feat/mixed-schedule: duracion diaria cuando es mixto
   'lun_inicio', 'lun_fin',
   'mar_inicio', 'mar_fin',
   'mie_inicio', 'mie_fin',
@@ -39,6 +41,8 @@ export const TEMPLATE_LABELS = {
   tipo_pago: 'tipo_pago',
   fecha_ingreso: 'fecha_ingreso',
   fecha_nacimiento: 'fecha_nacimiento',
+  horario_mixto: 'horario_mixto',
+  horas_diarias: 'horas_diarias',
   lun_inicio: 'lun_inicio', lun_fin: 'lun_fin',
   mar_inicio: 'mar_inicio', mar_fin: 'mar_fin',
   mie_inicio: 'mie_inicio', mie_fin: 'mie_fin',
@@ -59,8 +63,10 @@ export const TEMPLATE_HELP = [
   ['tipo_pago', 'Opcional. efectivo o transferencia. Default: efectivo.'],
   ['fecha_ingreso', 'Requerido. Formato YYYY-MM-DD (ej. 2026-04-21). No puede ser futura.'],
   ['fecha_nacimiento', 'Opcional. Formato YYYY-MM-DD. No puede ser futura.'],
-  ['lun_inicio / lun_fin', 'Hora de entrada y salida del lunes en formato HH:MM (24h). Si ambas están vacías = descanso.'],
-  ['mar..dom', 'Mismo formato que lunes para cada día. Al menos 1 día debe tener horario.'],
+  ['horario_mixto', 'Opcional. sí/no. Marca empleados con horario que cambia semana a semana (el gerente los agenda en el Planificador). Requiere activar "Horario mixto" en Configuración.'],
+  ['horas_diarias', 'Requerido si horario_mixto = sí. Número de horas que trabaja por día (ej. 8). El gerente luego asigna a qué hora entra cada día.'],
+  ['lun_inicio / lun_fin', 'Hora de entrada y salida del lunes en formato HH:MM (24h). Si ambas están vacías = descanso. Se ignora si horario_mixto = sí.'],
+  ['mar..dom', 'Mismo formato que lunes para cada día. Al menos 1 día debe tener horario (si no es mixto).'],
 ]
 
 // Ejemplo de fila usada en la hoja Plantilla para que el usuario vea cómo se llena.
@@ -75,6 +81,8 @@ export const TEMPLATE_EXAMPLE_ROW = {
   tipo_pago: 'efectivo',
   fecha_ingreso: '2026-01-15',
   fecha_nacimiento: '1995-08-30',
+  horario_mixto: 'no',
+  horas_diarias: '',
   lun_inicio: '09:00', lun_fin: '18:00',
   mar_inicio: '09:00', mar_fin: '18:00',
   mie_inicio: '09:00', mie_fin: '18:00',
@@ -108,6 +116,8 @@ const HEADER_ALIASES = {
   pago: 'tipo_pago', payment_type: 'tipo_pago', forma_pago: 'tipo_pago',
   ingreso: 'fecha_ingreso', fecha_alta: 'fecha_ingreso', hire_date: 'fecha_ingreso', fecha_de_ingreso: 'fecha_ingreso',
   nacimiento: 'fecha_nacimiento', cumpleanos: 'fecha_nacimiento', birth_date: 'fecha_nacimiento', fecha_de_nacimiento: 'fecha_nacimiento',
+  mixto: 'horario_mixto', es_mixto: 'horario_mixto', is_mixed: 'horario_mixto', horario_rotativo: 'horario_mixto',
+  horas_por_dia: 'horas_diarias', daily_hours: 'horas_diarias', jornada_diaria: 'horas_diarias',
   lunes_inicio: 'lun_inicio', lunes_fin: 'lun_fin',
   martes_inicio: 'mar_inicio', martes_fin: 'mar_fin',
   miercoles_inicio: 'mie_inicio', miercoles_fin: 'mie_fin',
@@ -239,8 +249,31 @@ export function validateRow(row, ctx = {}) {
     else if (fechaNacimiento > todayISO) errors.push('fecha_nacimiento no puede ser futura')
   }
 
-  // Schedule: para cada día, validar que si hay inicio haya fin y viceversa,
-  // que estén en HH:MM y que end > start.
+  // Mixto: horario_mixto (bool) + horas_diarias (numérico 1-24).
+  // Si horario_mixto = sí, se IGNORA el schedule semanal del archivo y se
+  // requiere horas_diarias. Validamos también que el tenant tenga el modo
+  // activado y no supere el límite (ctx.mixedCfg + ctx.mixedCount).
+  const isMixed = coerceBool(row.horario_mixto)
+  let dailyHours = null
+  if (isMixed) {
+    if (ctx.mixedCfg && !ctx.mixedCfg.enabled) {
+      errors.push('horario_mixto=sí pero el modo no está activado en Configuración')
+    }
+    const dhRaw = row.horas_diarias === '' || row.horas_diarias == null
+      ? null
+      : Number(String(row.horas_diarias).replace(',', '.'))
+    if (dhRaw == null || !Number.isFinite(dhRaw)) {
+      errors.push('horas_diarias requerido para empleados mixtos (1-24)')
+    } else if (dhRaw <= 0 || dhRaw > 24) {
+      errors.push('horas_diarias fuera de rango (1-24)')
+    } else {
+      dailyHours = dhRaw
+    }
+  }
+
+  // Schedule: para empleados fijos, validar que si hay inicio haya fin y
+  // viceversa, que estén en HH:MM y que end > start. Para mixtos, schedule
+  // queda todo en work:false (no aplica).
   const schedule = {}
   let anyWorkingDay = false
   for (const d of DAYS) {
@@ -278,8 +311,15 @@ export function validateRow(row, ctx = {}) {
     schedule[d] = { work: true, start, end, custom: false }
     anyWorkingDay = true
   }
-  if (!anyWorkingDay && errors.length === 0) {
+  // Regla "al menos 1 día" solo aplica a empleados fijos.
+  if (!isMixed && !anyWorkingDay && errors.length === 0) {
     errors.push('Debe tener al menos 1 día con horario (L-D todos vacíos = sin turno)')
+  }
+  // Mixto ignora cualquier schedule que traiga el archivo: lo reseteamos.
+  if (isMixed) {
+    for (const d of DAYS) {
+      schedule[d] = { work: false, start: '09:00', end: '18:00', custom: false }
+    }
   }
 
   // Duplicados dentro del archivo
@@ -309,6 +349,8 @@ export function validateRow(row, ctx = {}) {
     tipo_pago: tipoPago,
     fecha_ingreso: fechaIngreso,
     fecha_nacimiento: fechaNacimiento || null,
+    is_mixed: isMixed,
+    daily_hours: isMixed ? dailyHours : null,
     schedule,
   }
 
@@ -316,6 +358,12 @@ export function validateRow(row, ctx = {}) {
 }
 
 // Valida una lista de filas de golpe detectando duplicados internos.
+// ctx opcional:
+//   - codesInDb / pinsInDb   → Sets para detectar duplicados vs. BD
+//   - mixedCfg { enabled, maxRotating, unlimitedRotating } → config del tenant
+//   - mixedCount (int)       → número actual de mixtos existentes en BD
+// Cuando se pasa mixedCfg+mixedCount, se valida que el total (existentes +
+// mixtos en el archivo) no supere maxRotating si unlimitedRotating=false.
 export function validateRows(rows, ctx = {}) {
   const codesInFile = new Set()
   const pinsInFile = new Set()
@@ -337,11 +385,31 @@ export function validateRows(rows, ctx = {}) {
   }
 
   // Segundo barrido: validar cada fila con info de duplicados + BD
-  return rows.map(r => validateRow(r, {
+  const results = rows.map(r => validateRow(r, {
     ...ctx,
     codesInFile: dupCodes,
     pinsInFile: dupPins,
   }))
+
+  // Validación global del límite de mixtos: solo filas sin errores que sean
+  // mixtas suman al total. Si ya existen X en BD y el límite es Y, las filas
+  // mixtas a partir de la (Y-X+1)-ésima se marcan con error.
+  if (ctx.mixedCfg?.enabled && !ctx.mixedCfg.unlimitedRotating && ctx.mixedCfg.maxRotating != null) {
+    const limit = Number(ctx.mixedCfg.maxRotating)
+    const existing = Number(ctx.mixedCount || 0)
+    let running = existing
+    for (const r of results) {
+      if (r.errors.length > 0) continue
+      if (!r.normalized?.is_mixed) continue
+      if (running >= limit) {
+        r.errors.push(`Supera el límite de empleados mixtos (${limit}). Ya hay ${existing} y este archivo agrega más.`)
+      } else {
+        running++
+      }
+    }
+  }
+
+  return results
 }
 
 // Arma el JSONB schedule con el mismo shape que usa la UI manual

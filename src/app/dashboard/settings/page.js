@@ -796,6 +796,58 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
         </div>
       </div>
 
+      {/* Horario mixto (rotativos) */}
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Horario mixto <span className="normal-case text-gray-600">(empleados rotativos)</span></p>
+      <div className="card mb-4 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-white">Activar horario mixto</p>
+            <p className="text-[11px] text-gray-500 mt-0.5 leading-snug">
+              Permite registrar empleados con duración de jornada (horas/día) en lugar de horario fijo. El gerente planifica su horario semana a semana.
+            </p>
+          </div>
+          <button
+            onClick={() => setCfg(c => ({ ...c, mixedSchedule: { ...(c.mixedSchedule || {}), enabled: !c.mixedSchedule?.enabled } }))}
+            className={`w-10 h-6 rounded-full relative transition-colors shrink-0 ${cfg.mixedSchedule?.enabled ? 'bg-brand-400' : 'bg-dark-600'}`}
+            aria-label="Activar horario mixto">
+            <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${cfg.mixedSchedule?.enabled ? 'left-5' : 'left-1'}`} />
+          </button>
+        </div>
+
+        {cfg.mixedSchedule?.enabled && (
+          <div className="pt-3 border-t border-dark-border space-y-3">
+            <div>
+              <label className="label">Máximo de empleados rotativos permitidos</label>
+              <div className="flex items-center gap-2">
+                <input className="input flex-1" type="number" min="1" max="9999" placeholder="Ilimitado"
+                  value={cfg.mixedSchedule?.maxRotating ?? ''}
+                  onChange={e => {
+                    const raw = e.target.value
+                    const parsed = raw === '' ? null : Math.max(1, parseInt(raw) || 1)
+                    setCfg(c => ({ ...c, mixedSchedule: { ...(c.mixedSchedule || {}), maxRotating: parsed, unlimitedRotating: parsed == null } }))
+                  }}
+                  disabled={!!cfg.mixedSchedule?.unlimitedRotating}
+                />
+                <label className="flex items-center gap-1.5 text-[11px] text-gray-400 whitespace-nowrap">
+                  <input type="checkbox" className="accent-brand-400"
+                    checked={!!cfg.mixedSchedule?.unlimitedRotating || cfg.mixedSchedule?.maxRotating == null}
+                    onChange={e => {
+                      const unlim = e.target.checked
+                      setCfg(c => ({ ...c, mixedSchedule: { ...(c.mixedSchedule || {}), unlimitedRotating: unlim, maxRotating: unlim ? null : (c.mixedSchedule?.maxRotating || 1) } }))
+                    }}
+                  />
+                  Ilimitados
+                </label>
+              </div>
+              <p className="text-[10px] text-gray-600 font-mono mt-1">Vacío o "Ilimitados" = sin tope. El sistema bloquea registrar más mixtos que el tope definido.</p>
+            </div>
+            <div className="text-[11px] text-brand-300/80 bg-brand-400/5 border border-brand-400/20 rounded-lg p-2.5 leading-snug">
+              💡 Los empleados mixtos aparecen en la pestaña <strong>Planificador</strong>. El gerente los agenda cada semana (ideal: el día del corte).
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Business hours */}
       <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Horario del establecimiento</p>
       <div className="card mb-4">

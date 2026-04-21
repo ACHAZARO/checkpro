@@ -61,12 +61,21 @@ export async function POST(req) {
   // Snapshot de códigos/PINs existentes para detectar duplicados + calcular próximo EMP###
   const { data: existing } = await admin
     .from('employees')
-    .select('employee_code, pin')
+    .select('employee_code, pin, is_mixed, status')
     .eq('tenant_id', profile.tenant_id)
     .neq('status', 'deleted')
 
   const codesInDb = new Set((existing || []).map(e => String(e.employee_code || '').toUpperCase()).filter(Boolean))
   const pinsInDb = new Set((existing || []).map(e => String(e.pin || '')).filter(Boolean))
+  const mixedCount = (existing || []).filter(e => e.is_mixed && e.status === 'active').length
+
+  // feat/mixed-schedule: enforcement server-side del límite de mixtos.
+  const { data: tenantRow } = await admin
+    .from('tenants')
+    .select('config')
+    .eq('id', profile.tenant_id)
+    .maybeSingle()
+  const mixedCfg = tenantRow?.config?.mixedSchedule || { enabled: false }
 
   // Contador para nextCode — empieza en el máximo numérico existente
   const maxNum = (existing || []).reduce((m, e) => {
@@ -76,7 +85,7 @@ export async function POST(req) {
   const counter = { n: maxNum }
 
   // Validar de nuevo en el server (no confiamos en lo que mandó el cliente)
-  const validated = validateRows(rows, { codesInDb, pinsInDb })
+  const validated = validateRows(rows, { codesInDb, pinsInDb, mixedCfg, mixedCount })
 
   // Construir payloads solo para filas sin errores
   const toInsert = []
@@ -110,6 +119,11 @@ export async function POST(req) {
       payment_type: n.tipo_pago || 'efectivo',
       birth_date: n.fecha_nacimiento || null,
       hire_date: n.fecha_ingreso,
+      // feat/mixed-schedule: si es mixto, schedule queda "descanso todos los
+      // días" (ya asi lo deja validateRow), daily_hours trae la duracion, y
+      // is_mixed marca el flag. El planificador se encarga del horario diario.
+      is_mixed: !!n.is_mixed,
+      daily_hours: n.is_mixed ? n.daily_hours : null,
       schedule: buildSchedulePayload(n.schedule, branch, n.fecha_ingreso),
       status: 'active',
     })

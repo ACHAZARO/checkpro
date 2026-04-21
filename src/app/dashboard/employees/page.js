@@ -51,6 +51,8 @@ export default function EmployeesPage() {
   const [vacPeriods, setVacPeriods] = useState([])
   const [loading, setLoading] = useState(true)
   const [tenantId, setTenantId] = useState(null)
+  // feat/mixed-schedule: leer config.mixedSchedule del tenant para permitir/denegar mixto.
+  const [mixedCfg, setMixedCfg] = useState({ enabled: false, maxRotating: null, unlimitedRotating: true })
   const [sheet, setSheet] = useState(null)
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
@@ -128,6 +130,13 @@ export default function EmployeesPage() {
     setBranches((branchData && branchData.length > 0) ? branchData : (tenantData?.config?.branches || []))
     setVacTable(tenantData?.config?.vacationTable || tenantData?.config?.vacation_table || null)
     setVacPeriods(vpData || [])
+    // feat/mixed-schedule: leer config de horario mixto
+    const ms = tenantData?.config?.mixedSchedule || {}
+    setMixedCfg({
+      enabled: !!ms.enabled,
+      maxRotating: ms.maxRotating ?? null,
+      unlimitedRotating: ms.unlimitedRotating || ms.maxRotating == null,
+    })
     setLoading(false)
   }, [])
 
@@ -144,6 +153,9 @@ export default function EmployeesPage() {
       payment_type: 'efectivo',
       birth_date: '',
       hire_date: todayISO(),
+      // feat/mixed-schedule: default fijo
+      is_mixed: false,
+      daily_hours: 8,
     })
     setSheet('add')
   }
@@ -153,6 +165,21 @@ export default function EmployeesPage() {
     if (form.pin.length !== 4 || !/^\d{4}$/.test(form.pin)) { toast.error('El PIN debe ser exactamente 4 dígitos'); return }
     if (!form.branch_id) { toast.error('Debes seleccionar una sucursal'); return }
     if (!form.hire_date) { toast.error('La fecha de ingreso es obligatoria'); return }
+
+    // feat/mixed-schedule: validaciones específicas para mixto
+    if (form.is_mixed) {
+      if (!mixedCfg.enabled) { toast.error('Horario mixto no está activado en Configuración'); return }
+      const dh = parseFloat(form.daily_hours)
+      if (!dh || dh <= 0 || dh > 24) { toast.error('Duración diaria inválida (1-24 hrs)'); return }
+      // Verificar límite maxRotating
+      if (!mixedCfg.unlimitedRotating && mixedCfg.maxRotating != null) {
+        const alreadyMixed = emps.filter(e => e.is_mixed && e.status !== 'deleted' && (sheet !== 'edit' || e.id !== form.id)).length
+        if (alreadyMixed >= mixedCfg.maxRotating) {
+          toast.error(`Se alcanzó el máximo de ${mixedCfg.maxRotating} empleados rotativos. Aumenta el tope en Configuración.`)
+          return
+        }
+      }
+    }
 
     setSaving(true)
     const supabase = createClient()
@@ -179,6 +206,9 @@ export default function EmployeesPage() {
       birth_date: form.birth_date || null,
       hire_date: form.hire_date,
       schedule,
+      // feat/mixed-schedule
+      is_mixed: !!form.is_mixed,
+      daily_hours: form.is_mixed ? (parseFloat(form.daily_hours) || null) : null,
     }
     try {
       if (sheet === 'add') {
@@ -266,6 +296,9 @@ export default function EmployeesPage() {
       hire_date: (emp.hire_date && String(emp.hire_date).slice(0, 10)) || emp.schedule?.hireDate || '',
       payment_type: emp.payment_type || 'efectivo',
       birth_date: emp.birth_date || '',
+      // feat/mixed-schedule
+      is_mixed: !!emp.is_mixed,
+      daily_hours: emp.daily_hours || 8,
     })
     setSheet('edit')
   }
@@ -345,6 +378,7 @@ export default function EmployeesPage() {
                       <span className="font-bold text-sm text-white">{emp.name}</span>
                       <span className="text-xs font-mono text-gray-600">{emp.employee_code}</span>
                       {emp.can_manage && <span className="badge-orange text-[9px]">Gerente</span>}
+                      {emp.is_mixed && <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-purple-500/15 border border-purple-400/30 text-purple-300 whitespace-nowrap">🔀 Mixto</span>}
                       {emp.status === 'inactive' && <span className="badge-gray text-[9px]">Inactivo</span>}
                     </div>
                     <div className="text-xs text-gray-500 mt-0.5">
@@ -353,7 +387,9 @@ export default function EmployeesPage() {
                       ${(emp.monthly_salary || 0).toLocaleString()}/mes · ${monthlyToHourly(emp).toFixed(2)}/h
                     </div>
                     <div className="text-xs text-gray-600 font-mono mt-0.5">
-                      {DAYS.filter(d => emp.schedule?.[d]?.work).map(d => DAY_L[d]).join(' ')}
+                      {emp.is_mixed
+                        ? `${emp.daily_hours || '?'} hrs/día · agendado semanalmente`
+                        : DAYS.filter(d => emp.schedule?.[d]?.work).map(d => DAY_L[d]).join(' ')}
                     </div>
                     {/* Antigüedad + vacaciones */}
                     {hireDate && (
@@ -519,6 +555,20 @@ export default function EmployeesPage() {
                   </button>
                 </div>
 
+                {/* feat/mixed-schedule: toggle horario mixto (solo si está habilitado en config) */}
+                {mixedCfg.enabled && (
+                  <div className="flex items-center justify-between py-2 border-t border-dark-border pt-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Horario mixto <span className="text-[10px] font-mono text-gray-500 ml-1">ROTATIVO</span></p>
+                      <p className="text-xs text-gray-500">El gerente agenda su horario cada semana</p>
+                    </div>
+                    <button onClick={() => F('is_mixed', !form.is_mixed)}
+                      className={`w-10 h-6 rounded-full relative transition-colors ${form.is_mixed ? 'bg-brand-400' : 'bg-dark-600'}`}>
+                      <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${form.is_mixed ? 'left-5' : 'left-1'}`} />
+                    </button>
+                  </div>
+                )}
+
                 {sheet === 'edit' && (
                   <div>
                     <label className="label" htmlFor="emp-status">Estatus</label>
@@ -529,7 +579,19 @@ export default function EmployeesPage() {
                   </div>
                 )}
 
-                {/* Horario semanal — base + excepciones */}
+                {/* feat/mixed-schedule: cuando es mixto, no hay horario semanal; solo duración diaria. */}
+                {form.is_mixed ? (
+                  <div className="border-t border-dark-border pt-3">
+                    <label className="label" htmlFor="emp-daily-hours">Duración de jornada (horas/día)</label>
+                    <input id="emp-daily-hours" className="input" type="number" inputMode="decimal" min="1" max="24" step="0.5"
+                      value={form.daily_hours ?? ''}
+                      onChange={e => F('daily_hours', e.target.value)}
+                      placeholder="8" />
+                    <p className="text-[10px] text-gray-600 font-mono mt-1 leading-snug">
+                      El empleado trabajará esta cantidad de horas cada día que el gerente lo agende en el <strong>Planificador</strong>. No se define día/hora fija aquí.
+                    </p>
+                  </div>
+                ) : (
                 <div className="border-t border-dark-border pt-3">
                   <p className="label mb-2">Horario semanal</p>
 
@@ -598,6 +660,7 @@ export default function EmployeesPage() {
                     )
                   })}
                 </div>
+                )}
 
                 <div className="flex gap-2 pt-2">
                   <button onClick={save} disabled={saving || !hasBranches} className="btn-primary">

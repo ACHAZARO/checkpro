@@ -42,8 +42,20 @@ export function hoursInSchedule(schedule, dk) {
   return (h2*60+m2-h1*60-m1)/60
 }
 
+// NUEVO — semanas equivalentes para empleados mixtos
+// Mixto no tiene schedule fijo; usa daily_hours * días_por_semana_estimados (default 6).
+// Para el cálculo de hourly rate usamos 6 días/semana como referencia razonable.
+export const MIXED_DEFAULT_DAYS_PER_WEEK = 6
+
 export function monthlyToHourly(employee) {
   const period = employee.schedule?.salary_period || 'monthly'
+  if (employee.is_mixed) {
+    const daily = Number(employee.daily_hours || 0)
+    const wkH = daily * MIXED_DEFAULT_DAYS_PER_WEEK
+    if (wkH <= 0) return 0
+    if (period === 'weekly') return employee.monthly_salary / wkH
+    return employee.monthly_salary / (wkH * 4.33)
+  }
   const wkH = DAYS.reduce((a,d) => a + hoursInSchedule(employee.schedule||{}, d), 0)
   if (wkH <= 0) return 0
   if (period === 'weekly') return employee.monthly_salary / wkH
@@ -70,6 +82,32 @@ export function classifyEntry(schedule, entryTime, toleranceMinutes, tz = DEFAUL
   if (diff <= 0) return { type:'puntual', label:'Puntual' }
   if (diff <= toleranceMinutes) return { type:'tolerancia', label:`Tolerancia (${diff} min)` }
   return { type:'retardo', label:`Retardo (${diff} min)` }
+}
+
+// NUEVO — clasificación para mixtos contra su shift_plan del día.
+// plan = { entry_time_str: "HH:MM", duration_hours: N } del planificador.
+// Si no hay plan → tipo "no_planificado" (se registra pero queda pendiente de revisión).
+export function classifyEntryMixed(plan, entryTime, toleranceMinutes, tz = DEFAULT_TZ) {
+  if (!plan || !plan.entry_time_str) {
+    return { type:'no_planificado', label:'No estaba agendado' }
+  }
+  const dateStr = isoDate(entryTime, tz)
+  const refUtc = fromZonedTime(`${dateStr}T${plan.entry_time_str}:00`, tz)
+  const diff = Math.round((new Date(entryTime) - refUtc) / 60000)
+  if (diff <= 0) return { type:'puntual', label:'Puntual' }
+  if (diff <= toleranceMinutes) return { type:'tolerancia', label:`Tolerancia (${diff} min)` }
+  return { type:'retardo', label:`Retardo (${diff} min)` }
+}
+
+// NUEVO — suma "HH:MM" + horas decimales → "HH:MM"
+export function addHoursToTimeStr(timeStr, hours) {
+  if (!timeStr) return null
+  const [h, m] = String(timeStr).split(':').map(Number)
+  const totalMin = (h * 60 + m) + Math.round(Number(hours || 0) * 60)
+  const normalized = ((totalMin % (24 * 60)) + (24 * 60)) % (24 * 60)
+  const hh = String(Math.floor(normalized / 60)).padStart(2, '0')
+  const mm = String(normalized % 60).padStart(2, '0')
+  return `${hh}:${mm}`
 }
 
 export function haversineMeters(lat1, lng1, lat2, lng2) {
@@ -102,8 +140,13 @@ export function calcOvertimeHours(minutesOver) {
   return Math.ceil((minutesOver - 30) / 60)
 }
 
-// CAMBIO — scheduledExitDate usa TZ
-export function scheduledExitDate(dateStr, employee, tz = DEFAULT_TZ) {
+// CAMBIO — scheduledExitDate usa TZ. Para mixtos usamos el shift_plan del día si existe.
+export function scheduledExitDate(dateStr, employee, tz = DEFAULT_TZ, plan = null) {
+  if (employee?.is_mixed) {
+    if (!plan || !plan.entry_time_str || !plan.duration_hours) return null
+    const exitStr = addHoursToTimeStr(plan.entry_time_str, plan.duration_hours)
+    return fromZonedTime(`${dateStr}T${exitStr}:00`, tz)
+  }
   const dk = dayKey(`${dateStr}T12:00:00Z`, tz)
   const s = employee.schedule?.[dk]
   if (!s?.work || !s.end) return null
@@ -193,21 +236,40 @@ function resolvePayEmployee(employee, coveringEmployee, coveragePayMode) {
   return coveringEmployee
 }
 
+// CAMBIO — calcShiftPay contempla empleados mixtos:
+//   - pago por horas REALES trabajadas (duration_hours)
+//   - si trabajó > daily_hours → el exceso se paga como overtime (igual rate)
+//   - festivo x3 como siempre
 export function calcShiftPay(shift, employee, coveringEmployee, coveragePayMode) {
   if (shift.classification?.type === 'falta_injustificada') return 0
   if (!shift.duration_hours) return 0
   const payEmp = resolvePayEmployee(employee, coveringEmployee, coveragePayMode)
   const rate = monthlyToHourly(payEmp)
-  const otHours = shift.corrections?.overtime?.hours || 0
+  const otCorrection = shift.corrections?.overtime?.hours || 0
   if (shift.is_holiday) return shift.duration_hours * rate * 3
-  return shift.duration_hours * rate + otHours * rate
+  if (payEmp.is_mixed) {
+    const daily = Number(payEmp.daily_hours || 0)
+    const worked = Number(shift.duration_hours || 0)
+    const extraAuto = daily > 0 ? Math.max(0, worked - daily) : 0
+    const base = Math.min(worked, daily || worked)
+    return base * rate + extraAuto * rate + otCorrection * rate
+  }
+  return shift.duration_hours * rate + otCorrection * rate
 }
 
 export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMode) {
   const mine = weekShifts.filter(s => s.employee_id === employee.id)
   const closed = mine.filter(s => ['closed','incident'].includes(s.status))
   const totalH = closed.reduce((a,s) => a + (s.duration_hours||0), 0)
-  const otHours = closed.reduce((a,s) => a + (s.corrections?.overtime?.hours || 0), 0)
+  const otHours = closed.reduce((a,s) => {
+    const manual = s.corrections?.overtime?.hours || 0
+    // Mixto: el exceso sobre daily_hours también cuenta visualmente como OT.
+    if (employee.is_mixed && employee.daily_hours) {
+      const auto = Math.max(0, Number(s.duration_hours||0) - Number(employee.daily_hours))
+      return a + manual + auto
+    }
+    return a + manual
+  }, 0)
   const retardos = closed.filter(s => s.classification?.type === 'retardo').length
   const incidents = mine.filter(s => s.status === 'incident').length
   const faltasInjustificadas = mine.filter(s => s.classification?.type === 'falta_injustificada').length
