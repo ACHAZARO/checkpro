@@ -10,6 +10,8 @@ function ResetPageInner() {
   const router = useRouter()
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
+  const [showPass, setShowPass] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
   const [loading, setLoading] = useState(false)
   const [ready, setReady] = useState(false)
   const [error, setError] = useState(null)
@@ -102,21 +104,35 @@ function ResetPageInner() {
           <form onSubmit={handleSubmit} className="card space-y-4">
             <div>
               <label className="label">Nueva contraseña</label>
-              <input
-                className="input" type="password"
-                placeholder="Mínimo 6 caracteres"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required minLength={6} />
+              <div className="relative">
+                <input
+                  className="input pr-10" type={showPass ? 'text' : 'password'}
+                  placeholder="Mínimo 6 caracteres"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  required minLength={6} />
+                <button type="button" onClick={() => setShowPass(v => !v)}
+                  aria-label={showPass ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-brand-400 transition-colors text-lg px-1.5 py-0.5 rounded">
+                  {showPass ? '🙈' : '👁️'}
+                </button>
+              </div>
             </div>
             <div>
               <label className="label">Confirmar contraseña</label>
-              <input
-                className="input" type="password"
-                placeholder="Repite la contraseña"
-                value={confirm}
-                onChange={e => setConfirm(e.target.value)}
-                required minLength={6} />
+              <div className="relative">
+                <input
+                  className="input pr-10" type={showConfirm ? 'text' : 'password'}
+                  placeholder="Repite la contraseña"
+                  value={confirm}
+                  onChange={e => setConfirm(e.target.value)}
+                  required minLength={6} />
+                <button type="button" onClick={() => setShowConfirm(v => !v)}
+                  aria-label={showConfirm ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-brand-400 transition-colors text-lg px-1.5 py-0.5 rounded">
+                  {showConfirm ? '🙈' : '👁️'}
+                </button>
+              </div>
             </div>
             {password && confirm && password !== confirm && (
               <p className="text-red-400 text-xs font-mono">⚠ Las contraseñas no coinciden</p>
