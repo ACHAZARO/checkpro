@@ -2,7 +2,7 @@
 // src/app/dashboard/page.js
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
-import { fmtTime, weekRange, isoDate, diffMin, DAYS, countGraveIncidents, hasVacationPending, calcVacationDays } from '@/lib/utils'
+import { fmtTime, weekRange, isoDate, diffMin, DAYS, countGraveIncidents, hasVacationPending, calcVacationDays, managerFreeScheduleAlerts } from '@/lib/utils'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
 
@@ -142,6 +142,18 @@ export default function DashboardPage() {
       const { data: tenantData } = await supabase.from('tenants').select('config').eq('id', profile.tenant_id).single()
       const vacTable = tenantData?.config?.vacationTable || null
 
+      // feat/gerente-libre — turnos de la semana actual para alertas de gerentes libres.
+      const closingDayKey = tenantData?.config?.weekClosingDay || 'dom'
+      const rangeWeek = weekRange(new Date(), closingDayKey)
+      const weekStartStr = isoDate(rangeWeek.start)
+      const weekEndStr = isoDate(rangeWeek.end)
+      const { data: weekShiftsData } = await supabase
+        .from('shifts')
+        .select('id, employee_id, date_str, duration_hours, status, classification')
+        .eq('tenant_id', profile.tenant_id)
+        .gte('date_str', weekStartStr)
+        .lte('date_str', weekEndStr)
+
       // FIX R6: cargar vacation_periods vivos (pending/postponed/active/completed)
       // para pasarlos a hasVacationPending(emp, periods).
       const { data: vpData } = await supabase
@@ -156,6 +168,7 @@ export default function DashboardPage() {
         todayShifts: todayShifts || [],
         incidents: incidents || [],
         graveShifts: graveShifts || [],
+        weekShifts: weekShiftsData || [],
         vacTable,
       })
       setLoading(false)
@@ -222,7 +235,14 @@ export default function DashboardPage() {
   if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando...</div>
   if (!data) return null
 
-  const { employees, todayShifts, incidents, graveShifts, vacTable } = data
+  const { employees, todayShifts, incidents, graveShifts, vacTable, weekShifts = [] } = data
+
+  // feat/gerente-libre — alertas para gerentes con horario libre.
+  const freeManagers = employees.filter(e => e.free_schedule)
+  const freeAlerts = freeManagers.flatMap(emp => {
+    const list = managerFreeScheduleAlerts(emp, weekShifts)
+    return list.map(a => ({ ...a, employee: emp }))
+  })
   const checkedIn = employees.filter(e => todayShifts.some(s => s.employee_id === e.id))
 
   // Employees with 3+ grave incidents
@@ -271,6 +291,24 @@ export default function DashboardPage() {
           })}
           <Link href="/dashboard/attendance" className="inline-block mt-2 text-red-400 text-xs font-bold underline">
             Ver historial →
+          </Link>
+        </div>
+      )}
+
+      {freeAlerts.length > 0 && (
+        <div className="px-4 py-3 mb-3 bg-orange-500/10 border border-orange-500/30 rounded-xl">
+          <p className="text-orange-300 text-sm font-bold mb-1">
+            🔓 Gerentes con horario libre — {freeAlerts.length} alerta(s) esta semana
+          </p>
+          <div className="space-y-1 mt-1">
+            {freeAlerts.map((a, i) => (
+              <div key={`${a.employee.id}_${a.code}_${i}`} className={`text-xs font-mono ${a.level === 'error' ? 'text-red-400' : 'text-orange-300/90'}`}>
+                {a.level === 'error' ? '✗' : '⚠'} {a.employee.name} — {a.message}
+              </div>
+            ))}
+          </div>
+          <Link href="/dashboard/employees" className="inline-block mt-2 text-orange-300 text-xs font-bold underline">
+            Ver panel de gerentes →
           </Link>
         </div>
       )}
