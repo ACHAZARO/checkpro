@@ -58,14 +58,23 @@ export async function POST(req) {
   // Cargar códigos y PINs existentes del tenant para marcar duplicados
   const { data: existing } = await admin
     .from('employees')
-    .select('employee_code, pin')
+    .select('employee_code, pin, is_mixed, status')
     .eq('tenant_id', profile.tenant_id)
     .neq('status', 'deleted')
 
   const codesInDb = new Set((existing || []).map(e => String(e.employee_code || '').toUpperCase()).filter(Boolean))
   const pinsInDb = new Set((existing || []).map(e => String(e.pin || '')).filter(Boolean))
+  const mixedCount = (existing || []).filter(e => e.is_mixed && e.status === 'active').length
 
-  const validated = validateRows(rows, { codesInDb, pinsInDb })
+  // feat/mixed-schedule: leer config del tenant para enforcement del límite.
+  const { data: tenantRow } = await admin
+    .from('tenants')
+    .select('config')
+    .eq('id', profile.tenant_id)
+    .maybeSingle()
+  const mixedCfg = tenantRow?.config?.mixedSchedule || { enabled: false }
+
+  const validated = validateRows(rows, { codesInDb, pinsInDb, mixedCfg, mixedCount })
 
   // Clasificar cada fila en valid / duplicate / error. "duplicate" es un subtipo
   // de error que queremos diferenciar visualmente: la fila es válida en forma,
