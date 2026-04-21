@@ -6,15 +6,15 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 
-const NAV_BASE = [
-  { href: '/dashboard',            label: 'Hoy',        icon: '🏠' },
-  { href: '/dashboard/employees',  label: 'Personal',   icon: '👥' },
-  { href: '/dashboard/attendance', label: 'Asistencia', icon: '📅' },
-  { href: '/dashboard/payroll',    label: 'Nómina',     icon: '💰' },
+const NAV = [
+  { href: '/dashboard',              label: 'Hoy',          icon: '🏠' },
+  { href: '/dashboard/employees',    label: 'Personal',     icon: '👥' },
+  { href: '/dashboard/attendance',   label: 'Asistencia',   icon: '📅' },
+  { href: '/dashboard/planning',     label: 'Planificador', icon: '📋', mixedOnly: true },
+  { href: '/dashboard/incidencias',  label: 'Incidencias',  icon: '⚠' },
+  { href: '/dashboard/payroll',      label: 'Nómina',       icon: '💰' },
+  { href: '/dashboard/settings',     label: 'Config',       icon: '⚙️' },
 ]
-
-const NAV_SETTINGS = { href: '/dashboard/settings', label: 'Config', icon: '⚙️' }
-const NAV_PLANNING = { href: '/dashboard/planning', label: 'Planificador', icon: '📋' }
 
 export default function DashboardLayout({ children }) {
   const router = useRouter()
@@ -70,16 +70,6 @@ export default function DashboardLayout({ children }) {
     </div>
   )
 
-  // Mostrar el Planificador sólo si el tenant tiene horario mixto activado
-  // Y sólo a roles owner / manager / super_admin.
-  const mixedEnabled = !!tenant?.config?.mixedSchedule?.enabled
-  const canManage = ['owner','manager','super_admin'].includes(profile?.role)
-  const NAV = [
-    ...NAV_BASE,
-    ...(mixedEnabled && canManage ? [NAV_PLANNING] : []),
-    NAV_SETTINGS,
-  ]
-
   return (
     <div className="flex min-h-dvh bg-dark-900">
       {/* Desktop sidebar */}
@@ -91,7 +81,7 @@ export default function DashboardLayout({ children }) {
           <div className="text-gray-500 text-xs mt-0.5 truncate">{profile?.name}</div>
         </div>
         <nav className="flex-1 py-3">
-          {NAV.map(n => (
+          {NAV.filter(n => !n.mixedOnly || tenant?.config?.mixedSchedule?.enabled).map(n => (
             <Link key={n.href} href={n.href}
               className={`flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-colors
                 ${pathname === n.href ? 'text-brand-400 bg-brand-400/5 border-l-2 border-brand-400' : 'text-gray-400 hover:text-white hover:bg-dark-700 border-l-2 border-transparent'}`}>
@@ -140,7 +130,7 @@ export default function DashboardLayout({ children }) {
         {/* Mobile bottom nav */}
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-dark-900/95 backdrop-blur border-t border-dark-border flex z-50"
           style={{ paddingBottom: 'env(safe-area-inset-bottom,0)' }}>
-          {NAV.map(n => (
+          {NAV.filter(n => !n.mixedOnly || tenant?.config?.mixedSchedule?.enabled).map(n => (
             <Link key={n.href} href={n.href}
               className={`flex-1 flex flex-col items-center gap-1 py-2.5 transition-colors
                 ${pathname === n.href ? 'text-brand-400' : 'text-gray-500'}`}>
