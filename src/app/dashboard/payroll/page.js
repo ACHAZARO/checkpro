@@ -314,6 +314,11 @@ export default function PayrollPage() {
   const [closing, setClosing] = useState(false)
   const [printHTML, setPrintHTML] = useState(null)
   const [resolvingId, setResolvingId] = useState(null)
+  // feat/candados — estado para los candados del corte:
+  //   - nextWeekPlan: weekly_plans row para la semana siguiente (null = no planificada → bloquea)
+  //   - openIncidencias: incidencias status='open' de mi sucursal (>0 → bloquea)
+  const [nextWeekPlan, setNextWeekPlan] = useState(null)
+  const [openIncidencias, setOpenIncidencias] = useState([])
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -354,6 +359,41 @@ export default function PayrollPage() {
     setShifts(shiftData || [])
     setCuts(cutData || [])
     setVacPeriods(vacData || [])
+
+    // feat/candados — weekly_plans para la semana que empieza al día siguiente del corte actual.
+    // weekRange devuelve hasta el día de cierre (`dom` por defecto) → la próxima semana arranca en +1.
+    // Si ya existe una fila en weekly_plans para ese lunes/día de arranque, el candado se libera.
+    try {
+      // Calcular fecha de próximo inicio en base al tenant config (closingDay)
+      const closingDayKey = (tenant?.config?.weekClosingDay) || 'dom'
+      const rangeNow = weekRange(new Date(), closingDayKey)
+      const nextStart = new Date(rangeNow.end)
+      nextStart.setDate(nextStart.getDate() + 1) // día siguiente al cierre
+      const nextStartIso = isoDate(nextStart)
+      const { data: wp } = await supabase
+        .from('weekly_plans')
+        .select('id, start_date, end_date, title, saved_by_name, saved_at')
+        .eq('tenant_id', prof.tenant_id)
+        .eq('start_date', nextStartIso)
+        .maybeSingle()
+      setNextWeekPlan(wp || null)
+    } catch (e) {
+      // Si la tabla no existe aún (migración pendiente), no bloqueamos.
+      setNextWeekPlan({ _stub: true })
+    }
+
+    // feat/candados — incidencias abiertas del tenant (de MI sucursal).
+    try {
+      const { data: incs } = await supabase
+        .from('incidencias')
+        .select('id, branch_id, date_str, kind, status, employee_name')
+        .eq('tenant_id', prof.tenant_id)
+        .eq('status', 'open')
+      setOpenIncidencias(incs || [])
+    } catch (e) {
+      setOpenIncidencias([])
+    }
+
     setLoading(false)
   }, [])
 
@@ -464,6 +504,20 @@ export default function PayrollPage() {
     if (hasUnresolved) {
       toast.error(`Resuelve las ${incidentShifts.length} incidencia(s) antes de cerrar la semana`)
       return
+    }
+    // feat/candado-incidencias: no permitir corte si hay incidencias abiertas en la pestaña dedicada.
+    const myIncs = openIncidencias.filter(i => !i.branch_id || i.branch_id === myBranchId)
+    if (myIncs.length > 0) {
+      toast.error(`Revisa y resuelve ${myIncs.length} incidencia(s) en la pestaña Incidencias antes de cortar`)
+      return
+    }
+    // feat/candado-planificacion: no permitir corte si la próxima semana no está guardada.
+    if (!nextWeekPlan || nextWeekPlan._stub) {
+      if (!nextWeekPlan) {
+        toast.error('Primero planifica la próxima semana (Panel → Planificador → Guardar).')
+        return
+      }
+      // _stub = tabla weekly_plans no migrada aún; no bloqueamos para no romper prod.
     }
     // FIX BUG: bloquear cierre si hoy no es el dia de corte de la sucursal.
     if (!canCloseToday) {
@@ -774,28 +828,52 @@ export default function PayrollPage() {
       </div>
 
       {/* ── Corte semanal ─────────────────────────────────────────────────── */}
-      <div className={`card mb-4 ${hasUnresolved || !canCloseToday ? 'opacity-60' : ''}`}>
-        <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Corte semanal</p>
-        {hasUnresolved && (
-          <div className="px-3 py-2 mb-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-xs font-semibold">
-            🔒 Resuelve todas las incidencias para habilitar el corte
+      {(() => {
+        const myIncsCount = openIncidencias.filter(i => !i.branch_id || i.branch_id === myBranchId).length
+        const planningMissing = !nextWeekPlan || nextWeekPlan._stub === true ? !nextWeekPlan : false
+        const blockedByPlan = !nextWeekPlan && nextWeekPlan !== null // planningMissing solamente si la tabla existe y no hay row
+        const planBlocks = nextWeekPlan === null // true cuando no hay row (pero la tabla existe)
+        const disabledByCandados = hasUnresolved || !canCloseToday || myIncsCount > 0 || planBlocks
+        return (
+          <div className={`card mb-4 ${disabledByCandados ? 'opacity-60' : ''}`}>
+            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Corte semanal</p>
+            {hasUnresolved && (
+              <div className="px-3 py-2 mb-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-xs font-semibold">
+                🔒 Resuelve todas las incidencias del listado arriba para habilitar el corte
+              </div>
+            )}
+            {myIncsCount > 0 && (
+              <div className="px-3 py-2 mb-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-xs font-semibold">
+                📋 Hay {myIncsCount} incidencia(s) abierta(s) en la pestaña <a href="/dashboard/incidencias" className="underline">Incidencias</a>. Resuélvelas antes de cortar.
+              </div>
+            )}
+            {planBlocks && (
+              <div className="px-3 py-2 mb-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-300 text-xs font-semibold">
+                🗓 Primero planifica la próxima semana en <a href="/dashboard/planning" className="underline">Planificador</a> y presiona <span className="text-white">Guardar plan</span>.
+              </div>
+            )}
+            {!canCloseToday && !hasUnresolved && (
+              <div className="px-3 py-2 mb-3 bg-orange-500/10 border border-orange-500/20 rounded-lg text-orange-400 text-xs font-semibold">
+                🗓 El corte de <span className="text-white">{myBranchName || 'esta sucursal'}</span> solo se genera los {DAY_FL[closingDay]}. Hoy es {DAY_FL[todayKey]}.
+              </div>
+            )}
+            {nextWeekPlan && !nextWeekPlan._stub && (
+              <div className="px-3 py-2 mb-3 bg-brand-400/10 border border-brand-400/30 rounded-lg text-brand-300 text-xs font-semibold">
+                ✓ Próxima semana planificada: {nextWeekPlan.title || nextWeekPlan.start_date}
+              </div>
+            )}
+            <div className="mb-3">
+              <label className="label">Notas del corte (opcional)</label>
+              <input className="input text-sm" placeholder="Observaciones de la semana..."
+                value={cutNote} onChange={e => setCutNote(e.target.value)} disabled={disabledByCandados} />
+            </div>
+            <button onClick={closeWeek} disabled={closing || disabledByCandados}
+              className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed">
+              {closing ? '⏳ Cerrando...' : !canCloseToday ? `🔒 Disponible los ${DAY_FL[closingDay]}` : '🖨️ Cerrar semana e imprimir reporte'}
+            </button>
           </div>
-        )}
-        {!canCloseToday && !hasUnresolved && (
-          <div className="px-3 py-2 mb-3 bg-orange-500/10 border border-orange-500/20 rounded-lg text-orange-400 text-xs font-semibold">
-            🗓 El corte de <span className="text-white">{myBranchName || 'esta sucursal'}</span> solo se genera los {DAY_FL[closingDay]}. Hoy es {DAY_FL[todayKey]}.
-          </div>
-        )}
-        <div className="mb-3">
-          <label className="label">Notas del corte (opcional)</label>
-          <input className="input text-sm" placeholder="Observaciones de la semana..."
-            value={cutNote} onChange={e => setCutNote(e.target.value)} disabled={hasUnresolved || !canCloseToday} />
-        </div>
-        <button onClick={closeWeek} disabled={closing || hasUnresolved || !canCloseToday}
-          className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed">
-          {closing ? '⏳ Cerrando...' : !canCloseToday ? `🔒 Disponible los ${DAY_FL[closingDay]}` : '🖨️ Cerrar semana e imprimir reporte'}
-        </button>
-      </div>
+        )
+      })()}
 
       {/* ── Cortes anteriores ─────────────────────────────────────────────── */}
       {cutsForBranch.length > 0 && (
