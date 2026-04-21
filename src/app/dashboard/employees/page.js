@@ -10,6 +10,8 @@ import {
 import toast from 'react-hot-toast'
 // R7: reemplazamos window.confirm() (nativo, bloqueante, feo) por ConfirmSheet.
 import { ConfirmSheet } from '@/components/ConfirmSheet'
+// Carga masiva (feat/bulk-employees-upload): modal de 3 pasos con plantilla + preview
+import BulkUploadModal from '@/components/BulkUploadModal'
 
 const DEF_BASE = { start: '09:00', end: '18:00' }
 
@@ -56,6 +58,8 @@ export default function EmployeesPage() {
   // R7: estado del modal de confirmacion (reemplaza window.confirm()).
   // Forma: { title, message, onConfirm, danger, confirmLabel, cancelLabel, loading }
   const [confirmState, setConfirmState] = useState(null)
+  // Carga masiva: abre el modal dedicado
+  const [bulkOpen, setBulkOpen] = useState(false)
 
   const F = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -281,10 +285,17 @@ export default function EmployeesPage() {
           <h1 className="text-2xl font-extrabold text-white">Empleados</h1>
           <p className="text-gray-500 text-xs font-mono mt-0.5">GESTIÓN DE PERSONAL</p>
         </div>
-        <button onClick={openAdd}
-          className="flex items-center gap-1.5 px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90">
-          + Agregar
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setBulkOpen(true)} disabled={!hasBranches}
+            className="flex items-center gap-1.5 px-3 py-2 bg-dark-700 border border-dark-border text-gray-300 text-sm font-semibold rounded-xl active:bg-dark-600 disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Importar empleados desde Excel/CSV">
+            ⬆ Archivo
+          </button>
+          <button onClick={openAdd}
+            className="flex items-center gap-1.5 px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90">
+            + Agregar
+          </button>
+        </div>
       </div>
 
       {!hasBranches && (
@@ -602,6 +613,17 @@ export default function EmployeesPage() {
 
       {/* R7: Modal de confirmacion dark (reemplaza window.confirm()) */}
       <ConfirmSheet state={confirmState} onCancel={() => setConfirmState(null)} />
+
+      {/* Carga masiva — modal de 3 pasos.
+          onImported refresca la lista pero NO cierra el modal, para que el
+          usuario vea la pantalla de éxito (paso 3) y cierre manualmente. */}
+      {bulkOpen && (
+        <BulkUploadModal
+          branches={branches}
+          onClose={() => setBulkOpen(false)}
+          onImported={() => load()}
+        />
+      )}
     </div>
   )
 }
