@@ -8,7 +8,7 @@
 //     para calcular HE y duracion esperada.
 import { createServiceClient } from '@/lib/supabase'
 import { NextResponse } from 'next/server'
-import { classifyEntry, classifyEntryMixed, isoDate, diffHrs, calcOvertimeHours, scheduledExitDate, haversineMeters, todayISOMX } from '@/lib/utils'
+import { classifyEntry, classifyEntryMixed, classifyEntryFree, isoDate, diffHrs, calcOvertimeHours, scheduledExitDate, haversineMeters, todayISOMX } from '@/lib/utils'
 import { rateLimit } from '@/lib/rate-limit'
 import crypto from 'crypto'
 
@@ -208,9 +208,12 @@ export async function POST(req) {
         )
       }
 
-      // Clasificacion: mixto usa el plan de hoy; fijo usa su schedule semanal.
+      // Clasificacion: libre > mixto > fijo.
+      // free_schedule: gerentes con horario libre siempre "libre" (tracking only).
       let classification
-      if (emp.is_mixed) {
+      if (emp.free_schedule) {
+        classification = classifyEntryFree()
+      } else if (emp.is_mixed) {
         classification = classifyEntryMixed(mixedPlan, now, cfg.toleranceMinutes || 10, tz)
       } else {
         classification = classifyEntry(emp.schedule || {}, now, cfg.toleranceMinutes || 10, tz)
@@ -287,15 +290,18 @@ export async function POST(req) {
     // cual es la "hora esperada de salida". Si no habia plan, no se calcula HE
     // por reloj — solo se marca como no_planificado y se revisa en manager.
     let overtimeHours = 0, overtimeMinutes = 0
-    const planForExit = emp.is_mixed
-      ? (mixedPlan || openShift.corrections?.mixedPlanAtEntry || null)
-      : null
-    const scheduledExit = scheduledExitDate(openShift.date_str, emp, tz, planForExit)
-    if (scheduledExit) {
-      const minutesOver = Math.round((new Date(now) - scheduledExit) / 60000)
-      if (minutesOver > 0) {
-        overtimeMinutes = minutesOver
-        overtimeHours = calcOvertimeHours(minutesOver)
+    // free_schedule: nómina íntegra, no se calcula HE contra un horario inexistente.
+    if (!emp.free_schedule) {
+      const planForExit = emp.is_mixed
+        ? (mixedPlan || openShift.corrections?.mixedPlanAtEntry || null)
+        : null
+      const scheduledExit = scheduledExitDate(openShift.date_str, emp, tz, planForExit)
+      if (scheduledExit) {
+        const minutesOver = Math.round((new Date(now) - scheduledExit) / 60000)
+        if (minutesOver > 0) {
+          overtimeMinutes = minutesOver
+          overtimeHours = calcOvertimeHours(minutesOver)
+        }
       }
     }
 
