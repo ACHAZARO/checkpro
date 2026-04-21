@@ -1,7 +1,14 @@
 // src/app/api/check/punch/route.js
+// feat/mixed-schedule — soporte para empleados mixtos:
+//   - Al entrar, si emp.is_mixed === true, se busca el shift_plan del dia
+//     y se clasifica la entrada con classifyEntryMixed (contra plan.entry_time_str).
+//   - Si no hay plan para ese dia, se crea el shift con classification
+//     { type: 'no_planificado' } para que el gerente lo vea marcado.
+//   - En la salida, scheduledExitDate usa plan.entry_time_str + plan.duration_hours
+//     para calcular HE y duracion esperada.
 import { createServiceClient } from '@/lib/supabase'
 import { NextResponse } from 'next/server'
-import { classifyEntry, isoDate, diffHrs, calcOvertimeHours, scheduledExitDate, haversineMeters, todayISOMX } from '@/lib/utils'
+import { classifyEntry, classifyEntryMixed, isoDate, diffHrs, calcOvertimeHours, scheduledExitDate, haversineMeters, todayISOMX } from '@/lib/utils'
 import { rateLimit } from '@/lib/rate-limit'
 import crypto from 'crypto'
 
@@ -147,6 +154,19 @@ export async function POST(req) {
     const dateStr = isoDate(now, tz)
     const safeGeo = { lat: geo?.lat ?? null, lng: geo?.lng ?? null, dist, accuracy: geo?.accuracy ?? null, verified: true }
 
+    // Plan del dia para mixtos — se busca una sola vez, usado en entrada y salida.
+    let mixedPlan = null
+    if (emp.is_mixed) {
+      const { data: planRow } = await supabase
+        .from('shift_plans')
+        .select('employee_id, date_str, entry_time_str, duration_hours, exit_time_str')
+        .eq('tenant_id', tenantId)
+        .eq('employee_id', emp.id)
+        .eq('date_str', dateStr)
+        .maybeSingle()
+      mixedPlan = planRow || null
+    }
+
     if (action === 'in') {
       // BUG 5: revalidar vacaciones server-side. El bloqueo de cliente puede ser
       // saltado via DevTools/fetch directo. Si hay un periodo active que cubre HOY
@@ -188,7 +208,14 @@ export async function POST(req) {
         )
       }
 
-      const classification = classifyEntry(emp.schedule || {}, now, cfg.toleranceMinutes || 10, tz)
+      // Clasificacion: mixto usa el plan de hoy; fijo usa su schedule semanal.
+      let classification
+      if (emp.is_mixed) {
+        classification = classifyEntryMixed(mixedPlan, now, cfg.toleranceMinutes || 10, tz)
+      } else {
+        classification = classifyEntry(emp.schedule || {}, now, cfg.toleranceMinutes || 10, tz)
+      }
+
       const holidays = cfg.holidays || []
       const holiday = holidays.find(h => h.date === dateStr)
       const coverName = coveringEmployeeId
@@ -205,6 +232,13 @@ export async function POST(req) {
           entryIp: currentIp, sessionValid, branchId: branchId || null, ipMatchesBranch,
           entryDeviceId: deviceId || null, sessionDeviceId: sessionDeviceId || null,
           deviceMismatchOnEntry, coveragePayMode,
+          // Mixto: guardamos el plan usado para que payroll/attendance tengan
+          // una referencia estable aunque el plan se modifique despues.
+          mixedPlanAtEntry: emp.is_mixed ? (mixedPlan ? {
+            entry_time_str: mixedPlan.entry_time_str,
+            duration_hours: Number(mixedPlan.duration_hours),
+            exit_time_str: mixedPlan.exit_time_str,
+          } : null) : undefined,
         },
       })
 
@@ -218,7 +252,7 @@ export async function POST(req) {
       await supabase.from('audit_log').insert({
         tenant_id: tenantId, action: 'CHK_IN',
         employee_id: emp.id, employee_name: emp.name,
-        detail: `${classification.label}${coverName ? ' · Cubriendo: ' + coverName : ''}${holiday ? ' 🎉 FERIADO' : ''} · IP ${currentIp}${deviceMismatchOnEntry ? ' ⚠ Dispositivo diferente' : ''}`,
+        detail: `${classification.label}${coverName ? ' · Cubriendo: ' + coverName : ''}${holiday ? ' 🎉 FERIADO' : ''}${emp.is_mixed && !mixedPlan ? ' ⚠ Sin plan' : ''} · IP ${currentIp}${deviceMismatchOnEntry ? ' ⚠ Dispositivo diferente' : ''}`,
         success: true
       })
 
@@ -227,6 +261,7 @@ export async function POST(req) {
         msg: `Entrada registrada. ${classification.label}${coverName ? ' · Cubriendo a ' + coverName : ''}${holiday ? ' — Pago ×3 🎉' : ''}.`,
         ipMatchesBranch,
         birthday: isBirthdayToday, // R7
+        mixedNoPlan: emp.is_mixed && !mixedPlan, // aviso al cliente
       })
     }
 
@@ -248,8 +283,14 @@ export async function POST(req) {
       return NextResponse.json({ ok: false, msg: 'Duración inválida. Contacta a tu supervisor.' })
     }
 
+    // HE: mixtos usan el plan de hoy (o el snapshot del shift) para saber
+    // cual es la "hora esperada de salida". Si no habia plan, no se calcula HE
+    // por reloj — solo se marca como no_planificado y se revisa en manager.
     let overtimeHours = 0, overtimeMinutes = 0
-    const scheduledExit = scheduledExitDate(openShift.date_str, emp, tz)
+    const planForExit = emp.is_mixed
+      ? (mixedPlan || openShift.corrections?.mixedPlanAtEntry || null)
+      : null
+    const scheduledExit = scheduledExitDate(openShift.date_str, emp, tz, planForExit)
     if (scheduledExit) {
       const minutesOver = Math.round((new Date(now) - scheduledExit) / 60000)
       if (minutesOver > 0) {
