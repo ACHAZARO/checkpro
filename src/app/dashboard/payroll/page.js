@@ -1,6 +1,7 @@
 'use client'
 // src/app/dashboard/payroll/page.js
 import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate, dayKey, DAY_FL } from '@/lib/utils'
 import toast from 'react-hot-toast'
@@ -292,6 +293,7 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
 
 // ── Component ────────────────────────────────────────────────────────────────
 export default function PayrollPage() {
+  const router = useRouter()
   // Raw data (no filtering yet)
   const [allEmps, setAllEmps] = useState([])
   const [shifts, setShifts] = useState([])
@@ -396,6 +398,17 @@ export default function PayrollPage() {
   )
   const incidentShifts = weekShifts.filter(s => s.status === 'incident')
   const hasUnresolved = incidentShifts.length > 0
+
+  // feat/mixed-schedule: flag del tenant. El Paso 3 del wizard (planificar
+  // próxima semana) solo aplica si la empresa activó horarios mixtos en
+  // Configuración. Si no, el flujo se queda en 2 pasos (incidencias → corte).
+  const mixedEnabled = !!(tenantData?.config?.mixedSchedule?.enabled)
+  const hasMixedEmps = emps.some(e => e.is_mixed)
+  // Paso actual del wizard:
+  //   1 = revisión de incidencias (hay pendientes)
+  //   2 = generar corte (ya sin incidencias, aún no se imprime)
+  //   3 = planificar próxima semana (ya se generó/imprimió el corte)
+  const wizardStep = hasUnresolved ? 1 : (printHTML ? 3 : 2)
 
   // FIX BUG: solo se permite cerrar el día configurado por la sucursal.
   // dayKey() usa hora local (no UTC) — el gerente cierra cuando es ese día
@@ -546,6 +559,71 @@ export default function PayrollPage() {
           🏢 {myBranchName || 'Sucursal sin nombre'} · CORTE: {DAY_FL[closingDay]}
         </p>
       </div>
+
+      {/* ── Wizard de corte semanal (3 pasos, solo si hay mixtos activos) ──── */}
+      {/* feat/mixed-schedule: Cuando hay horarios mixtos, el corte se vuelve un
+          flujo de 3 pasos en lugar de una acción suelta. Así el gerente no
+          olvida planificar la próxima semana después de cerrar el corte, que
+          es el error más común reportado en la fase de diseño. */}
+      {mixedEnabled && hasMixedEmps && (
+        <div className="card mb-4 bg-brand-400/5 border border-brand-400/20">
+          <p className="text-[10px] font-mono text-brand-400/70 uppercase tracking-wider mb-2">
+            📋 Flujo del corte semanal
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { n: 1, label: 'Revisar incidencias', icon: '🚩' },
+              { n: 2, label: 'Generar corte', icon: '💰' },
+              { n: 3, label: 'Planificar semana', icon: '📅' },
+            ].map(step => {
+              const isCurrent = step.n === wizardStep
+              const isDone = step.n < wizardStep
+              return (
+                <div
+                  key={step.n}
+                  className={
+                    'rounded-lg px-2 py-2 text-center transition ' +
+                    (isCurrent
+                      ? 'bg-brand-400/20 border border-brand-400/50'
+                      : isDone
+                        ? 'bg-green-500/10 border border-green-500/30'
+                        : 'bg-dark-700/40 border border-dark-border')
+                  }
+                >
+                  <div className="text-lg leading-tight">
+                    {isDone ? '✅' : step.icon}
+                  </div>
+                  <div className={
+                    'text-[9px] font-mono uppercase tracking-wider mt-0.5 ' +
+                    (isCurrent
+                      ? 'text-brand-400'
+                      : isDone
+                        ? 'text-green-400'
+                        : 'text-gray-500')
+                  }>
+                    Paso {step.n}
+                  </div>
+                  <div className={
+                    'text-[10px] mt-0.5 ' +
+                    (isCurrent
+                      ? 'text-white font-bold'
+                      : isDone
+                        ? 'text-gray-400'
+                        : 'text-gray-600')
+                  }>
+                    {step.label}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-[10px] text-gray-500 font-mono mt-2 leading-relaxed">
+            {wizardStep === 1 && '⚠ Resuelve las incidencias antes de generar el corte.'}
+            {wizardStep === 2 && '✓ Incidencias resueltas. Ya puedes generar el corte semanal.'}
+            {wizardStep === 3 && '✓ Corte generado. Ahora planifica los horarios de la próxima semana para los empleados con horario mixto.'}
+          </p>
+        </div>
+      )}
 
       {/* ── Selector de sucursal (solo propietario con >1 sucursal) ────────── */}
       {isOwner && allBranches.length > 1 && (
@@ -750,6 +828,16 @@ export default function PayrollPage() {
               className="flex items-center gap-2 px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl">
               🖨️ Imprimir / Guardar PDF
             </button>
+            {/* feat/mixed-schedule: Paso 3 del wizard. Tras imprimir el corte,
+                el gerente se va directo a planificar la semana siguiente. Solo
+                aparece si la empresa tiene el modo mixto activado y al menos
+                un empleado mixto en esta sucursal. */}
+            {mixedEnabled && hasMixedEmps && (
+              <button onClick={() => router.push('/dashboard/planning')}
+                className="flex items-center gap-2 px-4 py-2 bg-brand-500/20 border border-brand-400/50 text-brand-400 text-sm font-bold rounded-xl active:bg-brand-500/30">
+                📅 Paso 3: Planificar próxima semana →
+              </button>
+            )}
             <button onClick={() => setPrintHTML(null)}
               className="flex items-center gap-2 px-4 py-2 bg-dark-700 border border-dark-border text-white text-sm font-semibold rounded-xl">
               ✕ Cerrar
