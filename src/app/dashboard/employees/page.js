@@ -156,6 +156,10 @@ export default function EmployeesPage() {
       // feat/mixed-schedule: default fijo
       is_mixed: false,
       daily_hours: 8,
+      // feat/horario-libre: gerentes con nómina íntegra; checan solo para tracking.
+      free_schedule: false,
+      free_min_days_week: 5,
+      free_min_hours_week: 40,
     })
     setSheet('add')
   }
@@ -179,6 +183,16 @@ export default function EmployeesPage() {
           return
         }
       }
+    }
+
+    // feat/horario-libre: solo gerentes; no puede combinarse con mixto
+    if (form.free_schedule) {
+      if (!form.can_manage) { toast.error('Horario libre solo aplica a gerentes'); return }
+      if (form.is_mixed) { toast.error('Horario libre y mixto son excluyentes'); return }
+      const md = parseInt(form.free_min_days_week || 0)
+      const mh = parseFloat(form.free_min_hours_week || 0)
+      if (md < 0 || md > 7) { toast.error('Mínimo de días por semana inválido (0-7)'); return }
+      if (mh < 0 || mh > 168) { toast.error('Mínimo de horas por semana inválido (0-168)'); return }
     }
 
     setSaving(true)
@@ -209,6 +223,10 @@ export default function EmployeesPage() {
       // feat/mixed-schedule
       is_mixed: !!form.is_mixed,
       daily_hours: form.is_mixed ? (parseFloat(form.daily_hours) || null) : null,
+      // feat/horario-libre
+      free_schedule: !!form.free_schedule,
+      free_min_days_week: form.free_schedule ? (parseInt(form.free_min_days_week) || 5) : null,
+      free_min_hours_week: form.free_schedule ? (parseFloat(form.free_min_hours_week) || 40) : null,
     }
     try {
       if (sheet === 'add') {
@@ -299,6 +317,10 @@ export default function EmployeesPage() {
       // feat/mixed-schedule
       is_mixed: !!emp.is_mixed,
       daily_hours: emp.daily_hours || 8,
+      // feat/horario-libre
+      free_schedule: !!emp.free_schedule,
+      free_min_days_week: emp.free_min_days_week ?? 5,
+      free_min_hours_week: emp.free_min_hours_week ?? 40,
     })
     setSheet('edit')
   }
@@ -379,6 +401,7 @@ export default function EmployeesPage() {
                       <span className="text-xs font-mono text-gray-600">{emp.employee_code}</span>
                       {emp.can_manage && <span className="badge-orange text-[9px]">Gerente</span>}
                       {emp.is_mixed && <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-purple-500/15 border border-purple-400/30 text-purple-300 whitespace-nowrap">🔀 Mixto</span>}
+                      {emp.free_schedule && <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-orange-500/15 border border-orange-400/30 text-orange-300 whitespace-nowrap">🔓 Libre</span>}
                       {emp.status === 'inactive' && <span className="badge-gray text-[9px]">Inactivo</span>}
                     </div>
                     <div className="text-xs text-gray-500 mt-0.5">
@@ -556,7 +579,7 @@ export default function EmployeesPage() {
                 </div>
 
                 {/* feat/mixed-schedule: toggle horario mixto (solo si está habilitado en config) */}
-                {mixedCfg.enabled && (
+                {mixedCfg.enabled && !form.free_schedule && (
                   <div className="flex items-center justify-between py-2 border-t border-dark-border pt-3">
                     <div>
                       <p className="text-sm font-semibold text-white">Horario mixto <span className="text-[10px] font-mono text-gray-500 ml-1">ROTATIVO</span></p>
@@ -566,6 +589,44 @@ export default function EmployeesPage() {
                       className={`w-10 h-6 rounded-full relative transition-colors ${form.is_mixed ? 'bg-brand-400' : 'bg-dark-600'}`}>
                       <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${form.is_mixed ? 'left-5' : 'left-1'}`} />
                     </button>
+                  </div>
+                )}
+
+                {/* feat/horario-libre: solo visible si es gerente; excluye mixto */}
+                {form.can_manage && !form.is_mixed && (
+                  <div className="border-t border-dark-border pt-3">
+                    <div className="flex items-center justify-between py-1">
+                      <div>
+                        <p className="text-sm font-semibold text-white">Horario libre <span className="text-[10px] font-mono text-orange-400 ml-1">GERENTE</span></p>
+                        <p className="text-xs text-gray-500 leading-snug">Nómina íntegra. Checa solo para tracking. Alertas si incumple mínimos.</p>
+                      </div>
+                      <button onClick={() => F('free_schedule', !form.free_schedule)}
+                        className={`w-10 h-6 rounded-full relative transition-colors shrink-0 ${form.free_schedule ? 'bg-orange-400' : 'bg-dark-600'}`}>
+                        <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${form.free_schedule ? 'left-5' : 'left-1'}`} />
+                      </button>
+                    </div>
+                    {form.free_schedule && (
+                      <div className="mt-3 space-y-2 p-3 bg-orange-500/5 border border-orange-400/20 rounded-xl">
+                        <p className="text-[11px] font-mono uppercase tracking-wider text-orange-300/80">Alertas de seguimiento</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="label text-[10px]">Mín. días/semana</label>
+                            <input className="input py-1.5 text-sm" type="number" min="0" max="7"
+                              value={form.free_min_days_week ?? 5}
+                              onChange={e => F('free_min_days_week', e.target.value)} />
+                          </div>
+                          <div>
+                            <label className="label text-[10px]">Mín. horas/semana</label>
+                            <input className="input py-1.5 text-sm" type="number" min="0" max="168" step="0.5"
+                              value={form.free_min_hours_week ?? 40}
+                              onChange={e => F('free_min_hours_week', e.target.value)} />
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-gray-500 leading-snug">
+                          Si checa menos de estos umbrales en la semana, aparece una alerta en Dashboard y tarjeta del empleado.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -590,6 +651,14 @@ export default function EmployeesPage() {
                     <p className="text-[10px] text-gray-600 font-mono mt-1 leading-snug">
                       El empleado trabajará esta cantidad de horas cada día que el gerente lo agende en el <strong>Planificador</strong>. No se define día/hora fija aquí.
                     </p>
+                  </div>
+                ) : form.free_schedule ? (
+                  <div className="border-t border-dark-border pt-3">
+                    <div className="p-3 bg-dark-800 border border-dark-border rounded-xl">
+                      <p className="text-xs text-gray-400 leading-snug">
+                        🔓 <strong>Horario libre</strong> — Este gerente no tiene horario semanal fijo. Checa cuando llega y sale para que CheckPro lleve el registro de horas trabajadas, pero no hay retardos ni clasificaciones.
+                      </p>
+                    </div>
                   </div>
                 ) : (
                 <div className="border-t border-dark-border pt-3">
