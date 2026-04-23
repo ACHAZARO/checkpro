@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate, dayKey, DAY_FL } from '@/lib/utils'
+import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate, dayKey, DAY_FL, managerFreeScheduleAlerts } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 // Default legend si el usuario no guardo uno custom (espejo de settings/DEFAULT_LEYENDA)
@@ -779,11 +779,20 @@ export default function PayrollPage() {
           const vac = vacationPayForWeek(emp, vacByEmp[emp.id] || [], weekStartStr, weekEndStr)
           const grossWithVac = s.grossPay + vac.totalVacationPay
           const netWithVac = Math.max(0, grossWithVac - s.retardoDesc - s.incidentDesc)
+          // Alertas de gerente libre (mínimos de días/horas, jornadas abiertas)
+          const freeAlerts = emp.free_schedule ? managerFreeScheduleAlerts(emp, weekShifts) : []
+          const hasFreeErrors = freeAlerts.some(a => a.level === 'error')
+          const hasFreeWarns = freeAlerts.some(a => a.level === 'warn')
           return (
-            <div key={emp.id} className="card">
+            <div key={emp.id} className={`card ${hasFreeErrors ? 'border-red-500/40' : ''}`}>
               <div className="flex items-start justify-between mb-2">
                 <div>
-                  <div className="font-bold text-white text-sm">{emp.name}</div>
+                  <div className="font-bold text-white text-sm">
+                    {emp.name}
+                    {emp.free_schedule && (
+                      <span className="ml-2 px-1.5 py-0.5 bg-purple-500/10 border border-purple-500/30 rounded text-purple-300 text-[9px] font-mono uppercase tracking-wider">horario libre</span>
+                    )}
+                  </div>
                   <div className="text-xs text-gray-500">{emp.department} · ${monthlyToHourly(emp).toFixed(2)}/h</div>
                 </div>
                 <div className="text-right">
@@ -794,7 +803,7 @@ export default function PayrollPage() {
               <div className="flex flex-wrap gap-3 text-xs text-gray-500 font-mono mb-2">
                 <span>{s.totalH}h trabajadas</span>
                 {s.otHours > 0 && <span className="text-blue-400">+{s.otHours}h extra (×2)</span>}
-                <span>Bruto: ${grossWithVac.toFixed(2)}</span>
+                <span>Bruto: ${grossWithVac.toFixed(2)}{emp.free_schedule ? ' (sueldo fijo)' : ''}</span>
                 {s.retardoDesc > 0 && <span className="text-orange-400">-${s.retardoDesc.toFixed(2)} retardos</span>}
                 {s.incidentDesc > 0 && <span className="text-red-400">-${s.incidentDesc.toFixed(2)} incid.</span>}
                 {vac.daysInRange > 0 && (
@@ -804,6 +813,22 @@ export default function PayrollPage() {
                   <span className="text-purple-300">💰 comp. ${vac.compensationPay.toFixed(2)}</span>
                 )}
               </div>
+              {freeAlerts.length > 0 && (
+                <div className="mb-2 space-y-1">
+                  {freeAlerts.map((a, i) => (
+                    <div
+                      key={i}
+                      className={`px-2 py-1 rounded text-[11px] font-semibold ${
+                        a.level === 'error'
+                          ? 'bg-red-500/10 border border-red-500/30 text-red-400'
+                          : 'bg-orange-500/10 border border-orange-500/30 text-orange-400'
+                      }`}
+                    >
+                      {a.level === 'error' ? '⛔' : '⚠️'} {a.message}
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="flex gap-1.5 flex-wrap">
                 {s.retardos > 0 && <span className="badge-orange">{s.retardos} retardo{s.retardos > 1 ? 's' : ''}</span>}
                 {s.incidents > 0 && <span className="badge-red">{s.incidents} incidencia{s.incidents > 1 ? 's' : ''}</span>}
@@ -818,7 +843,7 @@ export default function PayrollPage() {
                     💰 Compensación ×2 = ${vac.compensationPay.toFixed(0)}
                   </span>
                 )}
-                {s.retardos === 0 && s.incidents === 0 && s.otHours === 0 && vac.daysInRange === 0 && vac.compensationPay === 0 && (
+                {s.retardos === 0 && s.incidents === 0 && s.otHours === 0 && vac.daysInRange === 0 && vac.compensationPay === 0 && !hasFreeErrors && !hasFreeWarns && (
                   <span className="badge-green">Sin incidencias ✓</span>
                 )}
               </div>
