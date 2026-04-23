@@ -18,3 +18,4 @@ SaaS de reloj checador con GPS para PyMES mexicanas.
 - supabase.js: browser client only (no next/headers)
 - supabase-server.js: server/service clients
 - API routes: use supabase-server
+
