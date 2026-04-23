@@ -789,6 +789,29 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
         </div>
       </div>
 
+      {/* Modo del dispositivo checador */}
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Modo del dispositivo checador</p>
+      <div className="card mb-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-white">Modo Kiosko</p>
+            <p className="text-[11px] text-gray-500 mt-0.5 leading-snug">
+              Actívalo si este dispositivo se queda fijo en la entrada (tablet o celular compartido). El GPS se valida sólo al momento de checar y la pantalla regresa sola al teclado de ID unos segundos después, para que el siguiente empleado use el mismo equipo.
+            </p>
+            <p className="text-[11px] text-gray-500 mt-2 leading-snug">
+              Desactivado (por defecto): <span className="text-gray-400 font-semibold">modo estricto</span>. Cada empleado usa su propio celular; el GPS se monitorea en vivo mientras el turno está abierto y el turno se cierra automáticamente si el empleado sale de la zona por más de 20 minutos.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => F('kioskMode', !cfg.kioskMode)}
+            className={`w-10 h-6 rounded-full relative transition-colors shrink-0 ${cfg.kioskMode ? 'bg-brand-400' : 'bg-dark-600'}`}
+            aria-label="Modo Kiosko">
+            <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${cfg.kioskMode ? 'left-5' : 'left-1'}`} />
+          </button>
+        </div>
+      </div>
+
       {/* GPS */}
       <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Ubicación GPS</p>
       <div className="card mb-4 space-y-3">
