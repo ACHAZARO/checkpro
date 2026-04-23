@@ -13,26 +13,12 @@ function ShiftBadge({ status, classification }) {
     if (t === 'falta_injustificada') return <span className="badge-red">Falta injustificada</span>
     if (t === 'falta_justificada_pagada') return <span className="badge-orange">Falta justif. pagada</span>
     if (t === 'falta_justificada_no_pagada') return <span className="badge-orange">Falta justif. s/pago</span>
-    if (t === 'dia_libre_autorizado') return <span className="px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-300 text-[10px] font-mono">Día libre autorizado</span>
     return <span className="badge-red">Falta</span>
   }
   const t = classification?.type
   if (t === 'retardo') return <span className="badge-orange">Retardo</span>
   if (t === 'tolerancia') return <span className="badge-orange">Tolerancia</span>
-  if (t === 'no_planificado') return <span className="px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/20 rounded-full text-yellow-300 text-[10px] font-mono">No planificado</span>
   return <span className="badge-green">Completa</span>
-}
-
-// ── CSV export ────────────────────────────────────────────────────────────────
-function exportToCSV(rows, filename) {
-  const header = Object.keys(rows[0] || {}).join(',')
-  const body = rows.map(r =>
-    Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')
-  ).join('\n')
-  const blob = new Blob(['\uFEFF' + header + '\n' + body], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
 }
 
 // Días entre filterFrom y filterTo (inclusive), for absence detection
@@ -47,21 +33,13 @@ function dateRange(from, to) {
   return dates
 }
 
-// Check si una fecha (YYYY-MM-DD) cae en un periodo de vacaciones (start/end inclusivos)
-function dateInPeriod(dateStr, period) {
-  if (!dateStr || !period) return false
-  const s = String(period.start_date || '').slice(0, 10)
-  const e = String(period.end_date || '').slice(0, 10)
-  if (!s || !e) return false
-  return dateStr >= s && dateStr <= e
-}
-
 export default function AttendancePage() {
   const [shifts, setShifts] = useState([])
-  const [allShifts, setAllShifts] = useState([]) // all shifts (for grave count)
+  const [allShifts, setAllShifts] = useState([])
   const [emps, setEmps] = useState([])
   const [loading, setLoading] = useState(true)
   const [tenantId, setTenantId] = useState(null)
+  const [tenantName, setTenantName] = useState('')
   const [filterEmp, setFilterEmp] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterBranch, setFilterBranch] = useState('all')
@@ -72,19 +50,16 @@ export default function AttendancePage() {
   const [filterTo, setFilterTo] = useState(isoDate(new Date()))
   const [corrSheet, setCorrSheet] = useState(null)
   const [flagSheet, setFlagSheet] = useState(null)
-  const [absenceSheet, setAbsenceSheet] = useState(null) // { emp, dateStr }
+  const [absenceSheet, setAbsenceSheet] = useState(null)
   const [corrForm, setCorrForm] = useState({})
   const [flagForm, setFlagForm] = useState({ type: 'olvido_salida', note: '' })
   const [absenceForm, setAbsenceForm] = useState({ type: 'falta_injustificada', note: '' })
   const [saving, setSaving] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [showExportMenu, setShowExportMenu] = useState(false)
 
-  // Vacation periods que tocan el rango visible.
-  const [vacationPeriods, setVacationPeriods] = useState([])
-
-  // Suggested absences: employees who had scheduled workday but no shift record
-  const [suggestedAbsences, setSuggestedAbsences] = useState([]) // { emp, dateStr }
+  const [suggestedAbsences, setSuggestedAbsences] = useState([])
   const [dismissedSuggestions, setDismissedSuggestions] = useState(new Set())
-  const [shiftPlans, setShiftPlans] = useState([]) // feat/mixed-schedule
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -94,72 +69,30 @@ export default function AttendancePage() {
     if (!prof?.tenant_id) return
     setTenantId(prof.tenant_id)
 
-    const [{ data: empData }, { data: shiftData }, { data: tenantData }, { data: branchData }, { data: allShiftData }, { data: vacData }, { data: planData }] = await Promise.all([
-      // feat/mixed-schedule: traer is_mixed y daily_hours para detectar ausencias
-      // y calcular pagos correctamente.
-      supabase.from('employees').select('id,name,department,monthly_salary,schedule,is_mixed,daily_hours').eq('tenant_id', prof.tenant_id).neq('status','deleted'),
+    const [{ data: empData }, { data: shiftData }, { data: tenantData }, { data: allShiftData }] = await Promise.all([
+      supabase.from('employees').select('id,name,department,monthly_salary,schedule,employee_code,branch_id').eq('tenant_id', prof.tenant_id).neq('status','deleted'),
       supabase.from('shifts').select('*').eq('tenant_id', prof.tenant_id).gte('date_str', filterFrom).lte('date_str', filterTo).order('date_str', { ascending: false }).order('entry_time', { ascending: false }),
-      supabase.from('tenants').select('config').eq('id', prof.tenant_id).single(),
-      // FIX: leer sucursales de la tabla canonica (no del JSONB legacy)
-      supabase.from('branches').select('id,name,active').eq('tenant_id', prof.tenant_id).eq('active', true).order('created_at'),
-      // Load all shifts for grave incident count (last 12 months)
+      supabase.from('tenants').select('config,name').eq('id', prof.tenant_id).single(),
       supabase.from('shifts').select('employee_id,classification,status').eq('tenant_id', prof.tenant_id)
-        .gte('date_str', isoDate(new Date(Date.now() - 365 * 24 * 3600 * 1000))),
-      // Periodos de vacaciones que tocan el rango [filterFrom, filterTo]
-      // Solo status active/completed (no pending, no cancelled).
-      supabase.from('vacation_periods')
-        .select('id,employee_id,start_date,end_date,status,tipo,entitled_days')
-        .eq('tenant_id', prof.tenant_id)
-        .in('status', ['active', 'completed'])
-        .lte('start_date', filterTo)
-        .gte('end_date', filterFrom),
-      // feat/mixed-schedule: planes de turnos que tocan el rango. Se usan para
-      // detectar faltas de mixtos (agendado sin check-in) y para mostrar el
-      // horario planeado en la tabla.
-      supabase.from('shift_plans')
-        .select('employee_id,date_str,entry_time_str,duration_hours,exit_time_str')
-        .eq('tenant_id', prof.tenant_id)
-        .gte('date_str', filterFrom)
-        .lte('date_str', filterTo),
+        .gte('date_str', isoDate(new Date(Date.now() - 365 * 24 * 3600 * 1000)))
     ])
     setEmps(empData || [])
     setShifts(shiftData || [])
     setAllShifts(allShiftData || [])
-    // FIX: preferir tabla branches; fallback a JSONB legacy
-    setBranches((branchData && branchData.length > 0) ? branchData : (tenantData?.config?.branches || []))
-    setVacationPeriods(vacData || [])
-    setShiftPlans(planData || [])
+    setBranches(tenantData?.config?.branches || [])
+    setTenantName(tenantData?.name || '')
 
-    // Auto-detect possible absences (excluye dias que caen en vacaciones)
     const dates = dateRange(filterFrom, filterTo)
     const shiftsByEmpDate = new Set((shiftData || []).map(s => `${s.employee_id}_${s.date_str}`))
-    const vacByEmp = {}
-    for (const p of vacData || []) {
-      if (!vacByEmp[p.employee_id]) vacByEmp[p.employee_id] = []
-      vacByEmp[p.employee_id].push(p)
-    }
-    // feat/mixed-schedule: indice plan por empleado+fecha para decidir "debe
-    // trabajar" en mixtos. Solo cuenta como agendado si hay entry_time_str.
-    const planByEmpDate = new Set(
-      (planData || [])
-        .filter(p => p?.entry_time_str)
-        .map(p => `${p.employee_id}_${p.date_str}`)
-    )
     const suggestions = []
     for (const emp of (empData || [])) {
-      const empVacs = vacByEmp[emp.id] || []
       for (const dateStr of dates) {
-        const shouldWork = emp.is_mixed
-          ? planByEmpDate.has(`${emp.id}_${dateStr}`)
-          : (emp.schedule?.[dayKey(new Date(dateStr + 'T12:00:00'))]?.work === true)
+        const dk = dayKey(new Date(dateStr + 'T12:00:00'))
+        const shouldWork = emp.schedule?.[dk]?.work === true
         const hasRecord = shiftsByEmpDate.has(`${emp.id}_${dateStr}`)
-        const onVac = empVacs.some(p => dateInPeriod(dateStr, p))
-        if (shouldWork && !hasRecord && !onVac) {
-          suggestions.push({ emp, dateStr })
-        }
+        if (shouldWork && !hasRecord) suggestions.push({ emp, dateStr })
       }
     }
-    // Only show last 7 days suggestions to avoid noise
     const cutoff = isoDate(new Date(Date.now() - 7 * 24 * 3600 * 1000))
     setSuggestedAbsences(suggestions.filter(s => s.dateStr >= cutoff && s.dateStr < isoDate(new Date())))
     setLoading(false)
@@ -167,20 +100,8 @@ export default function AttendancePage() {
 
   useEffect(() => { load() }, [load])
 
-  // Build a map of employeeId → branchId for quick lookup
-  const empBranchMap = Object.fromEntries(emps.map(e => [e.id, e.schedule?.branch?.id || null]))
+  const empBranchMap = Object.fromEntries(emps.map(e => [e.id, e.branch_id || e.schedule?.branch?.id || null]))
 
-  // Mapas auxiliares: periodos por empleado (para lookup rapido) y
-  // dias del rango que caen en vacaciones (para pintar "rows virtuales").
-  const vacByEmp = {}
-  for (const p of vacationPeriods) {
-    if (!vacByEmp[p.employee_id]) vacByEmp[p.employee_id] = []
-    vacByEmp[p.employee_id].push(p)
-  }
-
-  // Shifts filtrados (como antes). Ademas marcamos cada uno con si ese dia
-  // esta dentro de un periodo de vacaciones del empleado (prevalece asistencia
-  // registrada; solo usamos la marca para informar visualmente).
   const filtered = shifts.filter(s => {
     if (filterEmp !== 'all' && s.employee_id !== filterEmp) return false
     if (filterStatus !== 'all' && s.status !== filterStatus) return false
@@ -188,61 +109,43 @@ export default function AttendancePage() {
     return true
   })
 
-  // Dias virtuales de vacaciones: para cada periodo visible, generar una fila por dia
-  // en el rango [filterFrom, filterTo] que caiga en (start_date, end_date) del periodo,
-  // SIEMPRE QUE no haya un shift registrado ese dia para ese empleado
-  // (si checo, prevalece la asistencia real).
-  const shiftsByEmpDate = new Set(shifts.map(s => `${s.employee_id}_${s.date_str}`))
-  const virtualVacationRows = []
-  for (const p of vacationPeriods) {
-    if (filterEmp !== 'all' && p.employee_id !== filterEmp) continue
-    const emp = emps.find(e => e.id === p.employee_id)
-    if (!emp) continue
-    if (filterBranch !== 'all' && empBranchMap[p.employee_id] !== filterBranch) continue
-    // Solo active prevalece sobre falta. completed si cayo en rango tambien lo mostramos.
-    const rangeDates = dateRange(filterFrom, filterTo)
-    const s = String(p.start_date).slice(0, 10)
-    const e = String(p.end_date).slice(0, 10)
-    for (const d of rangeDates) {
-      if (d < s || d > e) continue
-      if (shiftsByEmpDate.has(`${emp.id}_${d}`)) continue // prevalece la asistencia real
-      // BUG 10: ANTES filtrábamos por schedule.work=true (no mostrar
-      // descansos/domingos), pero el pago de nómina es en días naturales
-      // (LFT art. 89 — mensual/30). El gerente veía "5d vacaciones" en
-      // asistencia y "7d pagados" en nómina. Mostramos TODOS los días
-      // del rango que caen en el periodo — alinea UI con el pago real.
-      virtualVacationRows.push({
-        _virtual: 'vacation',
-        id: `vac_${p.id}_${d}`,
-        employee_id: emp.id,
-        date_str: d,
-        status: 'vacation',
-        classification: { type: 'vacation', label: `🏖 Vacaciones${p.tipo ? ' (' + p.tipo + ')' : ''}` },
-        period: p,
-      })
-    }
-  }
-
-  // Filtrar por status si aplica (vacation cuenta como un status virtual "vacation")
-  const visibleVacationRows = filterStatus === 'all' || filterStatus === 'vacation'
-    ? virtualVacationRows
-    : []
-
-  // Combinar shifts reales + filas virtuales de vacaciones, ordenado descendiente por fecha
-  const combined = [
-    ...filtered.map(s => ({ ...s, _virtual: null })),
-    ...visibleVacationRows,
-  ].sort((a, b) => {
-    if (a.date_str === b.date_str) {
-      // shifts reales primero
-      if (a._virtual && !b._virtual) return 1
-      if (!a._virtual && b._virtual) return -1
-      return 0
-    }
-    return a.date_str < b.date_str ? 1 : -1
-  })
-
   const getEmpName = id => emps.find(e => e.id === id)?.name || id
+
+  // ── Exportar XLS ──────────────────────────────────────────────────────────
+  async function handleExportXLS(scope) {
+    // scope: 'filtered' | 'all' | 'byEmployee'
+    setExporting(true)
+    setShowExportMenu(false)
+    try {
+      const { generateAttendanceXLSX } = await import('@/lib/export-xlsx')
+      let src
+      if (scope === 'all') {
+        src = shifts
+      } else {
+        src = filtered
+      }
+      if (src.length === 0) { toast.error('No hay registros para exportar'); setExporting(false); return }
+
+      // Enriquecer branches desde la lista cargada
+      const branchList = branches.map(b => ({ id: b.id, name: b.name }))
+      // También intentar desde config legacy (array de objetos)
+      const allBranches = branchList
+
+      generateAttendanceXLSX({
+        shifts: src,
+        emps,
+        branches: allBranches,
+        periodFrom: filterFrom,
+        periodTo: filterTo,
+        companyName: tenantName,
+      })
+      toast.success(`✅ Exportado: ${src.length} registros`)
+    } catch (err) {
+      console.error('[export-xlsx]', err)
+      toast.error('Error al generar el archivo: ' + err.message)
+    }
+    setExporting(false)
+  }
 
   async function saveCorr() {
     if (!corrForm.note) { toast.error('El motivo es obligatorio'); return }
@@ -251,27 +154,8 @@ export default function AttendancePage() {
     const entryTime = corrForm.entryTime ? new Date(corrForm.entryTime).toISOString() : corrSheet.entry_time
     const exitTime  = corrForm.exitTime  ? new Date(corrForm.exitTime).toISOString()  : corrSheet.exit_time
     const duration  = entryTime && exitTime ? parseFloat(((new Date(exitTime)-new Date(entryTime))/3600000).toFixed(2)) : corrSheet.duration_hours
-    // FIX R6: corrections en DB es OBJETO (punch/route.js lo guarda así con
-    // entryIp, overtime, branchId, etc.). Antes escribíamos array plano y se
-    // perdían esos campos. Guardamos las ediciones manuales bajo corrections.edits
-    // preservando todos los campos previos del objeto.
-    const prevObj = (corrSheet.corrections && !Array.isArray(corrSheet.corrections))
-      ? corrSheet.corrections
-      : {}
-    const prevEdits = Array.isArray(prevObj.edits) ? prevObj.edits
-      : (Array.isArray(corrSheet.corrections) ? corrSheet.corrections : [])
-    const corrections = {
-      ...prevObj,
-      edits: [...prevEdits, { ts: new Date().toISOString(), note: corrForm.note, entryTime, exitTime }],
-    }
-    // FIX: antes se swallowed el error silently. Ahora surface al usuario.
-    const { error: uErr } = await supabase.from('shifts').update({ entry_time: entryTime, exit_time: exitTime, duration_hours: duration, status: exitTime ? 'closed' : corrSheet.status, corrections }).eq('id', corrSheet.id)
-    if (uErr) {
-      console.error('[attendance] correction update error:', uErr)
-      toast.error(`No se pudo guardar la corrección: ${uErr.message}`)
-      setSaving(false)
-      return
-    }
+    const corrections = [...(corrSheet.corrections || []), { ts: new Date().toISOString(), note: corrForm.note, entryTime, exitTime }]
+    await supabase.from('shifts').update({ entry_time: entryTime, exit_time: exitTime, duration_hours: duration, status: exitTime ? 'closed' : corrSheet.status, corrections }).eq('id', corrSheet.id)
     await supabase.from('audit_log').insert({ tenant_id: tenantId, action: 'CORRECTION', employee_name: getEmpName(corrSheet.employee_id), detail: corrForm.note, success: true })
     toast.success('Corrección guardada')
     setSaving(false); setCorrSheet(null); await load()
@@ -281,19 +165,12 @@ export default function AttendancePage() {
     setSaving(true)
     const supabase = createClient()
     const incidents = [...(flagSheet.incidents || []), { id: crypto.randomUUID(), ts: new Date().toISOString(), type: flagForm.type, note: flagForm.note }]
-    const { error: uErr } = await supabase.from('shifts').update({ status: 'incident', incidents }).eq('id', flagSheet.id)
-    if (uErr) {
-      console.error('[attendance] flag update error:', uErr)
-      toast.error(`No se pudo registrar la incidencia: ${uErr.message}`)
-      setSaving(false)
-      return
-    }
+    await supabase.from('shifts').update({ status: 'incident', incidents }).eq('id', flagSheet.id)
     await supabase.from('audit_log').insert({ tenant_id: tenantId, action: 'INCIDENT', employee_name: getEmpName(flagSheet.employee_id), detail: flagForm.type, success: true })
     toast.success('Incidencia registrada')
     setSaving(false); setFlagSheet(null); await load()
   }
 
-  // ── Register an absence ────────────────────────────────────────────────────
   async function saveAbsence() {
     if (!absenceSheet) return
     setSaving(true)
@@ -303,16 +180,11 @@ export default function AttendancePage() {
       falta_injustificada: 'Falta injustificada',
       falta_justificada_pagada: 'Falta justificada (con goce de sueldo)',
       falta_justificada_no_pagada: 'Falta justificada (sin goce de sueldo)',
-      // feat/mixed-schedule: post-hoc justification — el gerente autorizo
-      // que el mixto no viniera ese dia. No cuenta como falta ni como
-      // descuento; simplemente registra que ese dia no trabajo.
-      dia_libre_autorizado: 'Día libre autorizado',
     }
     const label = typeLabels[absenceForm.type] || absenceForm.type
     const isGrave = absenceForm.type === 'falta_injustificada'
 
-    // FIX: antes se swallowed el error silently. Ahora surface al usuario.
-    const { error: insErr } = await supabase.from('shifts').insert({
+    await supabase.from('shifts').insert({
       tenant_id: tenantId,
       employee_id: emp.id,
       date_str: dateStr,
@@ -324,12 +196,6 @@ export default function AttendancePage() {
       incidents: isGrave ? [{ type: 'grave', note: absenceForm.note || 'Falta injustificada registrada por gerente', ts: new Date().toISOString() }] : [],
       corrections: {},
     })
-    if (insErr) {
-      console.error('[attendance] absence insert error:', insErr)
-      toast.error(`No se pudo registrar la falta: ${insErr.message}`)
-      setSaving(false)
-      return
-    }
 
     await supabase.from('audit_log').insert({
       tenant_id: tenantId, action: 'ABSENCE',
@@ -338,7 +204,6 @@ export default function AttendancePage() {
       success: true
     })
 
-    // Check for 3rd grave incident → alert in audit log
     const graveCount = countGraveIncidents(allShifts, emp.id) + 1
     if (isGrave && graveCount >= 3) {
       await supabase.from('audit_log').insert({
@@ -359,96 +224,12 @@ export default function AttendancePage() {
     await load()
   }
 
-  // Visible suggested absences (not yet dismissed or registered)
   const visibleSuggestions = suggestedAbsences.filter(s =>
     !dismissedSuggestions.has(`${s.emp.id}_${s.dateStr}`)
   )
 
-  // feat/mixed-schedule: reclasificar falta de mixto a dia libre autorizado.
-  // Limpia incidents de tipo 'grave' y actualiza classification. La fila
-  // sigue con status='absent' pero ya no pesa en nomina ni en faltas graves.
-  async function reclassifyAsDayOff(shift) {
-    if (!shift?.id) return
-    if (!confirm('¿Marcar esta falta como "Día libre autorizado"? No se pagará, pero dejará de contar como falta.')) return
-    setSaving(true)
-    const supabase = createClient()
-    const prevIncidents = Array.isArray(shift.incidents) ? shift.incidents : []
-    const cleanIncidents = prevIncidents.filter(i => i?.type !== 'grave')
-    const { error } = await supabase.from('shifts').update({
-      classification: { type: 'dia_libre_autorizado', label: 'Día libre autorizado' },
-      incidents: cleanIncidents,
-      corrections: {
-        ...(shift.corrections || {}),
-        reclassified: {
-          from: shift.classification?.type || null,
-          to: 'dia_libre_autorizado',
-          at: new Date().toISOString(),
-        },
-      },
-    }).eq('id', shift.id)
-    if (error) {
-      console.error('[attendance] reclassify error:', error)
-      toast.error(`No se pudo reclasificar: ${error.message}`)
-      setSaving(false)
-      return
-    }
-    await supabase.from('audit_log').insert({
-      tenant_id: tenantId, action: 'ABSENCE_RECLASS',
-      employee_id: shift.employee_id, employee_name: getEmpName(shift.employee_id),
-      detail: `Falta ${shift.date_str} reclasificada a "Día libre autorizado" (mixto)`,
-      success: true,
-    })
-    toast.success('Día libre autorizado')
-    setSaving(false)
-    await load()
-  }
-
-  // Export filtered shifts to CSV
-  function handleExportCSV(annual = false) {
-    const src = annual ? shifts : filtered // annual = all loaded, filtered = current filter
-    // FIX R6: incluir filas virtuales de vacaciones también en el CSV — en UI
-    // se muestran como días virtuales pero antes no salían en el export. Ahora
-    // alineamos para que el gerente vea en CSV lo mismo que en pantalla.
-    const vacRows = annual ? virtualVacationRows : visibleVacationRows
-    if (src.length === 0 && vacRows.length === 0) { toast.error('No hay registros para exportar'); return }
-    const shiftRows = src.map(s => ({
-      Fecha: s.date_str,
-      Empleado: getEmpName(s.employee_id),
-      Sucursal: (() => { const bid = empBranchMap[s.employee_id]; return bid ? branches.find(b => b.id === bid)?.name || '' : '' })(),
-      Estado: s.status,
-      Clasificación: s.classification?.label || '',
-      Entrada: s.entry_time ? new Date(s.entry_time).toLocaleTimeString('es-MX') : '',
-      Salida: s.exit_time ? new Date(s.exit_time).toLocaleTimeString('es-MX') : '',
-      Horas: s.duration_hours || 0,
-      HorasExtra: (s.corrections && !Array.isArray(s.corrections)) ? (s.corrections.overtime?.hours || 0) : 0,
-      Retardo: s.classification?.type === 'retardo' ? 'Sí' : 'No',
-      Feriado: s.is_holiday ? 'Sí' : 'No',
-      Incidencias: (s.incidents || []).map(i => i.type).join('; '),
-    }))
-    const vacationRows = vacRows.map(v => ({
-      Fecha: v.date_str,
-      Empleado: getEmpName(v.employee_id),
-      Sucursal: (() => { const bid = empBranchMap[v.employee_id]; return bid ? branches.find(b => b.id === bid)?.name || '' : '' })(),
-      Estado: 'VACACIONES',
-      Clasificación: v.classification?.label || '🏖 Vacaciones',
-      Entrada: '—',
-      Salida: '—',
-      Horas: 8.00,
-      HorasExtra: 0,
-      Retardo: 'No',
-      Feriado: 'No',
-      Incidencias: '',
-    }))
-    const rows = [...shiftRows, ...vacationRows].sort((a, b) =>
-      a.Fecha === b.Fecha ? 0 : (a.Fecha < b.Fecha ? 1 : -1)
-    )
-    const filename = `checkpro_asistencia_${filterFrom}_${filterTo}.csv`
-    exportToCSV(rows, filename)
-    toast.success(`${rows.length} registros exportados`)
-  }
-
   return (
-    <div className="p-5 md:p-6 max-w-2xl mx-auto">
+    <div className="p-4 md:p-6 max-w-2xl">
       <div className="mb-5">
         <h1 className="text-2xl font-extrabold text-white">Asistencia</h1>
         <p className="text-gray-500 text-xs font-mono mt-0.5">HISTORIAL DE JORNADAS</p>
@@ -501,17 +282,49 @@ export default function AttendancePage() {
         </div>
       )}
 
-      {/* Export */}
-      <div className="flex gap-2 mb-4 flex-wrap">
-        <button onClick={() => handleExportCSV(false)}
-          className="flex items-center gap-1.5 px-3 py-2 bg-dark-700 border border-dark-border rounded-xl text-xs font-semibold text-white active:bg-dark-600">
-          📥 Exportar filtro (.csv)
-        </button>
-        <button onClick={() => handleExportCSV(true)}
-          className="flex items-center gap-1.5 px-3 py-2 bg-dark-700 border border-dark-border rounded-xl text-xs font-semibold text-white active:bg-dark-600">
-          📦 Exportar todo el período (.csv)
-        </button>
+      {/* ── Exportar XLS ──────────────────────────────────────────────────── */}
+      <div className="relative mb-4">
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => setShowExportMenu(m => !m)}
+            disabled={exporting}
+            className="flex items-center gap-1.5 px-3 py-2 bg-green-500/15 border border-green-500/30 rounded-xl text-xs font-semibold text-green-400 active:bg-green-500/25 disabled:opacity-40">
+            {exporting ? '⏳ Generando...' : '📊 Exportar Excel (.xlsx)'}
+            <span className="text-green-400/60">▾</span>
+          </button>
+        </div>
+
+        {showExportMenu && (
+          <div className="absolute left-0 top-10 z-30 w-72 bg-dark-800 border border-dark-border rounded-xl shadow-xl overflow-hidden">
+            <div className="px-3 py-2 border-b border-dark-border">
+              <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">Selecciona qué exportar</p>
+            </div>
+            <button
+              onClick={() => handleExportXLS('filtered')}
+              className="w-full text-left px-4 py-3 hover:bg-dark-700 active:bg-dark-600 border-b border-dark-border/50">
+              <p className="text-sm font-semibold text-white">📋 Filtro actual</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {filtered.length} registros · {filterFrom} → {filterTo}
+                {filterEmp !== 'all' ? ' · ' + getEmpName(filterEmp) : ''}
+                {filterBranch !== 'all' ? ' · ' + (branches.find(b=>b.id===filterBranch)?.name||'') : ''}
+              </p>
+            </button>
+            <button
+              onClick={() => handleExportXLS('all')}
+              className="w-full text-left px-4 py-3 hover:bg-dark-700 active:bg-dark-600">
+              <p className="text-sm font-semibold text-white">📦 Todo el período cargado</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {shifts.length} registros · {filterFrom} → {filterTo} · todos los empleados y sucursales
+              </p>
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Overlay para cerrar el menú */}
+      {showExportMenu && (
+        <div className="fixed inset-0 z-20" onClick={() => setShowExportMenu(false)} />
+      )}
 
       {/* Filters */}
       <div className="card mb-4 space-y-3">
@@ -535,7 +348,6 @@ export default function AttendancePage() {
               <option value="closed">Cerradas</option>
               <option value="incident">Incidencias</option>
               <option value="absent">Faltas</option>
-              <option value="vacation">Vacaciones</option>
             </select>
           </div>
         </div>
@@ -555,74 +367,22 @@ export default function AttendancePage() {
 
       {loading ? <p className="text-gray-500 font-mono text-sm">Cargando...</p> : (
         <>
-          <p className="text-xs text-gray-600 font-mono mb-3">
-            {combined.length} registro(s)
-            {visibleVacationRows.length > 0 && (
-              <span className="ml-2 text-purple-400">· {visibleVacationRows.length} día(s) de vacaciones</span>
-            )}
-          </p>
+          <p className="text-xs text-gray-600 font-mono mb-3">{filtered.length} registro(s)</p>
           <div className="space-y-2">
-            {combined.length === 0 && <div className="card text-center py-10 text-gray-500 font-mono text-sm">Sin registros en este período</div>}
-            {combined.map(s => {
-              // ── Fila VIRTUAL de vacaciones ───────────────────────────────
-              if (s._virtual === 'vacation') {
-                const emp = emps.find(e => e.id === s.employee_id)
-                const bid = empBranchMap[s.employee_id]
-                const bn = bid ? branches.find(b => b.id === bid)?.name : null
-                return (
-                  <div key={s.id}
-                    className="card-sm border-l-4 border-l-purple-400 bg-purple-500/10">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-sm text-white">{emp?.name || s.employee_id}</span>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/20 border border-purple-500/30 text-purple-300">
-                            🏖 Vacaciones
-                          </span>
-                          {s.period?.status === 'completed' && (
-                            <span className="px-1.5 py-0.5 bg-dark-700 border border-dark-border rounded-full text-gray-400 text-[9px] font-mono">
-                              completado
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-xs text-gray-500 font-mono mt-1">
-                          {s.date_str}
-                          {s.period?.start_date && s.period?.end_date && (
-                            <> · Periodo {s.period.start_date} → {s.period.end_date}</>
-                          )}
-                        </div>
-                        <div className="text-xs text-purple-300/80 mt-0.5">{s.classification.label}</div>
-                        {bn && <div className="text-[10px] text-gray-600 font-mono mt-0.5">🏢 {bn}</div>}
-                      </div>
-                    </div>
-                  </div>
-                )
-              }
-
-              // ── Fila normal de shift ───────────────────────────────
+            {filtered.length === 0 && <div className="card text-center py-10 text-gray-500 font-mono text-sm">Sin registros en este período</div>}
+            {filtered.map(s => {
               const bid = empBranchMap[s.employee_id]
               const bn = bid ? branches.find(b => b.id === bid)?.name : null
               const graveCount = s.status === 'absent' && s.classification?.type === 'falta_injustificada'
                 ? countGraveIncidents(allShifts, s.employee_id)
                 : 0
-              // Si el empleado esta cubriendo a otro, resaltar en cyan
-              const isCovering = !!s.covering_employee_id
               return (
-                <div key={s.id}
-                  className={`card-sm
-                    ${s.status==='incident'||s.status==='absent' ? 'border-red-500/20' : ''}
-                    ${isCovering ? 'border-l-4 border-l-cyan-400 bg-cyan-500/10' : ''}
-                  `}>
+                <div key={s.id} className={`card-sm ${s.status==='incident'||s.status==='absent'?'border-red-500/20':''}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-sm text-white">{getEmpName(s.employee_id)}</span>
                         <ShiftBadge status={s.status} classification={s.classification} />
-                        {isCovering && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/20 border border-cyan-500/30 text-cyan-300">
-                            🔄 Cobertura
-                          </span>
-                        )}
                         {s.is_holiday && <span className="badge-orange text-[9px]">FERIADO ×3</span>}
                         {s.corrections?.overtime?.hours > 0 && (
                           <span className="px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-400 text-[9px] font-mono">
@@ -640,7 +400,7 @@ export default function AttendancePage() {
                       )}
                       {bn && <div className="text-[10px] text-gray-600 font-mono mt-0.5">🏢 {bn}</div>}
                       {s.covering_employee_id && (
-                        <div className="text-xs text-cyan-300 font-mono mt-0.5">Cubriendo: {getEmpName(s.covering_employee_id)}</div>
+                        <div className="text-xs text-blue-400 font-mono mt-0.5">Cubriendo: {getEmpName(s.covering_employee_id)}</div>
                       )}
                       {s.incidents?.length > 0 && s.incidents.map((inc,i) => (
                         <div key={i} className="text-xs text-red-400 mt-1">🚩 {inc.type} — {inc.note}</div>
@@ -651,15 +411,9 @@ export default function AttendancePage() {
                           {graveCount >= 3 && ' — ALERTA GENERADA'}
                         </div>
                       )}
-                      {(() => {
-                        // FIX R6: corrections puede ser array legacy o objeto nuevo con .edits
-                        const edits = Array.isArray(s.corrections)
-                          ? s.corrections
-                          : (Array.isArray(s.corrections?.edits) ? s.corrections.edits : [])
-                        return edits.length > 0 ? (
-                          <div className="text-xs text-yellow-500 mt-0.5">✏️ {edits.length} corrección(es)</div>
-                        ) : null
-                      })()}
+                      {Array.isArray(s.corrections) && s.corrections.length > 0 && (
+                        <div className="text-xs text-yellow-500 mt-0.5">✏️ {s.corrections.length} corrección(es)</div>
+                      )}
                     </div>
                     {s.status !== 'absent' && (
                       <div className="flex gap-1.5 shrink-0">
@@ -669,17 +423,6 @@ export default function AttendancePage() {
                           <button onClick={() => { setFlagSheet(s); setFlagForm({ type:'olvido_salida', note:'' }) }}
                             className="p-2 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400 active:bg-red-500/20">🚩</button>
                         )}
-                      </div>
-                    )}
-                    {/* feat/mixed-schedule: justificar post-hoc falta de mixto como dia libre */}
-                    {s.status === 'absent'
-                      && (emps.find(e => e.id === s.employee_id)?.is_mixed)
-                      && s.classification?.type !== 'dia_libre_autorizado' && (
-                      <div className="shrink-0">
-                        <button onClick={() => reclassifyAsDayOff(s)} disabled={saving}
-                          className="px-2 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg text-[10px] text-blue-300 active:bg-blue-500/20 disabled:opacity-50">
-                          Día libre
-                        </button>
                       </div>
                     )}
                   </div>
@@ -698,46 +441,18 @@ export default function AttendancePage() {
             <div className="px-5 pb-10">
               <h3 className="text-lg font-bold text-white mb-1">Registrar Falta</h3>
               <p className="text-xs text-gray-500 font-mono mb-4">{absenceSheet.emp.name} · {absenceSheet.dateStr}</p>
-
               <div className="mb-4">
                 <p className="label mb-2">Tipo de falta</p>
                 <div className="space-y-2">
                   {[
-                    {
-                      value: 'falta_injustificada',
-                      label: 'Injustificada',
-                      desc: 'Sin causa válida. No se paga. Se marca como falta grave.',
-                      color: 'red'
-                    },
-                    {
-                      value: 'falta_justificada_pagada',
-                      label: 'Justificada — con goce de sueldo',
-                      desc: 'Falta con justificante válido. Se paga el día.',
-                      color: 'green'
-                    },
-                    {
-                      value: 'falta_justificada_no_pagada',
-                      label: 'Justificada — sin goce de sueldo',
-                      desc: 'Falta con justificante pero sin pago del día.',
-                      color: 'orange'
-                    },
-                    // feat/mixed-schedule: post-hoc para mixtos cuyo gerente
-                    // autorizo el descanso despues del hecho. No se paga, no
-                    // es grave. Se ve igual en historial.
-                    ...(absenceSheet.emp.is_mixed ? [{
-                      value: 'dia_libre_autorizado',
-                      label: 'Día libre autorizado',
-                      desc: 'Autorizaste que no viniera ese día. No cuenta como falta y no afecta su nómina.',
-                      color: 'blue'
-                    }] : []),
+                    { value: 'falta_injustificada', label: 'Injustificada', desc: 'Sin causa válida. No se paga. Se marca como falta grave.', color: 'red' },
+                    { value: 'falta_justificada_pagada', label: 'Justificada — con goce de sueldo', desc: 'Falta con justificante válido. Se paga el día.', color: 'green' },
+                    { value: 'falta_justificada_no_pagada', label: 'Justificada — sin goce de sueldo', desc: 'Falta con justificante pero sin pago del día.', color: 'orange' },
                   ].map(opt => (
                     <label key={opt.value}
                       className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors
                         ${absenceForm.type === opt.value
-                          ? opt.color === 'red' ? 'bg-red-500/10 border-red-500/30'
-                            : opt.color === 'green' ? 'bg-green-500/10 border-green-500/30'
-                            : opt.color === 'blue' ? 'bg-blue-500/10 border-blue-500/30'
-                            : 'bg-orange-500/10 border-orange-500/30'
+                          ? opt.color === 'red' ? 'bg-red-500/10 border-red-500/30' : opt.color === 'green' ? 'bg-green-500/10 border-green-500/30' : 'bg-orange-500/10 border-orange-500/30'
                           : 'bg-dark-700 border-dark-border'
                         }`}>
                       <input type="radio" name="absenceType" value={opt.value}
@@ -752,26 +467,19 @@ export default function AttendancePage() {
                   ))}
                 </div>
               </div>
-
               {absenceForm.type === 'falta_injustificada' && (
                 <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
                   <p className="text-red-400 text-xs font-bold">⚠ Falta grave</p>
-                  <p className="text-red-400/70 text-xs mt-0.5">
-                    A las 3 faltas graves acumuladas se genera una alerta automática. Esto puede constituir causal de despido sin responsabilidad (Art. 47 LFT).
-                  </p>
+                  <p className="text-red-400/70 text-xs mt-0.5">A las 3 faltas graves acumuladas se genera una alerta automática. Esto puede constituir causal de despido sin responsabilidad (Art. 47 LFT).</p>
                 </div>
               )}
-
               <div className="mb-4">
                 <label className="label">Nota / Justificante</label>
                 <input className="input" placeholder="Descripción o referencia del justificante..."
-                  value={absenceForm.note}
-                  onChange={e => setAbsenceForm(f => ({ ...f, note: e.target.value }))} />
+                  value={absenceForm.note} onChange={e => setAbsenceForm(f => ({ ...f, note: e.target.value }))} />
               </div>
-
               <div className="flex gap-2">
-                <button onClick={saveAbsence} disabled={saving}
-                  className="btn-danger flex-1">
+                <button onClick={saveAbsence} disabled={saving} className="btn-danger flex-1">
                   {saving ? 'Guardando...' : 'Registrar falta'}
                 </button>
                 <button onClick={() => { setAbsenceSheet(null) }} className="btn-ghost">Cancelar</button>

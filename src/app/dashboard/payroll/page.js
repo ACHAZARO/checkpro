@@ -1,9 +1,8 @@
 'use client'
 // src/app/dashboard/payroll/page.js
 import { useState, useEffect, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate, dayKey, DAY_FL, managerFreeScheduleAlerts } from '@/lib/utils'
+import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate, dayKey, DAY_FL } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 // Default legend si el usuario no guardo uno custom (espejo de settings/DEFAULT_LEYENDA)
@@ -293,7 +292,6 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
 
 // ── Component ────────────────────────────────────────────────────────────────
 export default function PayrollPage() {
-  const router = useRouter()
   // Raw data (no filtering yet)
   const [allEmps, setAllEmps] = useState([])
   const [shifts, setShifts] = useState([])
@@ -314,11 +312,7 @@ export default function PayrollPage() {
   const [closing, setClosing] = useState(false)
   const [printHTML, setPrintHTML] = useState(null)
   const [resolvingId, setResolvingId] = useState(null)
-  // feat/candados — estado para los candados del corte:
-  //   - nextWeekPlan: weekly_plans row para la semana siguiente (null = no planificada → bloquea)
-  //   - openIncidencias: incidencias status='open' de mi sucursal (>0 → bloquea)
-  const [nextWeekPlan, setNextWeekPlan] = useState(null)
-  const [openIncidencias, setOpenIncidencias] = useState([])
+  const [exportingXLS, setExportingXLS] = useState(false)
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -359,41 +353,6 @@ export default function PayrollPage() {
     setShifts(shiftData || [])
     setCuts(cutData || [])
     setVacPeriods(vacData || [])
-
-    // feat/candados — weekly_plans para la semana que empieza al día siguiente del corte actual.
-    // weekRange devuelve hasta el día de cierre (`dom` por defecto) → la próxima semana arranca en +1.
-    // Si ya existe una fila en weekly_plans para ese lunes/día de arranque, el candado se libera.
-    try {
-      // Calcular fecha de próximo inicio en base al tenant config (closingDay)
-      const closingDayKey = (tenant?.config?.weekClosingDay) || 'dom'
-      const rangeNow = weekRange(new Date(), closingDayKey)
-      const nextStart = new Date(rangeNow.end)
-      nextStart.setDate(nextStart.getDate() + 1) // día siguiente al cierre
-      const nextStartIso = isoDate(nextStart)
-      const { data: wp } = await supabase
-        .from('weekly_plans')
-        .select('id, start_date, end_date, title, saved_by_name, saved_at')
-        .eq('tenant_id', prof.tenant_id)
-        .eq('start_date', nextStartIso)
-        .maybeSingle()
-      setNextWeekPlan(wp || null)
-    } catch (e) {
-      // Si la tabla no existe aún (migración pendiente), no bloqueamos.
-      setNextWeekPlan({ _stub: true })
-    }
-
-    // feat/candados — incidencias abiertas del tenant (de MI sucursal).
-    try {
-      const { data: incs } = await supabase
-        .from('incidencias')
-        .select('id, branch_id, date_str, kind, status, employee_name')
-        .eq('tenant_id', prof.tenant_id)
-        .eq('status', 'open')
-      setOpenIncidencias(incs || [])
-    } catch (e) {
-      setOpenIncidencias([])
-    }
-
     setLoading(false)
   }, [])
 
@@ -438,17 +397,6 @@ export default function PayrollPage() {
   )
   const incidentShifts = weekShifts.filter(s => s.status === 'incident')
   const hasUnresolved = incidentShifts.length > 0
-
-  // feat/mixed-schedule: flag del tenant. El Paso 3 del wizard (planificar
-  // próxima semana) solo aplica si la empresa activó horarios mixtos en
-  // Configuración. Si no, el flujo se queda en 2 pasos (incidencias → corte).
-  const mixedEnabled = !!(tenantData?.config?.mixedSchedule?.enabled)
-  const hasMixedEmps = emps.some(e => e.is_mixed)
-  // Paso actual del wizard:
-  //   1 = revisión de incidencias (hay pendientes)
-  //   2 = generar corte (ya sin incidencias, aún no se imprime)
-  //   3 = planificar próxima semana (ya se generó/imprimió el corte)
-  const wizardStep = hasUnresolved ? 1 : (printHTML ? 3 : 2)
 
   // FIX BUG: solo se permite cerrar el día configurado por la sucursal.
   // dayKey() usa hora local (no UTC) — el gerente cierra cuando es ese día
@@ -504,20 +452,6 @@ export default function PayrollPage() {
     if (hasUnresolved) {
       toast.error(`Resuelve las ${incidentShifts.length} incidencia(s) antes de cerrar la semana`)
       return
-    }
-    // feat/candado-incidencias: no permitir corte si hay incidencias abiertas en la pestaña dedicada.
-    const myIncs = openIncidencias.filter(i => !i.branch_id || i.branch_id === myBranchId)
-    if (myIncs.length > 0) {
-      toast.error(`Revisa y resuelve ${myIncs.length} incidencia(s) en la pestaña Incidencias antes de cortar`)
-      return
-    }
-    // feat/candado-planificacion: no permitir corte si la próxima semana no está guardada.
-    if (!nextWeekPlan || nextWeekPlan._stub) {
-      if (!nextWeekPlan) {
-        toast.error('Primero planifica la próxima semana (Panel → Planificador → Guardar).')
-        return
-      }
-      // _stub = tabla weekly_plans no migrada aún; no bloqueamos para no romper prod.
     }
     // FIX BUG: bloquear cierre si hoy no es el dia de corte de la sucursal.
     if (!canCloseToday) {
@@ -586,12 +520,33 @@ export default function PayrollPage() {
     setPrintHTML(buildReportHTML(cut, ws, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered'))
   }
 
+  // ── Exportar XLS del corte ───────────────────────────────────────────────
+  async function handleExportPayrollXLS(cut, cutShifts) {
+    setExportingXLS(true)
+    try {
+      const { generatePayrollXLSX } = await import('@/lib/export-xlsx')
+      generatePayrollXLSX({
+        cut,
+        weekShifts: cutShifts,
+        emps,
+        branchName: cfg?.branchName || myBranchName,
+        empWeekSummaryFn: empWeekSummary,
+        coveragePayMode: cfg?.coveragePayMode ?? 'covered',
+      })
+      toast.success('✅ Excel generado correctamente')
+    } catch (err) {
+      console.error('[export-payroll-xlsx]', err)
+      toast.error('Error al generar Excel: ' + err.message)
+    }
+    setExportingXLS(false)
+  }
+
   if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando...</div>
 
   // Aviso si no hay ninguna sucursal configurada para este tenant.
   if (allBranches.length === 0) {
     return (
-      <div className="p-5 md:p-6 max-w-2xl mx-auto">
+      <div className="p-4 md:p-6 max-w-2xl">
         <h1 className="text-2xl font-extrabold text-white mb-2">Nómina</h1>
         <div className="card text-center py-10">
           <div className="text-4xl mb-3">🏢</div>
@@ -603,7 +558,7 @@ export default function PayrollPage() {
   }
 
   return (
-    <div className="p-5 md:p-6 max-w-2xl mx-auto">
+    <div className="p-4 md:p-6 max-w-2xl">
       <div className="mb-5">
         <h1 className="text-2xl font-extrabold text-white">Nómina</h1>
         <p className="text-gray-500 text-xs font-mono mt-0.5">
@@ -613,71 +568,6 @@ export default function PayrollPage() {
           🏢 {myBranchName || 'Sucursal sin nombre'} · CORTE: {DAY_FL[closingDay]}
         </p>
       </div>
-
-      {/* ── Wizard de corte semanal (3 pasos, solo si hay mixtos activos) ──── */}
-      {/* feat/mixed-schedule: Cuando hay horarios mixtos, el corte se vuelve un
-          flujo de 3 pasos en lugar de una acción suelta. Así el gerente no
-          olvida planificar la próxima semana después de cerrar el corte, que
-          es el error más común reportado en la fase de diseño. */}
-      {mixedEnabled && hasMixedEmps && (
-        <div className="card mb-4 bg-brand-400/5 border border-brand-400/20">
-          <p className="text-[10px] font-mono text-brand-400/70 uppercase tracking-wider mb-2">
-            📋 Flujo del corte semanal
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              { n: 1, label: 'Revisar incidencias', icon: '🚩' },
-              { n: 2, label: 'Generar corte', icon: '💰' },
-              { n: 3, label: 'Planificar semana', icon: '📅' },
-            ].map(step => {
-              const isCurrent = step.n === wizardStep
-              const isDone = step.n < wizardStep
-              return (
-                <div
-                  key={step.n}
-                  className={
-                    'rounded-lg px-2 py-2 text-center transition ' +
-                    (isCurrent
-                      ? 'bg-brand-400/20 border border-brand-400/50'
-                      : isDone
-                        ? 'bg-green-500/10 border border-green-500/30'
-                        : 'bg-dark-700/40 border border-dark-border')
-                  }
-                >
-                  <div className="text-lg leading-tight">
-                    {isDone ? '✅' : step.icon}
-                  </div>
-                  <div className={
-                    'text-[9px] font-mono uppercase tracking-wider mt-0.5 ' +
-                    (isCurrent
-                      ? 'text-brand-400'
-                      : isDone
-                        ? 'text-green-400'
-                        : 'text-gray-500')
-                  }>
-                    Paso {step.n}
-                  </div>
-                  <div className={
-                    'text-[10px] mt-0.5 ' +
-                    (isCurrent
-                      ? 'text-white font-bold'
-                      : isDone
-                        ? 'text-gray-400'
-                        : 'text-gray-600')
-                  }>
-                    {step.label}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-          <p className="text-[10px] text-gray-500 font-mono mt-2 leading-relaxed">
-            {wizardStep === 1 && '⚠ Resuelve las incidencias antes de generar el corte.'}
-            {wizardStep === 2 && '✓ Incidencias resueltas. Ya puedes generar el corte semanal.'}
-            {wizardStep === 3 && '✓ Corte generado. Ahora planifica los horarios de la próxima semana para los empleados con horario mixto.'}
-          </p>
-        </div>
-      )}
 
       {/* ── Selector de sucursal (solo propietario con >1 sucursal) ────────── */}
       {isOwner && allBranches.length > 1 && (
@@ -779,20 +669,11 @@ export default function PayrollPage() {
           const vac = vacationPayForWeek(emp, vacByEmp[emp.id] || [], weekStartStr, weekEndStr)
           const grossWithVac = s.grossPay + vac.totalVacationPay
           const netWithVac = Math.max(0, grossWithVac - s.retardoDesc - s.incidentDesc)
-          // Alertas de gerente libre (mínimos de días/horas, jornadas abiertas)
-          const freeAlerts = emp.free_schedule ? managerFreeScheduleAlerts(emp, weekShifts) : []
-          const hasFreeErrors = freeAlerts.some(a => a.level === 'error')
-          const hasFreeWarns = freeAlerts.some(a => a.level === 'warn')
           return (
-            <div key={emp.id} className={`card ${hasFreeErrors ? 'border-red-500/40' : ''}`}>
+            <div key={emp.id} className="card">
               <div className="flex items-start justify-between mb-2">
                 <div>
-                  <div className="font-bold text-white text-sm">
-                    {emp.name}
-                    {emp.free_schedule && (
-                      <span className="ml-2 px-1.5 py-0.5 bg-purple-500/10 border border-purple-500/30 rounded text-purple-300 text-[9px] font-mono uppercase tracking-wider">horario libre</span>
-                    )}
-                  </div>
+                  <div className="font-bold text-white text-sm">{emp.name}</div>
                   <div className="text-xs text-gray-500">{emp.department} · ${monthlyToHourly(emp).toFixed(2)}/h</div>
                 </div>
                 <div className="text-right">
@@ -803,7 +684,7 @@ export default function PayrollPage() {
               <div className="flex flex-wrap gap-3 text-xs text-gray-500 font-mono mb-2">
                 <span>{s.totalH}h trabajadas</span>
                 {s.otHours > 0 && <span className="text-blue-400">+{s.otHours}h extra (×2)</span>}
-                <span>Bruto: ${grossWithVac.toFixed(2)}{emp.free_schedule ? ' (sueldo fijo)' : ''}</span>
+                <span>Bruto: ${grossWithVac.toFixed(2)}</span>
                 {s.retardoDesc > 0 && <span className="text-orange-400">-${s.retardoDesc.toFixed(2)} retardos</span>}
                 {s.incidentDesc > 0 && <span className="text-red-400">-${s.incidentDesc.toFixed(2)} incid.</span>}
                 {vac.daysInRange > 0 && (
@@ -813,22 +694,6 @@ export default function PayrollPage() {
                   <span className="text-purple-300">💰 comp. ${vac.compensationPay.toFixed(2)}</span>
                 )}
               </div>
-              {freeAlerts.length > 0 && (
-                <div className="mb-2 space-y-1">
-                  {freeAlerts.map((a, i) => (
-                    <div
-                      key={i}
-                      className={`px-2 py-1 rounded text-[11px] font-semibold ${
-                        a.level === 'error'
-                          ? 'bg-red-500/10 border border-red-500/30 text-red-400'
-                          : 'bg-orange-500/10 border border-orange-500/30 text-orange-400'
-                      }`}
-                    >
-                      {a.level === 'error' ? '⛔' : '⚠️'} {a.message}
-                    </div>
-                  ))}
-                </div>
-              )}
               <div className="flex gap-1.5 flex-wrap">
                 {s.retardos > 0 && <span className="badge-orange">{s.retardos} retardo{s.retardos > 1 ? 's' : ''}</span>}
                 {s.incidents > 0 && <span className="badge-red">{s.incidents} incidencia{s.incidents > 1 ? 's' : ''}</span>}
@@ -843,7 +708,7 @@ export default function PayrollPage() {
                     💰 Compensación ×2 = ${vac.compensationPay.toFixed(0)}
                   </span>
                 )}
-                {s.retardos === 0 && s.incidents === 0 && s.otHours === 0 && vac.daysInRange === 0 && vac.compensationPay === 0 && !hasFreeErrors && !hasFreeWarns && (
+                {s.retardos === 0 && s.incidents === 0 && s.otHours === 0 && vac.daysInRange === 0 && vac.compensationPay === 0 && (
                   <span className="badge-green">Sin incidencias ✓</span>
                 )}
               </div>
@@ -853,52 +718,41 @@ export default function PayrollPage() {
       </div>
 
       {/* ── Corte semanal ─────────────────────────────────────────────────── */}
-      {(() => {
-        const myIncsCount = openIncidencias.filter(i => !i.branch_id || i.branch_id === myBranchId).length
-        const planningMissing = !nextWeekPlan || nextWeekPlan._stub === true ? !nextWeekPlan : false
-        const blockedByPlan = !nextWeekPlan && nextWeekPlan !== null // planningMissing solamente si la tabla existe y no hay row
-        const planBlocks = nextWeekPlan === null // true cuando no hay row (pero la tabla existe)
-        const disabledByCandados = hasUnresolved || !canCloseToday || myIncsCount > 0 || planBlocks
-        return (
-          <div className={`card mb-4 ${disabledByCandados ? 'opacity-60' : ''}`}>
-            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Corte semanal</p>
-            {hasUnresolved && (
-              <div className="px-3 py-2 mb-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-xs font-semibold">
-                🔒 Resuelve todas las incidencias del listado arriba para habilitar el corte
-              </div>
-            )}
-            {myIncsCount > 0 && (
-              <div className="px-3 py-2 mb-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-xs font-semibold">
-                📋 Hay {myIncsCount} incidencia(s) abierta(s) en la pestaña <a href="/dashboard/incidencias" className="underline">Incidencias</a>. Resuélvelas antes de cortar.
-              </div>
-            )}
-            {planBlocks && (
-              <div className="px-3 py-2 mb-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-300 text-xs font-semibold">
-                🗓 Primero planifica la próxima semana en <a href="/dashboard/planning" className="underline">Planificador</a> y presiona <span className="text-white">Guardar plan</span>.
-              </div>
-            )}
-            {!canCloseToday && !hasUnresolved && (
-              <div className="px-3 py-2 mb-3 bg-orange-500/10 border border-orange-500/20 rounded-lg text-orange-400 text-xs font-semibold">
-                🗓 El corte de <span className="text-white">{myBranchName || 'esta sucursal'}</span> solo se genera los {DAY_FL[closingDay]}. Hoy es {DAY_FL[todayKey]}.
-              </div>
-            )}
-            {nextWeekPlan && !nextWeekPlan._stub && (
-              <div className="px-3 py-2 mb-3 bg-brand-400/10 border border-brand-400/30 rounded-lg text-brand-300 text-xs font-semibold">
-                ✓ Próxima semana planificada: {nextWeekPlan.title || nextWeekPlan.start_date}
-              </div>
-            )}
-            <div className="mb-3">
-              <label className="label">Notas del corte (opcional)</label>
-              <input className="input text-sm" placeholder="Observaciones de la semana..."
-                value={cutNote} onChange={e => setCutNote(e.target.value)} disabled={disabledByCandados} />
-            </div>
-            <button onClick={closeWeek} disabled={closing || disabledByCandados}
-              className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed">
-              {closing ? '⏳ Cerrando...' : !canCloseToday ? `🔒 Disponible los ${DAY_FL[closingDay]}` : '🖨️ Cerrar semana e imprimir reporte'}
-            </button>
+      <div className={`card mb-4 ${hasUnresolved || !canCloseToday ? 'opacity-60' : ''}`}>
+        <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Corte semanal</p>
+        {hasUnresolved && (
+          <div className="px-3 py-2 mb-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-xs font-semibold">
+            🔒 Resuelve todas las incidencias para habilitar el corte
           </div>
-        )
-      })()}
+        )}
+        {!canCloseToday && !hasUnresolved && (
+          <div className="px-3 py-2 mb-3 bg-orange-500/10 border border-orange-500/20 rounded-lg text-orange-400 text-xs font-semibold">
+            🗓 El corte de <span className="text-white">{myBranchName || 'esta sucursal'}</span> solo se genera los {DAY_FL[closingDay]}. Hoy es {DAY_FL[todayKey]}.
+          </div>
+        )}
+        <div className="mb-3">
+          <label className="label">Notas del corte (opcional)</label>
+          <input className="input text-sm" placeholder="Observaciones de la semana..."
+            value={cutNote} onChange={e => setCutNote(e.target.value)} disabled={hasUnresolved || !canCloseToday} />
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={closeWeek} disabled={closing || hasUnresolved || !canCloseToday}
+            className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed flex-1">
+            {closing ? '⏳ Cerrando...' : !canCloseToday ? `🔒 Disponible los ${DAY_FL[closingDay]}` : '🖨️ Cerrar semana e imprimir reporte'}
+          </button>
+          {weekShifts.length > 0 && (
+            <button
+              onClick={() => handleExportPayrollXLS(
+                { start_date: weekStartStr, end_date: weekEndStr, closed_by_name: 'Gerente', notes: cutNote },
+                weekShifts
+              )}
+              disabled={exportingXLS}
+              className="flex items-center gap-1.5 px-3 py-2 bg-green-500/15 border border-green-500/30 rounded-xl text-xs font-semibold text-green-400 active:bg-green-500/25 disabled:opacity-40 shrink-0">
+              {exportingXLS ? '⏳' : '📊 Excel'}
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* ── Cortes anteriores ─────────────────────────────────────────────── */}
       {cutsForBranch.length > 0 && (
@@ -913,10 +767,18 @@ export default function PayrollPage() {
                   <div className="font-semibold text-sm text-white">{c.start_date} → {c.end_date}</div>
                   <div className="text-xs text-gray-500">{c.closed_by_name} · {c.notes || 'Sin notas'}</div>
                 </div>
-                <button onClick={() => openReport(c)}
-                  className="px-3 py-2 bg-dark-700 border border-dark-border rounded-xl text-xs font-bold text-white active:bg-dark-600 shrink-0">
-                  🖨️
-                </button>
+                <div className="flex gap-1.5 shrink-0">
+                  <button onClick={() => openReport(c)}
+                    className="px-3 py-2 bg-dark-700 border border-dark-border rounded-xl text-xs font-bold text-white active:bg-dark-600">
+                    🖨️
+                  </button>
+                  <button
+                    onClick={() => handleExportPayrollXLS(c, shifts.filter(s => c.shift_ids?.includes(s.id)))}
+                    disabled={exportingXLS}
+                    className="px-3 py-2 bg-green-500/15 border border-green-500/30 rounded-xl text-xs font-bold text-green-400 active:bg-green-500/25 disabled:opacity-40">
+                    📊
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -931,16 +793,6 @@ export default function PayrollPage() {
               className="flex items-center gap-2 px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl">
               🖨️ Imprimir / Guardar PDF
             </button>
-            {/* feat/mixed-schedule: Paso 3 del wizard. Tras imprimir el corte,
-                el gerente se va directo a planificar la semana siguiente. Solo
-                aparece si la empresa tiene el modo mixto activado y al menos
-                un empleado mixto en esta sucursal. */}
-            {mixedEnabled && hasMixedEmps && (
-              <button onClick={() => router.push('/dashboard/planning')}
-                className="flex items-center gap-2 px-4 py-2 bg-brand-500/20 border border-brand-400/50 text-brand-400 text-sm font-bold rounded-xl active:bg-brand-500/30">
-                📅 Paso 3: Planificar próxima semana →
-              </button>
-            )}
             <button onClick={() => setPrintHTML(null)}
               className="flex items-center gap-2 px-4 py-2 bg-dark-700 border border-dark-border text-white text-sm font-semibold rounded-xl">
               ✕ Cerrar
