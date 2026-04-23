@@ -84,6 +84,12 @@ export function classifyEntry(schedule, entryTime, toleranceMinutes, tz = DEFAUL
   return { type:'retardo', label:`Retardo (${diff} min)` }
 }
 
+// NUEVO — gerentes con horario libre: siempre "libre", nunca retardo/no_laboral.
+// Sólo registra checada para tracking; no penaliza ni descuenta.
+export function classifyEntryFree() {
+  return { type:'libre', label:'Horario libre' }
+}
+
 // NUEVO — clasificación para mixtos contra su shift_plan del día.
 // plan = { entry_time_str: "HH:MM", duration_hours: N } del planificador.
 // Si no hay plan → tipo "no_planificado" (se registra pero queda pendiente de revisión).
@@ -277,6 +283,26 @@ export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMo
     s.classification?.type === 'falta_justificada_pagada' ||
     s.classification?.type === 'falta_justificada_no_pagada'
   ).length
+
+  // feat/gerente-libre: nómina íntegra, sin descuentos por retardo/incidentes.
+  if (employee.free_schedule) {
+    const weeklyGross = toMonthlySalary(employee) / 4.33
+    return {
+      totalH: parseFloat(totalH.toFixed(2)),
+      otHours: 0,
+      retardos: 0,
+      incidents: 0,
+      faltasInjustificadas: 0,
+      faltasJustificadas: 0,
+      grossPay: weeklyGross,
+      retardoDesc: 0,
+      incidentDesc: 0,
+      netPay: weeklyGross,
+      shifts: mine,
+      free_schedule: true,
+    }
+  }
+
   const empMap = new Map(allEmployees.map(e => [e.id, e]))
   let grossPay = 0
   closed.forEach(s => {
@@ -293,6 +319,46 @@ export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMo
     netPay: Math.max(0, grossPay - retardoDesc - incidentDesc),
     shifts: mine
   }
+}
+
+// NUEVO — alertas de gerente con horario libre.
+// Retorna lista de alertas { level: 'warn'|'error', code, message }.
+// - días_trabajados_sem: # de días distintos con alguna checada en la semana
+// - horas_trabajadas_sem: suma de duration_hours de shifts cerrados en la semana
+export function managerFreeScheduleAlerts(employee, weekShifts) {
+  if (!employee?.free_schedule) return []
+  const mine = (weekShifts || []).filter(s => s.employee_id === employee.id)
+  const closed = mine.filter(s => ['closed','incident'].includes(s.status))
+  const daysSet = new Set(closed.map(s => s.date_str).filter(Boolean))
+  const daysWorked = daysSet.size
+  const hoursWorked = closed.reduce((a, s) => a + Number(s.duration_hours || 0), 0)
+  const alerts = []
+  const minDays = Number(employee.free_min_days_week ?? 0)
+  const minHours = Number(employee.free_min_hours_week ?? 0)
+  if (minDays > 0 && daysWorked < minDays) {
+    alerts.push({
+      level: daysWorked === 0 ? 'error' : 'warn',
+      code: 'free_days_below',
+      message: `Sólo checó ${daysWorked} día(s) esta semana (mínimo ${minDays}).`,
+    })
+  }
+  if (minHours > 0 && hoursWorked < minHours) {
+    alerts.push({
+      level: hoursWorked === 0 ? 'error' : 'warn',
+      code: 'free_hours_below',
+      message: `Trabajó ${hoursWorked.toFixed(1)}h esta semana (mínimo ${minHours}h).`,
+    })
+  }
+  // Alerta implícita si no hay checada de salida en un día con entrada.
+  const openShifts = mine.filter(s => s.status === 'open').length
+  if (openShifts > 0) {
+    alerts.push({
+      level: 'warn',
+      code: 'free_open_shifts',
+      message: `${openShifts} jornada(s) quedaron sin cierre (sin salida).`,
+    })
+  }
+  return alerts
 }
 
 export function countGraveIncidents(allShifts, employeeId) {

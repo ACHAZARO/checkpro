@@ -40,6 +40,13 @@ function addDaysIso(iso, n) {
   return localDateISO(dt)
 }
 
+const MESES_CORTOS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+function prettyRange(startIso, endIso) {
+  const [,sm,sd] = startIso.split('-').map(Number)
+  const [,em,ed] = endIso.split('-').map(Number)
+  return `${sd} ${MESES_CORTOS[sm-1]} - ${ed} ${MESES_CORTOS[em-1]}`
+}
+
 export default function PlanningPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
@@ -49,6 +56,8 @@ export default function PlanningPage() {
   // plans: key `${empId}|${dateStr}` → { entry_time_str, duration_hours, exit_time_str }
   const [plans, setPlans] = useState({})
   const [saving, setSaving] = useState(false)
+  const [savedMeta, setSavedMeta] = useState(null) // weekly_plans row para la semana actual
+  const [profile, setProfile] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -62,6 +71,7 @@ export default function PlanningPage() {
       router.push('/dashboard')
       return
     }
+    setProfile(prof)
     const { data: ten } = await supabase.from('tenants').select('*').eq('id', prof.tenant_id).single()
     if (!ten?.config?.mixedSchedule?.enabled) {
       toast.error('Activa "Horario mixto" en Configuración primero')
@@ -69,6 +79,16 @@ export default function PlanningPage() {
       return
     }
     setTenant(ten)
+
+    // Cargar metadata de "planificación guardada" (weekly_plans) para esta semana
+    const wkEnd = addDaysIso(weekStart, 6)
+    const { data: wp } = await supabase
+      .from('weekly_plans')
+      .select('id, start_date, end_date, title, saved_by_name, saved_at, notes')
+      .eq('tenant_id', prof.tenant_id)
+      .eq('start_date', weekStart)
+      .maybeSingle()
+    setSavedMeta(wp || null)
     const { data: emps } = await supabase
       .from('employees')
       .select('id, name, department, employee_code, daily_hours, is_mixed, status')
@@ -132,8 +152,34 @@ export default function PlanningPage() {
       body: JSON.stringify({ plans: payload }),
     })
     const body = await res.json().catch(() => ({}))
+    if (!res.ok) { setSaving(false); toast.error(body.error || 'Error al guardar'); return }
+
+    // feat/candado: marcar la planificación como "guardada" en weekly_plans
+    // (aunque la semana esté vacía — el guardado explícito es lo que habilita el corte).
+    try {
+      const supabase = createClient()
+      const endIso = addDaysIso(weekStart, 6)
+      const title = `Planificación semanal ${prettyRange(weekStart, endIso)}`
+      const { data: up, error: upErr } = await supabase
+        .from('weekly_plans')
+        .upsert({
+          tenant_id: profile?.tenant_id,
+          branch_id: profile?.branch_id || null,
+          start_date: weekStart,
+          end_date: endIso,
+          title,
+          saved_by: profile?.id || null,
+          saved_by_name: profile?.name || null,
+          saved_at: new Date().toISOString(),
+        }, { onConflict: 'tenant_id,branch_id,start_date' })
+        .select('id, start_date, end_date, title, saved_by_name, saved_at, notes')
+        .single()
+      if (!upErr) setSavedMeta(up)
+    } catch (e) {
+      console.warn('[planning] no se pudo registrar weekly_plans:', e?.message)
+    }
+
     setSaving(false)
-    if (!res.ok) { toast.error(body.error || 'Error al guardar'); return }
     toast.success(`Plan guardado · ${body.saved || 0} entradas, ${body.deleted || 0} eliminadas`)
   }
 
@@ -199,6 +245,15 @@ export default function PlanningPage() {
         <div>
           <h1 className="text-2xl font-extrabold text-white">Planificador semanal</h1>
           <p className="text-gray-500 text-xs font-mono mt-0.5">EMPLEADOS MIXTOS · {mixedEmps.length} persona{mixedEmps.length !== 1 ? 's' : ''}</p>
+          {savedMeta ? (
+            <div className="mt-1 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-brand-400/15 border border-brand-400/30 text-brand-300 text-[11px] font-mono">
+              ✓ {savedMeta.title || `Semana ${savedMeta.start_date}`} · guardada{savedMeta.saved_by_name ? ` por ${savedMeta.saved_by_name}` : ''}
+            </div>
+          ) : (
+            <div className="mt-1 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-300 text-[11px] font-mono">
+              ⚠ Esta semana aún no está guardada (bloquea el corte)
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={() => setWeekStart(w => addDaysIso(w, -7))} className="px-3 py-2 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-xs active:bg-dark-600">← Anterior</button>

@@ -58,6 +58,17 @@ export async function POST(req) {
 
   const employee_code = generateEmployeeCode(existing || [])
 
+  // feat/gerente-libre: normalizar flags mutuamente excluyentes
+  const is_mixed = !!body.is_mixed
+  const free_schedule = !!body.free_schedule && !!body.can_manage && !is_mixed
+  const daily_hours = is_mixed ? (Number(body.daily_hours) || 8) : null
+  const free_min_days_week = free_schedule
+    ? Math.max(0, Math.min(7, parseInt(body.free_min_days_week ?? 5, 10) || 0))
+    : null
+  const free_min_hours_week = free_schedule
+    ? Math.max(0, Math.min(168, parseFloat(body.free_min_hours_week ?? 40) || 0))
+    : null
+
   const payload = {
     tenant_id: profile.tenant_id,
     branch_id,
@@ -72,7 +83,12 @@ export async function POST(req) {
     payment_type: body.payment_type || 'efectivo',
     birth_date: body.birth_date || null,
     hire_date,
-    schedule: body.schedule || {},
+    schedule: free_schedule ? {} : (body.schedule || {}),
+    is_mixed,
+    daily_hours,
+    free_schedule,
+    free_min_days_week,
+    free_min_hours_week,
     status: 'active',
   }
 

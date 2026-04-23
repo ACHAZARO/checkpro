@@ -15,6 +15,7 @@ export default function LoginPage() {
   const params = useSearchParams()
   const next = params?.get('next') || '/dashboard'
   const [loading, setLoading] = useState(false)
+  const [showPass, setShowPass] = useState(false)
   const [form, setForm] = useState({ email: '', password: '' })
   const F = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -92,8 +93,15 @@ export default function LoginPage() {
           </div>
           <div>
             <label className="label">Contraseña</label>
-            <input className="input" type="password" placeholder="Tu contraseña"
-              value={form.password} onChange={e => F('password', e.target.value)} required autoComplete="current-password" />
+            <div className="relative">
+              <input className="input pr-10" type={showPass ? 'text' : 'password'} placeholder="Tu contraseña"
+                value={form.password} onChange={e => F('password', e.target.value)} required autoComplete="current-password" />
+              <button type="button" onClick={() => setShowPass(v => !v)}
+                aria-label={showPass ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-brand-400 transition-colors text-lg px-1.5 py-0.5 rounded">
+                {showPass ? '🙈' : '👁️'}
+              </button>
+            </div>
           </div>
           <button type="button" onClick={handleReset}
             className="text-xs text-gray-500 hover:text-brand-400 transition-colors text-right w-full">
