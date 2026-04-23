@@ -16,16 +16,17 @@ export default function Home() {
   }, [router])
 
   return (
-    <main className="min-h-dvh bg-dark-900 flex flex-col items-center justify-center px-6">
+    <main className="min-h-dvh flex flex-col items-center justify-center px-6"
+      style={{ backgroundColor: 'var(--cp-bg)', color: 'var(--cp-text)' }}>
       <div className="max-w-md w-full text-center">
         {/* Logo */}
         <div className="mb-8">
           <div className="text-brand-400 font-mono text-sm font-bold tracking-widest uppercase mb-2">⬡ CheckPro</div>
-          <h1 className="text-4xl font-extrabold text-white tracking-tight leading-tight">
+          <h1 className="text-4xl font-extrabold tracking-tight leading-tight" style={{ color: 'var(--cp-text)' }}>
             Control de asistencia<br/>
             <span className="text-brand-400">profesional</span>
           </h1>
-          <p className="mt-4 text-gray-400 text-base">
+          <p className="mt-4 text-base" style={{ color: 'var(--cp-text-muted)' }}>
             GPS real · Nómina automática · Reportes imprimibles · Multi-sucursal
           </p>
         </div>
@@ -42,8 +43,8 @@ export default function Home() {
           ].map(([icon, title, desc]) => (
             <div key={title} className="card-sm">
               <div className="text-xl mb-1">{icon}</div>
-              <div className="text-white font-bold text-sm">{title}</div>
-              <div className="text-gray-500 text-xs mt-0.5">{desc}</div>
+              <div className="text-sm font-bold" style={{ color: 'var(--cp-text)' }}>{title}</div>
+              <div className="text-xs mt-0.5" style={{ color: 'var(--cp-text-muted)' }}>{desc}</div>
             </div>
           ))}
         </div>
@@ -58,7 +59,7 @@ export default function Home() {
           </Link>
         </div>
 
-        <p className="mt-6 text-gray-600 text-xs font-mono">
+        <p className="mt-6 text-xs font-mono" style={{ color: 'var(--cp-text-faint)' }}>
           CheckPro · Sistema profesional de asistencia
         </p>
       </div>
