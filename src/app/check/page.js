@@ -437,8 +437,12 @@ export default function CheckPage() {
   }, [simMode, cfg])
 
   // ── Dual monitoring while shift is open (step=done + openShift) ───────────
+  // En modo kiosko el dispositivo se queda fijo en la entrada: no tiene sentido
+  // vigilar GPS/IP en vivo ni arrancar el timer de abandono — el empleado ya
+  // no trae el device consigo. El GPS SÍ se valida al momento de checar.
   useEffect(() => {
     if (step !== 'done' || !openShift || !tenantId) return
+    if (cfg?.kioskMode) return
     let gpsWatchId = null
     let ipTimer = null
     let countdownTimer = null
@@ -691,6 +695,11 @@ export default function CheckPage() {
           if (action === 'in') {
             setStep('done')
             setOpenShift({ employee_id: foundEmp?.id, entry_time: new Date().toISOString() })
+            // En modo kiosko el dispositivo es compartido: devolverlo al teclado
+            // de ID unos segundos después para que el siguiente empleado entre.
+            // El turno ya quedó abierto en BD — al volver a checar su salida,
+            // /api/check/identify lo encontrará por su PIN+ID.
+            if (cfg?.kioskMode) setTimeout(reset, 6000)
           } else {
             setStep('done')
             setOpenShift(null)
@@ -829,9 +838,13 @@ export default function CheckPage() {
 
               {/* Rescan to exit instructions */}
               <div className="mt-2 p-4 bg-dark-700 border border-dark-border rounded-xl mb-4">
-                <p className="text-2xl mb-2">📱</p>
+                <p className="text-2xl mb-2">{cfg?.kioskMode ? '🖥️' : '📱'}</p>
                 <p className="text-white font-bold text-sm mb-1">Para registrar tu salida:</p>
-                <p className="text-gray-400 text-xs">Escanea de nuevo el código QR de la sucursal con tu celular.</p>
+                <p className="text-gray-400 text-xs">
+                  {cfg?.kioskMode
+                    ? 'Regresa a este mismo equipo y teclea tu ID + PIN. En unos segundos la pantalla vuelve al teclado para el siguiente empleado.'
+                    : 'Escanea de nuevo el código QR de la sucursal con tu celular.'}
+                </p>
               </div>
 
               {/* Birthday greeting (R7: usa flag del punch, no birth_date) */}
