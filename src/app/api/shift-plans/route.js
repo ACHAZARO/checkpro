@@ -4,18 +4,11 @@
 // - POST { plans: [{ employee_id, date_str, entry_time_str, duration_hours }] }
 //     → upsert batch. Plans sin entry_time_str se borran (desmarcar día).
 import { NextResponse } from 'next/server'
-import { createServerSupabase } from '@/lib/supabase-server'
-import { createClient } from '@supabase/supabase-js'
+import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase-server'
 import { addHoursToTimeStr } from '@/lib/utils'
 
-function serviceClient() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  })
-}
-
 async function getProfile() {
-  const supabase = createServerSupabase()
+  const supabase = createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
   const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).single()
@@ -31,7 +24,7 @@ export async function GET(req) {
   const end = searchParams.get('end')
   if (!start || !end) return NextResponse.json({ error: 'missing_range' }, { status: 400 })
 
-  const sb = serviceClient()
+  const sb = createServiceClient()
   const { data, error } = await sb
     .from('shift_plans')
     .select('*')
@@ -55,7 +48,7 @@ export async function POST(req) {
   const plans = Array.isArray(body?.plans) ? body.plans : []
   if (!plans.length) return NextResponse.json({ ok: true, saved: 0, deleted: 0 })
 
-  const sb = serviceClient()
+  const sb = createServiceClient()
   const tenant_id = prof.tenant_id
   const created_by = prof.id
 
