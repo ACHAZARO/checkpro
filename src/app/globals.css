@@ -2,8 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ===== VARIABLES DE TEMA ===== */
 :root {
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* Light mode (default) */
+  --cp-bg:        #f1f5f9;
+  --cp-surface:   #ffffff;
+  --cp-elevated:  #f8fafc;
+  --cp-hover:     #e2e8f0;
+  --cp-muted:     #e2e8f0;
+  --cp-border:    #e2e8f0;
+  --cp-text:      #0f172a;
+  --cp-text-muted:#64748b;
+  --cp-text-faint:#94a3b8;
+  --cp-input-bg:  #f1f5f9;
+}
+
+html.dark {
+  --cp-bg:        #090b11;
+  --cp-surface:   #101318;
+  --cp-elevated:  #171b24;
+  --cp-hover:     #1e2330;
+  --cp-muted:     #252b3a;
+  --cp-border:    #1f2636;
+  --cp-text:      #ffffff;
+  --cp-text-muted:#94a3b8;
+  --cp-text-faint:#64748b;
+  --cp-input-bg:  #171b24;
 }
 
 * { -webkit-tap-highlight-color: transparent; }
@@ -11,6 +36,9 @@
 body {
   min-height: 100dvh;
   overscroll-behavior: none;
+  background-color: var(--cp-bg);
+  color: var(--cp-text);
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* Scrollbar hide */
@@ -21,12 +49,41 @@ body {
 .pb-safe { padding-bottom: calc(72px + var(--safe-bottom)); }
 .bottom-safe { bottom: var(--safe-bottom); }
 
+/* ===== LIGHT MODE: OVERRIDE CLASES DARK DE TAILWIND ===== */
+/* (excluye el sidebar que tiene inline styles) */
+html.light .bg-dark-900 { background-color: var(--cp-bg) !important; }
+html.light .bg-dark-800 { background-color: var(--cp-surface) !important; }
+html.light .bg-dark-700 { background-color: var(--cp-elevated) !important; }
+html.light .bg-dark-600 { background-color: var(--cp-hover) !important; }
+html.light .bg-dark-500 { background-color: var(--cp-muted) !important; }
+html.light .border-dark-border { border-color: var(--cp-border) !important; }
+html.light .border-dark-500 { border-color: #cbd5e1 !important; }
+html.light .text-white { color: var(--cp-text) !important; }
+html.light .text-gray-300 { color: #475569 !important; }
+html.light .text-gray-400 { color: #64748b !important; }
+html.light .text-gray-500 { color: #94a3b8 !important; }
+html.light .text-gray-600 { color: #64748b !important; }
+html.light .hover\:text-white:hover { color: #1e293b !important; }
+html.light .hover\:bg-dark-700:hover { background-color: #f1f5f9 !important; }
+
+/* Sidebar siempre oscuro (tiene inline styles, esto es backup) */
+html.light aside[data-sidebar],
+html.light aside[data-sidebar] * {
+  /* Los inline styles del sidebar tienen mayor especificidad */
+}
+
 @layer components {
   .card {
-    @apply bg-dark-800 border border-dark-border rounded-2xl p-5;
+    background-color: var(--cp-surface);
+    border: 1px solid var(--cp-border);
+    @apply rounded-2xl p-5;
+    transition: background-color 0.2s ease;
   }
   .card-sm {
-    @apply bg-dark-800 border border-dark-border rounded-xl p-4;
+    background-color: var(--cp-surface);
+    border: 1px solid var(--cp-border);
+    @apply rounded-xl p-4;
+    transition: background-color 0.2s ease;
   }
   .btn-primary {
     @apply flex items-center justify-center gap-2 w-full py-3.5 px-5 rounded-xl
@@ -39,24 +96,44 @@ body {
            disabled:opacity-40 transition-all;
   }
   .btn-ghost {
-    @apply flex items-center justify-center gap-2 py-3.5 px-5 rounded-xl
-           bg-dark-700 text-white font-semibold text-sm border border-dark-border
-           active:bg-dark-600 transition-all;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.875rem 1.25rem;
+    border-radius: 0.75rem;
+    background-color: var(--cp-elevated);
+    color: var(--cp-text);
+    font-weight: 600;
+    font-size: 0.875rem;
+    border: 1px solid var(--cp-border);
+    transition: all 0.15s ease;
   }
+  .btn-ghost:active { background-color: var(--cp-hover); }
   .btn-sm {
     @apply py-2 px-3 text-xs rounded-lg;
   }
   .input {
-    @apply w-full bg-dark-700 border border-dark-500 rounded-xl text-white text-base
-           px-4 py-3 outline-none focus:border-brand-400 transition-colors
-           placeholder:text-dark-500;
+    width: 100%;
+    background-color: var(--cp-input-bg);
+    border: 1px solid var(--cp-border);
+    border-radius: 0.75rem;
+    color: var(--cp-text);
+    font-size: 1rem;
+    padding: 0.75rem 1rem;
+    outline: none;
+    transition: border-color 0.15s ease, background-color 0.2s ease;
   }
+  .input:focus { border-color: theme('colors.brand.400'); }
+  .input::placeholder { color: var(--cp-text-faint); }
   .label {
-    @apply block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 font-mono;
+    @apply block text-xs font-bold uppercase tracking-wider mb-1.5 font-mono;
+    color: var(--cp-text-muted);
   }
   .badge-green  { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-brand-400/10 text-brand-400; }
   .badge-red    { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-red-500/10 text-red-400; }
   .badge-orange { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-orange-500/10 text-orange-400; }
   .badge-blue   { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-blue-500/10 text-blue-400; }
-  .badge-gray   { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-dark-600 text-gray-500; }
+  .badge-gray   { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-gray-500/10 text-gray-400; }
+  .badge-purple { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-purple-500/10 text-purple-400; }
 }

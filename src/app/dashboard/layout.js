@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
+import { useTheme } from '@/lib/ThemeContext'
 import toast from 'react-hot-toast'
 
 const NAV = [
@@ -22,6 +23,7 @@ export default function DashboardLayout({ children }) {
   const [profile, setProfile] = useState(null)
   const [tenant, setTenant] = useState(null)
   const [loading, setLoading] = useState(true)
+  const { theme } = useTheme()
 
   useEffect(() => {
     async function load() {
@@ -65,15 +67,15 @@ export default function DashboardLayout({ children }) {
   }
 
   if (loading) return (
-    <div className="min-h-dvh bg-dark-900 flex items-center justify-center">
+    <div className="min-h-dvh flex items-center justify-center" style={{ backgroundColor: 'var(--cp-bg)' }}>
       <div className="text-brand-400 font-mono text-sm animate-pulse">⬡ Cargando CheckPro...</div>
     </div>
   )
 
   return (
-    <div className="flex min-h-dvh bg-dark-900">
+    <div className="flex min-h-dvh" style={{ backgroundColor: 'var(--cp-bg)' }}>
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex flex-col w-56 bg-dark-800 border-r border-dark-border shrink-0">
+      <aside data-sidebar className="hidden md:flex flex-col w-56 shrink-0" style={{ background: '#101318', borderRight: '1px solid #1f2636' }}>
         <div className="p-5 border-b border-dark-border">
           <div className="text-brand-400 font-mono text-xs font-bold tracking-widest">⬡ CHECKPRO</div>
           {/* FIX: mostrar nombre de la EMPRESA (tenant.name) — el nombre de sucursal se ve dentro de cada pagina */}
@@ -112,7 +114,7 @@ export default function DashboardLayout({ children }) {
       {/* Main content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Mobile top bar */}
-        <div className="md:hidden sticky top-0 z-30 bg-dark-900/92 backdrop-blur border-b border-dark-border px-5 py-3 flex items-center justify-between">
+        <div className={`md:hidden sticky top-0 z-30 backdrop-blur border-b px-5 py-3 flex items-center justify-between ${theme === 'dark' ? 'bg-dark-900/92 border-dark-border' : 'bg-white/95 border-gray-200'}`}>
           <div>
             <div className="text-xs font-mono text-brand-400 tracking-widest">⬡ CHECKPRO</div>
             <div className="text-sm font-bold text-white">{tenant?.name || tenant?.config?.branchName}</div>
@@ -128,7 +130,7 @@ export default function DashboardLayout({ children }) {
         </div>
 
         {/* Mobile bottom nav */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-dark-900/95 backdrop-blur border-t border-dark-border flex z-50"
+        <nav className={`md:hidden fixed bottom-0 left-0 right-0 backdrop-blur border-t flex z-50 ${theme === 'dark' ? 'bg-dark-900/95 border-dark-border' : 'bg-white/95 border-gray-200'}`}
           style={{ paddingBottom: 'env(safe-area-inset-bottom,0)' }}>
           {NAV.filter(n => !n.mixedOnly || tenant?.config?.mixedSchedule?.enabled).map(n => (
             <Link key={n.href} href={n.href}
@@ -143,3 +145,4 @@ export default function DashboardLayout({ children }) {
     </div>
   )
 }
+

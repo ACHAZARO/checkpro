@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase'
 import { DAYS, DAY_L, DAY_FL, LFT_VACATION_TABLE } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import HelpCenter from '@/components/HelpCenter'
+import { useTheme } from '@/lib/ThemeContext'
 
 const DEFAULT_LEYENDA = 'Al firmar el presente comprobante de nómina, el trabajador acepta que los montos, horas trabajadas e incidencias registradas son correctos y conformes a su contrato laboral. Cualquier aclaración deberá presentarse por escrito en un plazo máximo de 5 días hábiles. Documento confidencial de uso interno.'
 const FALLBACK_URL = 'https://checkpro-self.vercel.app'
@@ -22,6 +23,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [openBranchId, setOpenBranchId] = useState(null)
   const [origin, setOrigin] = useState(FALLBACK_URL)
+  const { theme, setTheme } = useTheme()
 
   useEffect(() => { setOrigin(window.location.origin) }, [])
 
@@ -92,7 +94,7 @@ export default function SettingsPage() {
   }
 
   const TABS = isOwner
-    ? [['empresa','Empresa'],['sucursales','Sucursales'],['equipo','Equipo'],['ayuda','Ayuda']]
+    ? [['empresa','Empresa'],['sucursales','Sucursales'],['equipo','Equipo'],['apariencia','Apariencia'],['ayuda','Ayuda']]
     : [['sucursales','Mi sucursal'],['ayuda','Ayuda']]
 
   // Manager can't see Empresa/Equipo tabs; default to sucursales (Ayuda sí la ven)
@@ -150,6 +152,44 @@ export default function SettingsPage() {
 
       {tab === 'equipo' && isOwner && (
         <TeamTab branches={branches} onChanged={load} />
+      )}
+
+
+      {tab === 'apariencia' && (
+        <div className="space-y-4">
+          <div className="card space-y-4">
+            <h2 className="text-base font-bold" style={{ color: 'var(--cp-text)' }}>Tema de la interfaz</h2>
+            <p className="text-xs font-mono" style={{ color: 'var(--cp-text-muted)' }}>
+              Elige cómo se ve CheckPro en tu dispositivo.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setTheme('light')}
+                className={`flex-1 flex flex-col items-center gap-2 py-4 rounded-xl border-2 transition-all ${
+                  theme === 'light'
+                    ? 'border-brand-400 bg-brand-400/5'
+                    : 'border-transparent bg-dark-700 opacity-60'
+                }`}
+              >
+                <span className="text-2xl">☀️</span>
+                <span className="text-sm font-bold" style={{ color: 'var(--cp-text)' }}>Claro</span>
+                <span className="text-xs font-mono" style={{ color: 'var(--cp-text-muted)' }}>Predeterminado</span>
+              </button>
+              <button
+                onClick={() => setTheme('dark')}
+                className={`flex-1 flex flex-col items-center gap-2 py-4 rounded-xl border-2 transition-all ${
+                  theme === 'dark'
+                    ? 'border-brand-400 bg-brand-400/5'
+                    : 'border-transparent bg-dark-700 opacity-60'
+                }`}
+              >
+                <span className="text-2xl">🌙</span>
+                <span className="text-sm font-bold" style={{ color: 'var(--cp-text)' }}>Oscuro</span>
+                <span className="text-xs font-mono" style={{ color: 'var(--cp-text-muted)' }}>Clásico</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {tab === 'ayuda' && (
@@ -1069,3 +1109,4 @@ function TeamTab({ branches, onChanged }) {
     </div>
   )
 }
+
