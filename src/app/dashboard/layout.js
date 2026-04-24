@@ -14,7 +14,7 @@ import {
 const NAV = [
   { href: '/dashboard',              label: 'Hoy',          Icon: Home },
   { href: '/dashboard/employees',    label: 'Personal',     Icon: Users },
-  { href: '/dashboard/attendance',   label: 'Asistencia',   Icon: CalendarCheck },
+  { href: '/dashboard/attendance',   label: 'Registros',    Icon: CalendarCheck },
   { href: '/dashboard/planning',     label: 'Planificador', Icon: ClipboardList, mixedOnly: true },
   { href: '/dashboard/incidencias',  label: 'Incidencias',  Icon: AlertTriangle },
   { href: '/dashboard/payroll',      label: 'Nómina',       Icon: DollarSign },

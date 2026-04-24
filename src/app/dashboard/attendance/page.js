@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { fmtTime, fmtDate, isoDate, weekRange, dayKey, countGraveIncidents } from '@/lib/utils'
 import toast from 'react-hot-toast'
-import { FileSpreadsheet, Loader2, ClipboardList, Package, Building2, AlertTriangle } from 'lucide-react'
+import { FileSpreadsheet, Loader2, ClipboardList, Package, Building2 } from 'lucide-react'
 
 function ShiftBadge({ status, classification }) {
   if (status === 'open') return <span className="badge-blue">Abierta</span>
@@ -20,18 +20,6 @@ function ShiftBadge({ status, classification }) {
   if (t === 'retardo') return <span className="badge-orange">Retardo</span>
   if (t === 'tolerancia') return <span className="badge-orange">Tolerancia</span>
   return <span className="badge-green">Completa</span>
-}
-
-// Días entre filterFrom y filterTo (inclusive), for absence detection
-function dateRange(from, to) {
-  const dates = []
-  const d = new Date(from + 'T12:00:00')
-  const end = new Date(to + 'T12:00:00')
-  while (d <= end) {
-    dates.push(isoDate(d))
-    d.setDate(d.getDate() + 1)
-  }
-  return dates
 }
 
 export default function AttendancePage() {
@@ -51,16 +39,11 @@ export default function AttendancePage() {
   const [filterTo, setFilterTo] = useState(isoDate(new Date()))
   const [corrSheet, setCorrSheet] = useState(null)
   const [flagSheet, setFlagSheet] = useState(null)
-  const [absenceSheet, setAbsenceSheet] = useState(null)
   const [corrForm, setCorrForm] = useState({})
   const [flagForm, setFlagForm] = useState({ type: 'olvido_salida', note: '' })
-  const [absenceForm, setAbsenceForm] = useState({ type: 'falta_injustificada', note: '' })
   const [saving, setSaving] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [showExportMenu, setShowExportMenu] = useState(false)
-
-  const [suggestedAbsences, setSuggestedAbsences] = useState([])
-  const [dismissedSuggestions, setDismissedSuggestions] = useState(new Set())
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -82,20 +65,6 @@ export default function AttendancePage() {
     setAllShifts(allShiftData || [])
     setBranches(tenantData?.config?.branches || [])
     setTenantName(tenantData?.name || '')
-
-    const dates = dateRange(filterFrom, filterTo)
-    const shiftsByEmpDate = new Set((shiftData || []).map(s => `${s.employee_id}_${s.date_str}`))
-    const suggestions = []
-    for (const emp of (empData || [])) {
-      for (const dateStr of dates) {
-        const dk = dayKey(new Date(dateStr + 'T12:00:00'))
-        const shouldWork = emp.schedule?.[dk]?.work === true
-        const hasRecord = shiftsByEmpDate.has(`${emp.id}_${dateStr}`)
-        if (shouldWork && !hasRecord) suggestions.push({ emp, dateStr })
-      }
-    }
-    const cutoff = isoDate(new Date(Date.now() - 7 * 24 * 3600 * 1000))
-    setSuggestedAbsences(suggestions.filter(s => s.dateStr >= cutoff && s.dateStr < isoDate(new Date())))
     setLoading(false)
   }, [filterFrom, filterTo])
 
@@ -172,124 +141,13 @@ export default function AttendancePage() {
     setSaving(false); setFlagSheet(null); await load()
   }
 
-  async function saveAbsence() {
-    if (!absenceSheet) return
-    setSaving(true)
-    const supabase = createClient()
-    const { emp, dateStr } = absenceSheet
-    const typeLabels = {
-      falta_injustificada: 'Falta injustificada',
-      falta_justificada_pagada: 'Falta justificada (con goce de sueldo)',
-      falta_justificada_no_pagada: 'Falta justificada (sin goce de sueldo)',
-    }
-    const label = typeLabels[absenceForm.type] || absenceForm.type
-    const isGrave = absenceForm.type === 'falta_injustificada'
-
-    const { error: insertErr } = await supabase.from('shifts').insert({
-      tenant_id: tenantId,
-      employee_id: emp.id,
-      date_str: dateStr,
-      entry_time: null,
-      exit_time: null,
-      duration_hours: 0,
-      status: 'absent',
-      classification: { type: absenceForm.type, label },
-      incidents: isGrave ? [{ type: 'grave', note: absenceForm.note || 'Falta injustificada registrada por gerente', ts: new Date().toISOString() }] : [],
-      corrections: [],
-    })
-
-    if (insertErr) {
-      console.error('Error registrando falta:', insertErr)
-      const code = insertErr.code ? ` [${insertErr.code}]` : ''
-      toast.error(`No se pudo registrar la falta${code}: ${insertErr.message || 'error'}`, { duration: 8000 })
-      setSaving(false)
-      return
-    }
-
-    await supabase.from('audit_log').insert({
-      tenant_id: tenantId, action: 'ABSENCE',
-      employee_id: emp.id, employee_name: emp.name,
-      detail: `${label} · ${dateStr}${absenceForm.note ? ' · ' + absenceForm.note : ''}`,
-      success: true
-    })
-
-    const graveCount = countGraveIncidents(allShifts, emp.id) + 1
-    if (isGrave && graveCount >= 3) {
-      await supabase.from('audit_log').insert({
-        tenant_id: tenantId, action: 'GRAVE_ALERT',
-        employee_id: emp.id, employee_name: emp.name,
-        detail: `⚠ ALERTA: ${emp.name} acumula ${graveCount} faltas injustificadas. Revisar posible causal de despido.`,
-        success: false
-      })
-      toast.error(`⚠ ${emp.name} tiene ${graveCount} faltas graves. Se generó alerta.`, { duration: 6000 })
-    } else {
-      toast.success(`Falta registrada: ${label}`)
-    }
-
-    setSaving(false)
-    setAbsenceSheet(null)
-    setAbsenceForm({ type: 'falta_injustificada', note: '' })
-    setDismissedSuggestions(prev => new Set([...prev, `${emp.id}_${dateStr}`]))
-    await load()
-  }
-
-  const visibleSuggestions = suggestedAbsences.filter(s =>
-    !dismissedSuggestions.has(`${s.emp.id}_${s.dateStr}`)
-  )
-
   return (
     <div className="p-4 md:p-6 max-w-2xl">
       <div className="mb-5">
-        <h1 className="page-title">Asistencia</h1>
-        <p className="text-gray-500 text-xs font-mono mt-0.5">HISTORIAL DE JORNADAS</p>
+        <p className="page-eyebrow">Historial · Jornadas registradas</p>
+        <h1 className="page-title">Registros</h1>
+        <p className="text-gray-500 text-xs mt-1">Consulta, filtra y exporta las jornadas. Las faltas se gestionan desde <span className="text-brand-400">Incidencias</span>.</p>
       </div>
-
-      {/* ── Suggested absences ──────────────────────────────────────────── */}
-      {visibleSuggestions.length > 0 && (
-        <div className="mb-5">
-          <div className="px-4 py-3 mb-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
-            <p className="text-yellow-400 text-sm font-bold">
-              <span className="inline-flex items-center gap-1.5"><ClipboardList size={14} /> {visibleSuggestions.length} posible{visibleSuggestions.length > 1 ? 's' : ''} falta{visibleSuggestions.length > 1 ? 's' : ''} detectada{visibleSuggestions.length > 1 ? 's' : ''}</span>
-            </p>
-            <p className="text-yellow-400/70 text-xs mt-0.5">
-              Empleados con turno programado que no ficharon. Confirma o descarta cada una.
-            </p>
-          </div>
-          <div className="space-y-2">
-            {visibleSuggestions.map(({ emp, dateStr }) => {
-              const graveCount = countGraveIncidents(allShifts, emp.id)
-              return (
-                <div key={`${emp.id}_${dateStr}`} className="card border-l-4 border-l-yellow-400">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="font-bold text-white text-sm">{emp.name}</div>
-                      <div className="text-xs text-gray-400 font-mono mt-0.5">{dateStr} · Sin registro</div>
-                      {graveCount > 0 && (
-                        <div className="mt-1 text-[10px] text-red-400 font-mono">
-                          <AlertTriangle size={12} className="inline" /> {graveCount} falta{graveCount > 1 ? 's' : ''} grave{graveCount > 1 ? 's' : ''} previas
-                          {graveCount >= 2 && ' — próxima = 3 faltas → ALERTA'}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex flex-col gap-1.5 shrink-0">
-                      <button
-                        onClick={() => { setAbsenceSheet({ emp, dateStr }); setAbsenceForm({ type: 'falta_injustificada', note: '' }) }}
-                        className="px-3 py-1.5 bg-red-500/15 border border-red-500/25 rounded-lg text-red-400 text-xs font-semibold active:bg-red-500/25">
-                        Registrar falta
-                      </button>
-                      <button
-                        onClick={() => setDismissedSuggestions(prev => new Set([...prev, `${emp.id}_${dateStr}`]))}
-                        className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-gray-500 text-xs font-semibold active:bg-dark-600">
-                        Descartar
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
 
       {/* ── Exportar XLS ──────────────────────────────────────────────────── */}
       <div className="relative mb-4">
@@ -440,62 +298,6 @@ export default function AttendancePage() {
             })}
           </div>
         </>
-      )}
-
-      {/* ── Register absence sheet ─────────────────────────────────────────── */}
-      {absenceSheet && (
-        <div className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end">
-          <div className="bg-dark-800 rounded-t-2xl flex flex-col" style={{maxHeight:'90dvh'}}>
-            <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-2 shrink-0"/>
-            <div className="px-5 pb-10 overflow-y-auto overscroll-contain" style={{touchAction:'pan-y'}}>
-              <h3 className="text-lg font-bold text-white mb-1">Registrar Falta</h3>
-              <p className="text-xs text-gray-500 font-mono mb-4">{absenceSheet.emp.name} · {absenceSheet.dateStr}</p>
-              <div className="mb-4">
-                <p className="label mb-2">Tipo de falta</p>
-                <div className="space-y-2">
-                  {[
-                    { value: 'falta_injustificada', label: 'Injustificada', desc: 'Sin causa válida. No se paga. Se marca como falta grave.', color: 'red' },
-                    { value: 'falta_justificada_pagada', label: 'Justificada — con goce de sueldo', desc: 'Falta con justificante válido. Se paga el día.', color: 'green' },
-                    { value: 'falta_justificada_no_pagada', label: 'Justificada — sin goce de sueldo', desc: 'Falta con justificante pero sin pago del día.', color: 'orange' },
-                  ].map(opt => (
-                    <label key={opt.value}
-                      className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors
-                        ${absenceForm.type === opt.value
-                          ? opt.color === 'red' ? 'bg-red-500/10 border-red-500/30' : opt.color === 'green' ? 'bg-green-500/10 border-green-500/30' : 'bg-orange-500/10 border-orange-500/30'
-                          : 'bg-dark-700 border-dark-border'
-                        }`}>
-                      <input type="radio" name="absenceType" value={opt.value}
-                        checked={absenceForm.type === opt.value}
-                        onChange={() => setAbsenceForm(f => ({ ...f, type: opt.value }))}
-                        className="mt-0.5 shrink-0" />
-                      <div>
-                        <p className="text-sm text-white font-semibold">{opt.label}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">{opt.desc}</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </div>
-              {absenceForm.type === 'falta_injustificada' && (
-                <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
-                  <p className="text-red-400 text-xs font-bold">⚠ Falta grave</p>
-                  <p className="text-red-400/70 text-xs mt-0.5">A las 3 faltas graves acumuladas se genera una alerta automática. Esto puede constituir causal de despido sin responsabilidad (Art. 47 LFT).</p>
-                </div>
-              )}
-              <div className="mb-4">
-                <label className="label">Nota / Justificante</label>
-                <input className="input" placeholder="Descripción o referencia del justificante..."
-                  value={absenceForm.note} onChange={e => setAbsenceForm(f => ({ ...f, note: e.target.value }))} />
-              </div>
-              <div className="flex gap-2">
-                <button onClick={saveAbsence} disabled={saving} className="btn-danger flex-1">
-                  {saving ? 'Guardando...' : 'Registrar falta'}
-                </button>
-                <button onClick={() => { setAbsenceSheet(null) }} className="btn-ghost">Cancelar</button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Correction sheet */}
