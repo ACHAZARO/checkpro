@@ -8,9 +8,12 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
+import { Download } from 'lucide-react'
 // R7: componentes compartidos extraidos a src/components/
 import { BottomSheet } from '@/components/BottomSheet'
 import { ConfirmSheet } from '@/components/ConfirmSheet'
+import { createClient } from '@/lib/supabase'
+import { generateEmployeeAttendanceXLSX } from '@/lib/export-xlsx'
 
 // ── helpers de formato ───────────────────────────────────────────────────────
 function fmtLongDate(iso) {
@@ -116,6 +119,14 @@ export default function EmployeeDetailPage() {
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [confirmState, setConfirmState] = useState(null) // BUG P: reemplaza confirm()
+  // Export de asistencia individual
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [expFrom, setExpFrom] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 30)
+    return d.toISOString().slice(0, 10)
+  })
+  const [expTo, setExpTo] = useState(() => new Date().toISOString().slice(0, 10))
   // BUG 14: si el usuario edita end_date manualmente, el auto-cálculo
   // (que dispara al cambiar start_date o entitled_days) ya no debe pisar
   // su valor. Se resetea a false al abrir cada modal.
@@ -145,6 +156,46 @@ export default function EmployeeDetailPage() {
   }, [employeeId])
 
   useEffect(() => { load() }, [load])
+
+  async function doExport() {
+    if (!expFrom || !expTo) { toast.error('Selecciona el rango de fechas'); return }
+    if (expFrom > expTo) { toast.error('La fecha inicial debe ser menor o igual a la final'); return }
+    setExporting(true)
+    try {
+      const supabase = createClient()
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) { toast.error('Sesión expirada'); setExporting(false); return }
+      const { data: prof } = await supabase.from('profiles').select('tenant_id').eq('id', session.user.id).single()
+      if (!prof?.tenant_id) { toast.error('Sin tenant'); setExporting(false); return }
+
+      const [{ data: shifts, error: shErr }, { data: tenant }, { data: branches }] = await Promise.all([
+        supabase.from('shifts').select('*')
+          .eq('tenant_id', prof.tenant_id)
+          .eq('employee_id', employeeId)
+          .gte('date_str', expFrom)
+          .lte('date_str', expTo)
+          .order('date_str', { ascending: true }),
+        supabase.from('tenants').select('name, config').eq('id', prof.tenant_id).single(),
+        supabase.from('branches').select('id, name').eq('tenant_id', prof.tenant_id),
+      ])
+      if (shErr) { toast.error(`Error: ${shErr.message}`); setExporting(false); return }
+      generateEmployeeAttendanceXLSX({
+        employee: employee,
+        shifts: shifts || [],
+        branches: branches || [],
+        periodFrom: expFrom,
+        periodTo: expTo,
+        companyName: tenant?.name || 'CheckPro',
+      })
+      toast.success(`Exportado · ${shifts?.length || 0} registros`)
+      setExportOpen(false)
+    } catch (e) {
+      toast.error('Error al exportar')
+      console.error(e)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   // BUG 9/14: auto-calcular end_date cuando cambian start_date o entitled_days
   // en el modal "Tomar". Si el usuario ya editó manualmente end_date
@@ -456,8 +507,14 @@ export default function EmployeeDetailPage() {
   return (
     <div className="p-5 md:p-6 max-w-3xl mx-auto">
       {/* Back + título */}
-      <div className="mb-4">
+      <div className="mb-4 flex items-center justify-between">
         <Link href="/dashboard/employees" className="text-brand-400 text-xs font-mono active:brightness-90">← Empleados</Link>
+        <button
+          onClick={() => setExportOpen(true)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-dark-700 border border-dark-border text-gray-300 rounded-lg text-xs font-semibold hover:text-white active:bg-dark-600"
+          title="Exportar asistencia a Excel">
+          <Download size={14} /> Exportar Excel
+        </button>
       </div>
 
       {/* ── Header del empleado ───────────────────────────────────────────── */}
@@ -888,6 +945,64 @@ export default function EmployeeDetailPage() {
 
       {/* BUG P: ConfirmSheet reutilizable (reemplaza confirm()/alert()) */}
       <ConfirmSheet state={confirmState} onCancel={() => setConfirmState(null)} />
+
+      {/* Modal exportar asistencia individual */}
+      {exportOpen && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col"
+               style={{ maxHeight: '90dvh' }}>
+            <div className="px-5 pt-4 pb-2 shrink-0">
+              <h3 className="text-lg font-bold text-white">Exportar asistencia</h3>
+              <p className="text-xs text-gray-500 mt-0.5">{employee.name}</p>
+            </div>
+            <div className="px-5 pb-4 overflow-y-auto flex-1" style={{ touchAction: 'pan-y' }}>
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <div>
+                  <label className="label">Desde</label>
+                  <input type="date" className="input text-sm" value={expFrom}
+                    onChange={e => setExpFrom(e.target.value)} />
+                </div>
+                <div>
+                  <label className="label">Hasta</label>
+                  <input type="date" className="input text-sm" value={expTo}
+                    onChange={e => setExpTo(e.target.value)} />
+                </div>
+              </div>
+              <div className="flex gap-1.5 flex-wrap mb-2">
+                {[
+                  { label: 'Últimos 7 días', days: 7 },
+                  { label: '30 días', days: 30 },
+                  { label: '90 días', days: 90 },
+                ].map(p => (
+                  <button key={p.days} type="button"
+                    onClick={() => {
+                      const to = new Date()
+                      const from = new Date(); from.setDate(from.getDate() - p.days)
+                      setExpFrom(from.toISOString().slice(0, 10))
+                      setExpTo(to.toISOString().slice(0, 10))
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-[11px] bg-dark-700 border border-dark-border text-gray-400 hover:text-white">
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-600 mt-2">
+                Se exportará un archivo .xlsx con dos hojas: Registros y Resumen.
+              </p>
+            </div>
+            <div className="px-5 pb-5 pt-2 border-t border-dark-border shrink-0 flex gap-2">
+              <button onClick={doExport} disabled={exporting}
+                className="flex-1 px-3 py-2.5 bg-brand-400 text-black font-bold rounded-lg text-sm active:brightness-90 disabled:opacity-50">
+                {exporting ? 'Generando...' : 'Descargar Excel'}
+              </button>
+              <button onClick={() => setExportOpen(false)} disabled={exporting}
+                className="px-3 py-2.5 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-sm">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

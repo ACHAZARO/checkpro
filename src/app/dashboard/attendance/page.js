@@ -444,9 +444,9 @@ export default function AttendancePage() {
       {/* ── Register absence sheet ─────────────────────────────────────────── */}
       {absenceSheet && (
         <div className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end">
-          <div className="bg-dark-800 rounded-t-2xl overflow-y-auto overscroll-contain no-scrollbar" style={{maxHeight:'80vh',touchAction:'pan-y'}}>
-            <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-4"/>
-            <div className="px-5 pb-10">
+          <div className="bg-dark-800 rounded-t-2xl flex flex-col" style={{maxHeight:'90dvh'}}>
+            <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-2 shrink-0"/>
+            <div className="px-5 pb-10 overflow-y-auto overscroll-contain" style={{touchAction:'pan-y'}}>
               <h3 className="text-lg font-bold text-white mb-1">Registrar Falta</h3>
               <p className="text-xs text-gray-500 font-mono mb-4">{absenceSheet.emp.name} · {absenceSheet.dateStr}</p>
               <div className="mb-4">
@@ -500,9 +500,9 @@ export default function AttendancePage() {
       {/* Correction sheet */}
       {corrSheet && (
         <div className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end">
-          <div className="bg-dark-800 rounded-t-2xl overflow-y-auto overscroll-contain no-scrollbar" style={{height:'75vh',touchAction:'pan-y'}}>
-            <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-4"/>
-            <div className="px-5 pb-10">
+          <div className="bg-dark-800 rounded-t-2xl flex flex-col" style={{maxHeight:'90dvh'}}>
+            <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-2 shrink-0"/>
+            <div className="px-5 pb-10 overflow-y-auto overscroll-contain" style={{touchAction:'pan-y'}}>
               <h3 className="text-lg font-bold text-white mb-1">Corrección de Jornada</h3>
               <p className="text-xs text-gray-500 font-mono mb-4">{getEmpName(corrSheet.employee_id)} · {corrSheet.date_str}</p>
               <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 text-yellow-400 text-xs font-semibold mb-4">
@@ -525,9 +525,9 @@ export default function AttendancePage() {
       {/* Flag incident sheet */}
       {flagSheet && (
         <div className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end">
-          <div className="bg-dark-800 rounded-t-2xl overflow-y-auto overscroll-contain no-scrollbar" style={{height:'65vh',touchAction:'pan-y'}}>
-            <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-4"/>
-            <div className="px-5 pb-10">
+          <div className="bg-dark-800 rounded-t-2xl flex flex-col" style={{maxHeight:'90dvh'}}>
+            <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-2 shrink-0"/>
+            <div className="px-5 pb-10 overflow-y-auto overscroll-contain" style={{touchAction:'pan-y'}}>
               <h3 className="text-lg font-bold text-white mb-1">Marcar Incidencia</h3>
               <p className="text-xs text-gray-500 font-mono mb-4">{getEmpName(flagSheet.employee_id)} · entrada {fmtTime(flagSheet.entry_time)}</p>
               <div className="mb-3"><label className="label">Tipo</label>

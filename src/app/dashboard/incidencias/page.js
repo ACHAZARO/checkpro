@@ -1,11 +1,13 @@
 'use client'
 // src/app/dashboard/incidencias/page.js
-// feat/gerente-libre-candados — Pestaña Incidencias: listado, detalle, resolución.
-// Candado: todas las incidencias deben estar 'resolved' o 'ignored' antes de cortar.
+// Gestión de incidencias con acciones directas por tipo:
+//  - falta: registra la inasistencia (3 opciones) y resuelve la incidencia
+//  - otros: resolución con nota breve
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import toast from 'react-hot-toast'
+import { AlertCircle, CheckCircle2, Plus, Inbox, Lock, X } from 'lucide-react'
 
 const KIND_LABEL = {
   falta: 'Falta',
@@ -27,15 +29,37 @@ const KIND_COLOR = {
   otro: 'bg-gray-500/10 border-gray-500/30 text-gray-300',
 }
 
+const ABSENCE_TYPES = [
+  {
+    value: 'falta_injustificada',
+    label: 'Injustificada',
+    desc: 'Sin causa válida. No se paga. Cuenta como falta grave (Art. 47 LFT).',
+    color: 'red',
+  },
+  {
+    value: 'falta_justificada_pagada',
+    label: 'Justificada — con goce de sueldo',
+    desc: 'Falta con justificante válido. Se paga el día.',
+    color: 'green',
+  },
+  {
+    value: 'falta_justificada_no_pagada',
+    label: 'Justificada — sin goce de sueldo',
+    desc: 'Falta con justificante pero sin pago del día.',
+    color: 'orange',
+  },
+]
+
 export default function IncidenciasPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [profile, setProfile] = useState(null)
   const [incidencias, setIncidencias] = useState([])
-  const [filter, setFilter] = useState('open') // open | resolved | all
+  const [filter, setFilter] = useState('open')
   const [resolvingId, setResolvingId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [resolutionText, setResolutionText] = useState('')
+  const [absenceType, setAbsenceType] = useState('falta_injustificada')
   // Creación manual
   const [showNew, setShowNew] = useState(false)
   const [employees, setEmployees] = useState([])
@@ -67,7 +91,6 @@ export default function IncidenciasPage() {
     if (filter !== 'all') q = q.eq('status', filter === 'resolved' ? 'resolved' : 'open')
     const { data: incs, error } = await q
     if (error) {
-      // si la tabla aún no está migrada, mostrar estado vacío amigable
       setIncidencias([])
       console.warn('[incidencias] select error:', error?.message)
     } else {
@@ -78,23 +101,126 @@ export default function IncidenciasPage() {
 
   useEffect(() => { load() }, [load])
 
-  async function resolveIncidencia(id, action) {
-    setResolvingId(id)
+  function openDetail(inc) {
+    setDetail(inc)
+    setResolutionText('')
+    setAbsenceType('falta_injustificada')
+  }
+
+  async function resolveAsAbsence() {
+    if (!detail) return
+    setResolvingId(detail.id)
     const supabase = createClient()
-    const newStatus = action === 'resolve' ? 'resolved' : 'ignored'
-    const { error } = await supabase
+
+    const typeLabels = {
+      falta_injustificada: 'Falta injustificada',
+      falta_justificada_pagada: 'Falta justificada (con goce de sueldo)',
+      falta_justificada_no_pagada: 'Falta justificada (sin goce de sueldo)',
+    }
+    const label = typeLabels[absenceType] || absenceType
+    const isGrave = absenceType === 'falta_injustificada'
+    const note = resolutionText || label
+
+    // 1) Verificar si ya existe un shift para ese día — evita duplicados
+    const { data: existing } = await supabase
+      .from('shifts')
+      .select('id')
+      .eq('tenant_id', detail.tenant_id)
+      .eq('employee_id', detail.employee_id)
+      .eq('date_str', detail.date_str)
+      .maybeSingle()
+
+    if (existing?.id) {
+      // Actualizar el shift existente a absent con la clasificación elegida
+      const { error: updErr } = await supabase.from('shifts').update({
+        status: 'absent',
+        classification: { type: absenceType, label },
+        incidents: isGrave
+          ? [{ type: 'grave', note, ts: new Date().toISOString() }]
+          : [],
+      }).eq('id', existing.id)
+      if (updErr) {
+        setResolvingId(null)
+        toast.error(`No se pudo actualizar la jornada: ${updErr.message}`)
+        return
+      }
+    } else {
+      // Insert nuevo shift de ausencia
+      const { error: insErr } = await supabase.from('shifts').insert({
+        tenant_id: detail.tenant_id,
+        employee_id: detail.employee_id,
+        date_str: detail.date_str,
+        entry_time: null,
+        exit_time: null,
+        duration_hours: 0,
+        status: 'absent',
+        classification: { type: absenceType, label },
+        incidents: isGrave
+          ? [{ type: 'grave', note, ts: new Date().toISOString() }]
+          : [],
+        corrections: [],
+      })
+      if (insErr) {
+        setResolvingId(null)
+        toast.error(`No se pudo registrar la falta: ${insErr.message}`)
+        return
+      }
+    }
+
+    // 2) Marcar incidencia como resuelta con referencia a la acción tomada
+    const { error: resErr } = await supabase
       .from('incidencias')
       .update({
-        status: newStatus,
-        resolution: resolutionText || (action === 'resolve' ? 'Resuelta por gerente' : 'Ignorada por gerente'),
+        status: 'resolved',
+        resolution: `${label}${resolutionText ? ` · ${resolutionText}` : ''}`,
         resolved_by: profile?.id || null,
         resolved_by_name: profile?.name || null,
         resolved_at: new Date().toISOString(),
       })
-      .eq('id', id)
+      .eq('id', detail.id)
+
+    // 3) Audit log
+    await supabase.from('audit_log').insert({
+      tenant_id: detail.tenant_id,
+      action: 'ABSENCE',
+      employee_id: detail.employee_id,
+      employee_name: detail.employee_name,
+      detail: `${label} · ${detail.date_str}${resolutionText ? ' · ' + resolutionText : ''}`,
+      success: true,
+    })
+
+    setResolvingId(null)
+    if (resErr) {
+      toast.error(`Falta registrada pero no se cerró la incidencia: ${resErr.message}`)
+    } else {
+      toast.success('Falta registrada y resuelta')
+    }
+    setDetail(null)
+    setResolutionText('')
+    load()
+  }
+
+  async function resolveGeneric() {
+    if (!detail) return
+    if (!resolutionText.trim()) {
+      toast.error('Agrega una nota breve de resolución')
+      return
+    }
+    setResolvingId(detail.id)
+    const supabase = createClient()
+    const { error } = await supabase
+      .from('incidencias')
+      .update({
+        status: 'resolved',
+        resolution: resolutionText,
+        resolved_by: profile?.id || null,
+        resolved_by_name: profile?.name || null,
+        resolved_at: new Date().toISOString(),
+      })
+      .eq('id', detail.id)
     setResolvingId(null)
     if (error) { toast.error(`No se pudo resolver: ${error.message}`); return }
-    toast.success(action === 'resolve' ? 'Incidencia resuelta ✓' : 'Incidencia ignorada')
+    toast.success('Incidencia resuelta')
     setDetail(null)
     setResolutionText('')
     load()
@@ -127,19 +253,28 @@ export default function IncidenciasPage() {
   if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando incidencias...</div>
 
   const openCount = incidencias.filter(i => i.status === 'open').length
+  const isFalta = detail?.kind === 'falta'
 
   return (
     <div className="p-5 md:p-6 max-w-5xl mx-auto">
       <div className="flex items-end justify-between mb-5 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-extrabold text-white">Incidencias</h1>
-          <p className="text-gray-500 text-xs font-mono mt-0.5">
-            {openCount > 0 ? <span className="text-red-400">🔒 {openCount} abierta(s) · bloquean el corte</span> : <span className="text-brand-400">✓ Sin incidencias pendientes</span>}
+          <p className="text-gray-500 text-xs font-mono mt-0.5 flex items-center gap-1.5">
+            {openCount > 0 ? (
+              <span className="text-red-400 inline-flex items-center gap-1.5">
+                <Lock size={12} /> {openCount} abierta{openCount !== 1 ? 's' : ''} · bloquean el corte
+              </span>
+            ) : (
+              <span className="text-brand-400 inline-flex items-center gap-1.5">
+                <CheckCircle2 size={12} /> Sin incidencias pendientes
+              </span>
+            )}
           </p>
         </div>
         <button onClick={() => setShowNew(true)}
-          className="px-3 py-2 bg-brand-400 text-black font-bold rounded-lg text-xs active:brightness-90">
-          + Nueva incidencia
+          className="inline-flex items-center gap-1.5 px-3 py-2 bg-brand-400 text-black font-bold rounded-lg text-xs active:brightness-90">
+          <Plus size={14} /> Nueva incidencia
         </button>
       </div>
 
@@ -160,12 +295,14 @@ export default function IncidenciasPage() {
 
       {incidencias.length === 0 ? (
         <div className="card text-center py-10">
-          <div className="text-4xl mb-3">{filter === 'open' ? '✅' : '📭'}</div>
+          <div className="flex justify-center mb-3 text-gray-500">
+            {filter === 'open' ? <CheckCircle2 size={40} /> : <Inbox size={40} />}
+          </div>
           <p className="text-gray-300 text-sm font-semibold">
             {filter === 'open' ? 'Ninguna incidencia abierta' : 'Sin incidencias'}
           </p>
           <p className="text-gray-500 text-xs mt-2">
-            Las incidencias detectadas automáticamente (dispositivo diferente, sin plan, etc.) y las creadas manualmente aparecerán aquí.
+            Las incidencias detectadas automáticamente y las creadas manualmente aparecen aquí.
           </p>
         </div>
       ) : (
@@ -182,15 +319,15 @@ export default function IncidenciasPage() {
                 </div>
                 {inc.description && <p className="text-gray-400 text-xs leading-snug">{inc.description}</p>}
                 {inc.status !== 'open' && inc.resolution && (
-                  <p className="text-gray-600 text-[11px] font-mono mt-1">
-                    {inc.status === 'resolved' ? '✓' : '✗'} {inc.resolution}{inc.resolved_by_name ? ` · ${inc.resolved_by_name}` : ''}
+                  <p className="text-gray-600 text-[11px] font-mono mt-1 inline-flex items-center gap-1">
+                    <CheckCircle2 size={10} /> {inc.resolution}{inc.resolved_by_name ? ` · ${inc.resolved_by_name}` : ''}
                   </p>
                 )}
               </div>
               {inc.status === 'open' && (
-                <button onClick={() => { setDetail(inc); setResolutionText('') }}
-                  className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-xs hover:bg-dark-600">
-                  Revisar →
+                <button onClick={() => openDetail(inc)}
+                  className="px-3 py-1.5 bg-brand-400 text-black font-bold rounded-lg text-xs active:brightness-90">
+                  Gestionar
                 </button>
               )}
             </div>
@@ -198,37 +335,89 @@ export default function IncidenciasPage() {
         </div>
       )}
 
-      {/* Modal detalle */}
+      {/* Modal detalle — con scroll correcto */}
       {detail && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="card max-w-md w-full">
-            <h2 className="text-lg font-bold text-white mb-1">{KIND_LABEL[detail.kind] || detail.kind}</h2>
-            <p className="text-gray-500 text-xs font-mono mb-3">
-              {detail.employee_name || '—'} · {detail.date_str}
-            </p>
-            {detail.description && (
-              <p className="text-gray-300 text-sm mb-3 bg-dark-700 p-3 rounded-lg">{detail.description}</p>
-            )}
-            <div className="mb-3">
-              <label className="label">Resolución / nota (opcional)</label>
-              <textarea className="input text-sm min-h-[60px]"
-                placeholder="Ej. Se aplicó descuento, se justificó por cita médica, etc."
-                value={resolutionText}
-                onChange={e => setResolutionText(e.target.value)} />
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+          <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col"
+               style={{ maxHeight: '90dvh' }}>
+            <div className="px-5 pt-4 pb-2 flex items-start justify-between shrink-0">
+              <div>
+                <h2 className="text-lg font-bold text-white">{KIND_LABEL[detail.kind] || detail.kind}</h2>
+                <p className="text-gray-500 text-xs font-mono mt-0.5">
+                  {detail.employee_name || '—'} · {detail.date_str}
+                </p>
+              </div>
+              <button onClick={() => setDetail(null)} className="text-gray-500 hover:text-white p-1 -mt-1 -mr-1">
+                <X size={18} />
+              </button>
             </div>
-            <div className="flex gap-2 flex-wrap">
-              <button onClick={() => resolveIncidencia(detail.id, 'resolve')}
-                disabled={resolvingId === detail.id}
-                className="flex-1 px-3 py-2 bg-brand-400 text-black font-bold rounded-lg text-sm active:brightness-90 disabled:opacity-50">
-                ✓ Marcar resuelta
-              </button>
-              <button onClick={() => resolveIncidencia(detail.id, 'ignore')}
-                disabled={resolvingId === detail.id}
-                className="px-3 py-2 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-sm">
-                Ignorar
-              </button>
+
+            <div className="px-5 pb-4 overflow-y-auto flex-1" style={{ touchAction: 'pan-y' }}>
+              {detail.description && (
+                <p className="text-gray-300 text-sm mb-3 bg-dark-700 p-3 rounded-lg">{detail.description}</p>
+              )}
+
+              {isFalta ? (
+                <>
+                  <p className="label mb-2">Tipo de falta</p>
+                  <div className="space-y-2 mb-3">
+                    {ABSENCE_TYPES.map(opt => (
+                      <label key={opt.value}
+                        className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors
+                          ${absenceType === opt.value
+                            ? opt.color === 'red' ? 'bg-red-500/10 border-red-500/30'
+                              : opt.color === 'green' ? 'bg-green-500/10 border-green-500/30'
+                              : 'bg-orange-500/10 border-orange-500/30'
+                            : 'bg-dark-700 border-dark-border'
+                          }`}>
+                        <input type="radio" name="absenceType" value={opt.value}
+                          checked={absenceType === opt.value}
+                          onChange={() => setAbsenceType(opt.value)}
+                          className="mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-sm text-white font-semibold">{opt.label}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">{opt.desc}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                  {absenceType === 'falta_injustificada' && (
+                    <div className="mb-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl inline-flex items-start gap-2">
+                      <AlertCircle className="text-red-400 shrink-0 mt-0.5" size={14} />
+                      <div>
+                        <p className="text-red-400 text-xs font-bold">Falta grave</p>
+                        <p className="text-red-400/70 text-xs mt-0.5">A las 3 faltas graves acumuladas se genera una alerta automática (causal Art. 47 LFT).</p>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : null}
+
+              <div className="mb-3">
+                <label className="label">Nota {isFalta ? '(opcional)' : '(obligatoria)'}</label>
+                <textarea className="input text-sm min-h-[60px]"
+                  placeholder={isFalta ? 'Ej. justificante médico, aviso previo, etc.' : 'Describe la resolución'}
+                  value={resolutionText}
+                  onChange={e => setResolutionText(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="px-5 pb-5 pt-2 border-t border-dark-border shrink-0 flex gap-2">
+              {isFalta ? (
+                <button onClick={resolveAsAbsence}
+                  disabled={resolvingId === detail.id}
+                  className="flex-1 px-3 py-2.5 bg-brand-400 text-black font-bold rounded-lg text-sm active:brightness-90 disabled:opacity-50">
+                  {resolvingId === detail.id ? 'Guardando...' : 'Registrar falta'}
+                </button>
+              ) : (
+                <button onClick={resolveGeneric}
+                  disabled={resolvingId === detail.id || !resolutionText.trim()}
+                  className="flex-1 px-3 py-2.5 bg-brand-400 text-black font-bold rounded-lg text-sm active:brightness-90 disabled:opacity-50">
+                  {resolvingId === detail.id ? 'Guardando...' : 'Marcar resuelta'}
+                </button>
+              )}
               <button onClick={() => setDetail(null)}
-                className="px-3 py-2 text-gray-500 text-sm">
+                className="px-3 py-2.5 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-sm">
                 Cancelar
               </button>
             </div>
@@ -238,10 +427,16 @@ export default function IncidenciasPage() {
 
       {/* Modal nueva */}
       {showNew && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="card max-w-md w-full">
-            <h2 className="text-lg font-bold text-white mb-3">Nueva incidencia</h2>
-            <div className="space-y-3">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+          <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col"
+               style={{ maxHeight: '90dvh' }}>
+            <div className="px-5 pt-4 pb-2 flex items-start justify-between shrink-0">
+              <h2 className="text-lg font-bold text-white">Nueva incidencia</h2>
+              <button onClick={() => setShowNew(false)} className="text-gray-500 hover:text-white p-1 -mt-1 -mr-1">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="px-5 pb-4 overflow-y-auto flex-1 space-y-3" style={{ touchAction: 'pan-y' }}>
               <div>
                 <label className="label">Empleado</label>
                 <select className="input text-sm"
@@ -273,18 +468,18 @@ export default function IncidenciasPage() {
               <div>
                 <label className="label">Descripción</label>
                 <textarea className="input text-sm min-h-[60px]"
-                  placeholder="Detalle breve de la incidencia"
+                  placeholder="Detalle breve"
                   value={newForm.description}
                   onChange={e => setNewForm(f => ({ ...f, description: e.target.value }))} />
               </div>
             </div>
-            <div className="flex gap-2 mt-4">
+            <div className="px-5 pb-5 pt-2 border-t border-dark-border shrink-0 flex gap-2">
               <button onClick={createIncidencia}
-                className="flex-1 px-3 py-2 bg-brand-400 text-black font-bold rounded-lg text-sm active:brightness-90">
+                className="flex-1 px-3 py-2.5 bg-brand-400 text-black font-bold rounded-lg text-sm active:brightness-90">
                 Guardar
               </button>
               <button onClick={() => setShowNew(false)}
-                className="px-3 py-2 text-gray-500 text-sm">
+                className="px-3 py-2.5 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-sm">
                 Cancelar
               </button>
             </div>

@@ -12,6 +12,8 @@ import toast from 'react-hot-toast'
 import { ConfirmSheet } from '@/components/ConfirmSheet'
 // Carga masiva (feat/bulk-employees-upload): modal de 3 pasos con plantilla + preview
 import BulkUploadModal from '@/components/BulkUploadModal'
+import { generateAllEmployeesBySheetXLSX } from '@/lib/export-xlsx'
+import { Upload, Plus, Download, Users } from 'lucide-react'
 
 const DEF_BASE = { start: '09:00', end: '18:00' }
 
@@ -62,6 +64,50 @@ export default function EmployeesPage() {
   const [confirmState, setConfirmState] = useState(null)
   // Carga masiva: abre el modal dedicado
   const [bulkOpen, setBulkOpen] = useState(false)
+  // Export auditoría de todos los empleados con pestañas
+  const [exportAllOpen, setExportAllOpen] = useState(false)
+  const [expAllFrom, setExpAllFrom] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 30)
+    return d.toISOString().slice(0, 10)
+  })
+  const [expAllTo, setExpAllTo] = useState(() => new Date().toISOString().slice(0, 10))
+  const [exportingAll, setExportingAll] = useState(false)
+
+  async function doExportAll() {
+    if (!expAllFrom || !expAllTo) { toast.error('Selecciona el rango'); return }
+    if (expAllFrom > expAllTo) { toast.error('Fecha inicial mayor a final'); return }
+    if (!tenantId) { toast.error('Sin tenant'); return }
+    setExportingAll(true)
+    try {
+      const supabase = createClient()
+      const activeEmps = emps.filter(e => e.status === 'active')
+      if (activeEmps.length === 0) { toast.error('No hay empleados activos'); setExportingAll(false); return }
+      const [{ data: shifts, error: shErr }, { data: tenant }] = await Promise.all([
+        supabase.from('shifts').select('*')
+          .eq('tenant_id', tenantId)
+          .gte('date_str', expAllFrom)
+          .lte('date_str', expAllTo)
+          .order('date_str', { ascending: true }),
+        supabase.from('tenants').select('name').eq('id', tenantId).single(),
+      ])
+      if (shErr) { toast.error(`Error: ${shErr.message}`); setExportingAll(false); return }
+      generateAllEmployeesBySheetXLSX({
+        emps: activeEmps,
+        shifts: shifts || [],
+        branches: branches || [],
+        periodFrom: expAllFrom,
+        periodTo: expAllTo,
+        companyName: tenant?.name || 'CheckPro',
+      })
+      toast.success(`Auditoría exportada · ${activeEmps.length} empleados · ${shifts?.length || 0} registros`)
+      setExportAllOpen(false)
+    } catch (e) {
+      toast.error('Error al exportar')
+      console.error(e)
+    } finally {
+      setExportingAll(false)
+    }
+  }
 
   const F = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -340,15 +386,20 @@ export default function EmployeesPage() {
           <h1 className="text-2xl font-extrabold text-white">Empleados</h1>
           <p className="text-gray-500 text-xs font-mono mt-0.5">GESTIÓN DE PERSONAL</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => setExportAllOpen(true)} disabled={emps.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-dark-700 border border-dark-border text-gray-300 text-sm font-semibold rounded-xl active:bg-dark-600 disabled:opacity-40"
+            title="Exportar auditoría de asistencia — todos los empleados con pestañas">
+            <Download size={14} /> Auditoría
+          </button>
           <button onClick={() => setBulkOpen(true)} disabled={!hasBranches}
-            className="flex items-center gap-1.5 px-3 py-2 bg-dark-700 border border-dark-border text-gray-300 text-sm font-semibold rounded-xl active:bg-dark-600 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-dark-700 border border-dark-border text-gray-300 text-sm font-semibold rounded-xl active:bg-dark-600 disabled:opacity-40 disabled:cursor-not-allowed"
             title="Importar empleados desde Excel/CSV">
-            ⬆ Archivo
+            <Upload size={14} /> Archivo
           </button>
           <button onClick={openAdd}
-            className="flex items-center gap-1.5 px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90">
-            + Agregar
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90">
+            <Plus size={14} /> Agregar
           </button>
         </div>
       </div>
@@ -755,6 +806,67 @@ export default function EmployeesPage() {
           onClose={() => setBulkOpen(false)}
           onImported={() => load()}
         />
+      )}
+
+      {/* Modal exportar auditoría — todos los empleados con pestaña por empleado */}
+      {exportAllOpen && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col"
+               style={{ maxHeight: '90dvh' }}>
+            <div className="px-5 pt-4 pb-2 shrink-0">
+              <h3 className="text-lg font-bold text-white inline-flex items-center gap-2">
+                <Users size={18} /> Auditoría de asistencia
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">Excel con una pestaña por empleado activo + resumen general.</p>
+            </div>
+            <div className="px-5 pb-4 overflow-y-auto flex-1" style={{ touchAction: 'pan-y' }}>
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <div>
+                  <label className="label">Desde</label>
+                  <input type="date" className="input text-sm" value={expAllFrom}
+                    onChange={e => setExpAllFrom(e.target.value)} />
+                </div>
+                <div>
+                  <label className="label">Hasta</label>
+                  <input type="date" className="input text-sm" value={expAllTo}
+                    onChange={e => setExpAllTo(e.target.value)} />
+                </div>
+              </div>
+              <div className="flex gap-1.5 flex-wrap mb-2">
+                {[
+                  { label: '7 días', days: 7 },
+                  { label: '30 días', days: 30 },
+                  { label: '90 días', days: 90 },
+                  { label: '1 año', days: 365 },
+                ].map(p => (
+                  <button key={p.days} type="button"
+                    onClick={() => {
+                      const to = new Date()
+                      const from = new Date(); from.setDate(from.getDate() - p.days)
+                      setExpAllFrom(from.toISOString().slice(0, 10))
+                      setExpAllTo(to.toISOString().slice(0, 10))
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-[11px] bg-dark-700 border border-dark-border text-gray-400 hover:text-white">
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-600 mt-2">
+                Empleados activos: <span className="text-white font-semibold">{emps.filter(e => e.status === 'active').length}</span>
+              </p>
+            </div>
+            <div className="px-5 pb-5 pt-2 border-t border-dark-border shrink-0 flex gap-2">
+              <button onClick={doExportAll} disabled={exportingAll}
+                className="flex-1 px-3 py-2.5 bg-brand-400 text-black font-bold rounded-lg text-sm active:brightness-90 disabled:opacity-50">
+                {exportingAll ? 'Generando...' : 'Descargar Excel'}
+              </button>
+              <button onClick={() => setExportAllOpen(false)} disabled={exportingAll}
+                className="px-3 py-2.5 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-sm">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

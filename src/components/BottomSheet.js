@@ -93,12 +93,12 @@ export function BottomSheet({ open, onClose, title, children, footer }) {
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="bg-dark-800 rounded-t-2xl overflow-y-auto overscroll-contain no-scrollbar focus:outline-none"
-        style={{ maxHeight: '90vh', touchAction: 'pan-y' }}
+        className="bg-dark-800 rounded-t-2xl flex flex-col focus:outline-none"
+        style={{ maxHeight: '90dvh' }}
         onClick={e => e.stopPropagation()}
       >
-        <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-4" />
-        <div className="px-5 pb-10">
+        <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-2 shrink-0" />
+        <div className="px-5 pb-10 overflow-y-auto overscroll-contain" style={{ touchAction: 'pan-y' }}>
           <div className="flex items-center justify-between mb-4">
             <h3 id={titleId} className="text-lg font-bold text-white">{title}</h3>
             <button

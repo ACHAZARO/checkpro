@@ -6,15 +6,19 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import { useTheme } from '@/lib/ThemeContext'
 import toast from 'react-hot-toast'
+import {
+  Home, Users, CalendarCheck, ClipboardList, AlertTriangle,
+  DollarSign, Settings as SettingsIcon, MapPin, Wrench, LogOut,
+} from 'lucide-react'
 
 const NAV = [
-  { href: '/dashboard',              label: 'Hoy',          icon: '🏠' },
-  { href: '/dashboard/employees',    label: 'Personal',     icon: '👥' },
-  { href: '/dashboard/attendance',   label: 'Asistencia',   icon: '📅' },
-  { href: '/dashboard/planning',     label: 'Planificador', icon: '📋', mixedOnly: true },
-  { href: '/dashboard/incidencias',  label: 'Incidencias',  icon: '⚠' },
-  { href: '/dashboard/payroll',      label: 'Nómina',       icon: '💰' },
-  { href: '/dashboard/settings',     label: 'Config',       icon: '⚙️' },
+  { href: '/dashboard',              label: 'Hoy',          Icon: Home },
+  { href: '/dashboard/employees',    label: 'Personal',     Icon: Users },
+  { href: '/dashboard/attendance',   label: 'Asistencia',   Icon: CalendarCheck },
+  { href: '/dashboard/planning',     label: 'Planificador', Icon: ClipboardList, mixedOnly: true },
+  { href: '/dashboard/incidencias',  label: 'Incidencias',  Icon: AlertTriangle },
+  { href: '/dashboard/payroll',      label: 'Nómina',       Icon: DollarSign },
+  { href: '/dashboard/settings',     label: 'Config',       Icon: SettingsIcon },
 ]
 
 export default function DashboardLayout({ children }) {
@@ -87,26 +91,26 @@ export default function DashboardLayout({ children }) {
             <Link key={n.href} href={n.href}
               className={`flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-colors
                 ${pathname === n.href ? 'text-brand-400 bg-brand-400/5 border-l-2 border-brand-400' : 'text-gray-400 hover:text-white hover:bg-dark-700 border-l-2 border-transparent'}`}>
-              <span>{n.icon}</span>{n.label}
+              <n.Icon size={16} /> {n.label}
             </Link>
           ))}
         </nav>
         <div className="p-4 border-t border-dark-border space-y-2">
           <Link href="/check" target="_blank"
             className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500 hover:text-brand-400 transition-colors rounded-lg hover:bg-dark-700">
-            📍 Abrir checador
+            <MapPin size={13} /> Abrir checador
           </Link>
           {['owner','manager','super_admin'].includes(profile?.role) && (
             <Link href="/dashboard/bugs"
               className={`flex items-center gap-2 px-3 py-2 text-xs transition-colors rounded-lg hover:bg-dark-700 ${
                 pathname === '/dashboard/bugs' ? 'text-brand-400' : 'text-gray-500 hover:text-brand-400'
               }`}>
-              🔧 Bugs y mejoras
+              <Wrench size={13} /> Bugs y mejoras
             </Link>
           )}
           <button onClick={signOut}
             className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500 hover:text-red-400 transition-colors w-full rounded-lg hover:bg-dark-700">
-            🚪 Cerrar sesión
+            <LogOut size={13} /> Cerrar sesión
           </button>
         </div>
       </aside>
@@ -136,7 +140,7 @@ export default function DashboardLayout({ children }) {
             <Link key={n.href} href={n.href}
               className={`flex-1 flex flex-col items-center gap-1 py-2.5 transition-colors
                 ${pathname === n.href ? 'text-brand-400' : 'text-gray-500'}`}>
-              <span className="text-lg leading-none">{n.icon}</span>
+              <n.Icon size={18} />
               <span className="text-[10px] font-semibold">{n.label}</span>
             </Link>
           ))}
