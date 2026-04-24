@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { fmtTime, fmtDate, isoDate, weekRange, dayKey, countGraveIncidents } from '@/lib/utils'
 import toast from 'react-hot-toast'
+import { FileSpreadsheet, Loader2, ClipboardList, Package, Building2, AlertTriangle } from 'lucide-react'
 
 function ShiftBadge({ status, classification }) {
   if (status === 'open') return <span className="badge-blue">Abierta</span>
@@ -248,7 +249,7 @@ export default function AttendancePage() {
         <div className="mb-5">
           <div className="px-4 py-3 mb-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
             <p className="text-yellow-400 text-sm font-bold">
-              📋 {visibleSuggestions.length} posible{visibleSuggestions.length > 1 ? 's' : ''} falta{visibleSuggestions.length > 1 ? 's' : ''} detectada{visibleSuggestions.length > 1 ? 's' : ''}
+              <span className="inline-flex items-center gap-1.5"><ClipboardList size={14} /> {visibleSuggestions.length} posible{visibleSuggestions.length > 1 ? 's' : ''} falta{visibleSuggestions.length > 1 ? 's' : ''} detectada{visibleSuggestions.length > 1 ? 's' : ''}</span>
             </p>
             <p className="text-yellow-400/70 text-xs mt-0.5">
               Empleados con turno programado que no ficharon. Confirma o descarta cada una.
@@ -265,7 +266,7 @@ export default function AttendancePage() {
                       <div className="text-xs text-gray-400 font-mono mt-0.5">{dateStr} · Sin registro</div>
                       {graveCount > 0 && (
                         <div className="mt-1 text-[10px] text-red-400 font-mono">
-                          ⚠ {graveCount} falta{graveCount > 1 ? 's' : ''} grave{graveCount > 1 ? 's' : ''} previas
+                          <AlertTriangle size={12} className="inline" /> {graveCount} falta{graveCount > 1 ? 's' : ''} grave{graveCount > 1 ? 's' : ''} previas
                           {graveCount >= 2 && ' — próxima = 3 faltas → ALERTA'}
                         </div>
                       )}
@@ -297,7 +298,7 @@ export default function AttendancePage() {
             onClick={() => setShowExportMenu(m => !m)}
             disabled={exporting}
             className="flex items-center gap-1.5 px-3 py-2 bg-green-500/15 border border-green-500/30 rounded-xl text-xs font-semibold text-green-400 active:bg-green-500/25 disabled:opacity-40">
-            {exporting ? '⏳ Generando...' : '📊 Exportar Excel (.xlsx)'}
+            <span className="inline-flex items-center gap-1.5">{exporting ? <><Loader2 size={14} className="animate-spin" /> Generando...</> : <><FileSpreadsheet size={14} /> Exportar Excel (.xlsx)</>}</span>
             <span className="text-green-400/60">▾</span>
           </button>
         </div>
@@ -310,7 +311,7 @@ export default function AttendancePage() {
             <button
               onClick={() => handleExportXLS('filtered')}
               className="w-full text-left px-4 py-3 hover:bg-dark-700 active:bg-dark-600 border-b border-dark-border/50">
-              <p className="text-sm font-semibold text-white">📋 Filtro actual</p>
+              <p className="text-sm font-semibold text-white flex items-center gap-1.5"><ClipboardList size={14} /> Filtro actual</p>
               <p className="text-xs text-gray-500 mt-0.5">
                 {filtered.length} registros · {filterFrom} → {filterTo}
                 {filterEmp !== 'all' ? ' · ' + getEmpName(filterEmp) : ''}
@@ -320,7 +321,7 @@ export default function AttendancePage() {
             <button
               onClick={() => handleExportXLS('all')}
               className="w-full text-left px-4 py-3 hover:bg-dark-700 active:bg-dark-600">
-              <p className="text-sm font-semibold text-white">📦 Todo el período cargado</p>
+              <p className="text-sm font-semibold text-white flex items-center gap-1.5"><Package size={14} /> Todo el período cargado</p>
               <p className="text-xs text-gray-500 mt-0.5">
                 {shifts.length} registros · {filterFrom} → {filterTo} · todos los empleados y sucursales
               </p>
@@ -406,7 +407,7 @@ export default function AttendancePage() {
                       {s.classification?.label && s.status !== 'absent' && (
                         <div className="text-xs text-gray-600 mt-0.5">{s.classification.label}</div>
                       )}
-                      {bn && <div className="text-[10px] text-gray-600 font-mono mt-0.5">🏢 {bn}</div>}
+                      {bn && <div className="text-[10px] text-gray-600 font-mono mt-0.5 flex items-center gap-1"><Building2 size={10} /> {bn}</div>}
                       {s.covering_employee_id && (
                         <div className="text-xs text-blue-400 font-mono mt-0.5">Cubriendo: {getEmpName(s.covering_employee_id)}</div>
                       )}

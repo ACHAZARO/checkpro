@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
-import { Download } from 'lucide-react'
+import { Download, Building2, Calendar, Clock, Cake, Palmtree, DollarSign, AlertTriangle } from 'lucide-react'
 // R7: componentes compartidos extraidos a src/components/
 import { BottomSheet } from '@/components/BottomSheet'
 import { ConfirmSheet } from '@/components/ConfirmSheet'
@@ -491,7 +491,7 @@ export default function EmployeeDetailPage() {
       <div className="p-5 md:p-6 max-w-3xl mx-auto">
         <Link href="/dashboard/employees" className="text-brand-400 text-sm font-mono">← Volver a empleados</Link>
         <div className="card mt-4 text-center py-10">
-          <div className="text-4xl mb-3">⚠️</div>
+          <div className="flex justify-center mb-3 text-yellow-400"><AlertTriangle size={40} /></div>
           <p className="text-red-400 text-sm font-mono">{err || 'Empleado no encontrado'}</p>
           <button onClick={load} className="mt-3 text-brand-400 text-sm font-semibold">Reintentar</button>
         </div>
@@ -532,10 +532,10 @@ export default function EmployeeDetailPage() {
             <p className="text-xs text-gray-500 mt-0.5">
               {employee.role_label || 'Empleado'}
               {employee.department && ` · ${employee.department}`}
-              {branchName && <span className="text-brand-400/80"> · 🏢 {branchName}</span>}
+              {branchName && <span className="text-brand-400/80 inline-flex items-center gap-1"> · <Building2 size={10} /> {branchName}</span>}
             </p>
             <p className="text-[11px] text-gray-600 font-mono mt-1">
-              📅 Ingreso: {fmtLongDate(employee.hire_date)}
+              <Calendar size={12} className="inline" /> Ingreso: {fmtLongDate(employee.hire_date)}
               {(antig.years > 0 || antig.months > 0) && (
                 <> · {antig.years > 0 ? `${antig.years} año${antig.years !== 1 ? 's' : ''}` : ''}
                   {antig.years > 0 && antig.months > 0 ? ' ' : ''}
@@ -556,7 +556,7 @@ export default function EmployeeDetailPage() {
           : 'border-dark-border'
         }`}>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-base">{annivStrong ? '⏰' : '🎂'}</span>
+            {annivStrong ? <Clock size={16} /> : <Cake size={16} />}
             <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">Próximo aniversario</p>
           </div>
           {anniv ? (
@@ -579,7 +579,7 @@ export default function EmployeeDetailPage() {
         {/* Balance actual — BUG G: 4 contadores explicitos */}
         <div className="card-sm">
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-base">🏖️</span>
+            <Palmtree size={16} />
             <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">Balance actual</p>
           </div>
           <div className="grid grid-cols-4 gap-2">
@@ -617,17 +617,17 @@ export default function EmployeeDetailPage() {
         <div className="grid grid-cols-3 gap-2">
           <button onClick={openTomar}
             className="flex flex-col items-center gap-1 py-4 px-2 rounded-xl bg-brand-400/10 border border-brand-400/30 text-brand-400 font-bold text-xs active:bg-brand-400/20 transition">
-            <span className="text-2xl">🏖️</span>
+            <Palmtree size={22} />
             Tomar ahora
           </button>
           <button onClick={openPosponer}
             className="flex flex-col items-center gap-1 py-4 px-2 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-400 font-bold text-xs active:bg-orange-500/20 transition">
-            <span className="text-2xl">📅</span>
+            <Calendar size={22} />
             Posponer
           </button>
           <button onClick={openCompensar}
             className="flex flex-col items-center gap-1 py-4 px-2 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400 font-bold text-xs active:bg-blue-500/20 transition">
-            <span className="text-2xl">💰</span>
+            <DollarSign size={22} />
             Compensar
           </button>
         </div>

@@ -13,7 +13,7 @@ import { ConfirmSheet } from '@/components/ConfirmSheet'
 // Carga masiva (feat/bulk-employees-upload): modal de 3 pasos con plantilla + preview
 import BulkUploadModal from '@/components/BulkUploadModal'
 import { generateAllEmployeesBySheetXLSX } from '@/lib/export-xlsx'
-import { Upload, Plus, Download, Users } from 'lucide-react'
+import { Upload, Plus, Download, Users, Building2, Calendar, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 
 const DEF_BASE = { start: '09:00', end: '18:00' }
 
@@ -406,7 +406,7 @@ export default function EmployeesPage() {
 
       {!hasBranches && (
         <div className="px-4 py-3 mb-4 bg-orange-500/10 border border-orange-500/20 rounded-xl text-orange-400 text-sm">
-          ⚠️ No hay sucursales configuradas. Ve a <span className="font-bold">Configuración → Sucursales</span> para agregar al menos una antes de crear empleados.
+          <span className="inline-flex items-center gap-1.5"><AlertTriangle size={14} /> No hay sucursales configuradas. Ve a <span className="font-bold">Configuración → Sucursales</span> para agregar al menos una antes de crear empleados.</span>
         </div>
       )}
 
@@ -414,7 +414,7 @@ export default function EmployeesPage() {
         <div className="space-y-3">
           {emps.length === 0 && (
             <div className="card text-center py-10">
-              <div className="text-4xl mb-3">👥</div>
+              <div className="flex justify-center mb-3 text-gray-500"><Users size={40} /></div>
               <p className="text-gray-500 text-sm">No hay empleados registrados.</p>
               <button onClick={openAdd} className="mt-3 text-brand-400 text-sm font-semibold">+ Agregar el primero →</button>
             </div>
@@ -457,7 +457,7 @@ export default function EmployeesPage() {
                     </div>
                     <div className="text-xs text-gray-500 mt-0.5">
                       {emp.department && `${emp.department} · `}
-                      {branchName && <span className="text-brand-400/80">🏢 {branchName} · </span>}
+                      {branchName && <span className="text-brand-400/80 inline-flex items-center gap-1"><Building2 size={10} /> {branchName} · </span>}
                       ${(emp.monthly_salary || 0).toLocaleString()}/mes · ${monthlyToHourly(emp).toFixed(2)}/h
                     </div>
                     <div className="text-xs text-gray-600 font-mono mt-0.5">
@@ -469,7 +469,7 @@ export default function EmployeesPage() {
                     {hireDate && (
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <span className="text-[10px] font-mono text-gray-500">
-                          📅 {new Date(hireDate + 'T12:00:00').toLocaleDateString('es-MX', { day:'2-digit', month:'short', year:'numeric' })}
+                          <Calendar size={10} className="inline" /> {new Date(hireDate + 'T12:00:00').toLocaleDateString('es-MX', { day:'2-digit', month:'short', year:'numeric' })}
                           {years > 0 && ` · ${years} año${years !== 1 ? 's' : ''}`}
                         </span>
                         {years >= 1 && (
@@ -489,9 +489,9 @@ export default function EmployeesPage() {
                       className="p-2 bg-brand-400/10 border border-brand-400/30 rounded-lg text-brand-400 active:bg-brand-400/20 text-xs text-center"
                       title="Ver detalle">👁</Link>
                     <button onClick={() => openEdit(emp)}
-                      className="p-2 bg-dark-700 border border-dark-border rounded-lg text-gray-400 active:bg-dark-600 text-xs">✏️</button>
+                      className="p-2 bg-dark-700 border border-dark-border rounded-lg text-gray-400 active:bg-dark-600 text-xs"><Pencil size={12} /></button>
                     <button onClick={() => deactivate(emp)}
-                      className="p-2 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 active:bg-red-500/20 text-xs">🗑</button>
+                      className="p-2 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 active:bg-red-500/20 text-xs"><Trash2 size={12} /></button>
                   </div>
                 </div>
 
@@ -544,7 +544,7 @@ export default function EmployeesPage() {
                     </select>
                   ) : (
                     <div className="input bg-dark-700 text-orange-400 text-xs">
-                      ⚠️ Configura sucursales primero en Configuración
+                      <span className="inline-flex items-center gap-1.5"><AlertTriangle size={12} /> Configura sucursales primero en Configuración</span>
                     </div>
                   )}
                 </div>

@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase'
 import { fmtTime, weekRange, isoDate, diffMin, DAYS, countGraveIncidents, hasVacationPending, calcVacationDays, managerFreeScheduleAlerts } from '@/lib/utils'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
+import { Unlock, Palmtree, Cake, Award, AlertTriangle, Clock, ClipboardList, X } from 'lucide-react'
 
 function daysUntilBirthday(iso) {
   if (!iso) return null
@@ -297,13 +298,13 @@ export default function DashboardPage() {
 
       {freeAlerts.length > 0 && (
         <div className="px-4 py-3 mb-3 bg-orange-500/10 border border-orange-500/30 rounded-xl">
-          <p className="text-orange-300 text-sm font-bold mb-1">
-            🔓 Gerentes con horario libre — {freeAlerts.length} alerta(s) esta semana
+          <p className="text-orange-300 text-sm font-bold mb-1 flex items-center gap-1.5">
+            <Unlock size={14} /> Gerentes con horario libre — {freeAlerts.length} alerta(s) esta semana
           </p>
           <div className="space-y-1 mt-1">
             {freeAlerts.map((a, i) => (
               <div key={`${a.employee.id}_${a.code}_${i}`} className={`text-xs font-mono ${a.level === 'error' ? 'text-red-400' : 'text-orange-300/90'}`}>
-                {a.level === 'error' ? '✗' : '⚠'} {a.employee.name} — {a.message}
+                {a.level === 'error' ? <X size={12} className="inline" /> : <AlertTriangle size={12} className="inline" />} {a.employee.name} — {a.message}
               </div>
             ))}
           </div>
@@ -315,8 +316,8 @@ export default function DashboardPage() {
 
       {vacationPending.length > 0 && (
         <div className="px-4 py-3 mb-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
-          <p className="text-yellow-400 text-sm font-bold mb-1">
-            🏖 {vacationPending.length} empleado{vacationPending.length > 1 ? 's' : ''} con vacaciones pendientes
+          <p className="text-yellow-400 text-sm font-bold mb-1 flex items-center gap-1.5">
+            <Palmtree size={14} /> {vacationPending.length} empleado{vacationPending.length > 1 ? 's' : ''} con vacaciones pendientes
           </p>
           <div className="flex flex-wrap gap-1 mt-1">
             {vacationPending.map(e => (
@@ -344,7 +345,7 @@ export default function DashboardPage() {
 
         {/* A. Cumpleaños esta semana */}
         <div className="card">
-          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">🎂 Cumpleaños esta semana</p>
+          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Cake size={12} /> Cumpleaños esta semana</p>
           {upcomingBirthdays.length === 0 ? (
             <p className="text-xs text-gray-600">No hay cumpleaños en los próximos 7 días.</p>
           ) : (
@@ -381,12 +382,12 @@ export default function DashboardPage() {
 
         {/* B. Aniversarios próximos (30 días) */}
         {vacUpcoming.loading ? (
-          <WidgetSkeleton title="🎖️ Aniversarios próximos" />
+          <WidgetSkeleton title="Aniversarios próximos" />
         ) : vacUpcoming.error ? (
-          <WidgetError title="🎖️ Aniversarios próximos" onRetry={fetchUpcoming} />
+          <WidgetError title="Aniversarios próximos" onRetry={fetchUpcoming} />
         ) : (
           <div className="card">
-            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">🎖️ Aniversarios próximos (30d)</p>
+            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Award size={12} /> Aniversarios próximos (30d)</p>
             {vacUpcoming.items.length === 0 ? (
               <p className="text-xs text-gray-600">Sin aniversarios en los próximos 30 días.</p>
             ) : (
@@ -396,11 +397,11 @@ export default function DashboardPage() {
                   const rowClass = urgent
                     ? 'bg-yellow-500/15 border-yellow-400/40'
                     : 'bg-dark-700 border-dark-border'
-                  const icon = urgent ? '⏰' : '🎖️'
+                  const IconC = urgent ? Clock : Award
                   return (
                     <div key={employee.id} className={`px-3 py-2 border rounded-lg ${rowClass}`}>
                       <div className="text-sm text-white flex items-center gap-2">
-                        <span>{icon}</span>
+                        <IconC size={14} className={urgent ? 'text-yellow-300' : 'text-gray-400'} />
                         <span className="font-semibold">{employee.name}</span>
                       </div>
                       <div className="text-[11px] text-gray-400 font-mono mt-0.5">
@@ -417,12 +418,12 @@ export default function DashboardPage() {
 
         {/* C. En vacaciones hoy */}
         {vacActive.loading ? (
-          <WidgetSkeleton title="🏖 En vacaciones hoy" />
+          <WidgetSkeleton title="En vacaciones hoy" />
         ) : vacActive.error ? (
-          <WidgetError title="🏖 En vacaciones hoy" onRetry={fetchActive} />
+          <WidgetError title="En vacaciones hoy" onRetry={fetchActive} />
         ) : (
           <div className="card">
-            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">🏖 En vacaciones hoy</p>
+            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Palmtree size={12} /> En vacaciones hoy</p>
             {vacActive.items.length === 0 ? (
               <p className="text-xs text-gray-600">Nadie de vacaciones hoy.</p>
             ) : (
@@ -453,12 +454,12 @@ export default function DashboardPage() {
 
         {/* D. Prescripciones (expired) */}
         {vacExpired.loading ? (
-          <WidgetSkeleton title="⚠️ Prescripciones" />
+          <WidgetSkeleton title="Prescripciones" />
         ) : vacExpired.error ? (
-          <WidgetError title="⚠️ Prescripciones" onRetry={fetchExpired} />
+          <WidgetError title="Prescripciones" onRetry={fetchExpired} />
         ) : (
           <div className="card">
-            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">⚠️ Prescripciones</p>
+            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5"><AlertTriangle size={12} /> Prescripciones</p>
             {vacExpired.items.length === 0 ? (
               <p className="text-xs text-gray-600">Sin periodos prescritos.</p>
             ) : (
@@ -552,7 +553,7 @@ export default function DashboardPage() {
 
       {checkedIn.length === 0 && notYet.length === 0 && (
         <div className="text-center py-12 text-gray-600">
-          <div className="text-4xl mb-3">📋</div>
+          <div className="flex justify-center mb-3"><ClipboardList size={40} /></div>
           <p className="font-mono text-sm">Sin empleados registrados aún.</p>
           <Link href="/dashboard/employees" className="text-brand-400 text-sm font-semibold mt-2 inline-block">+ Agregar empleados →</Link>
         </div>
