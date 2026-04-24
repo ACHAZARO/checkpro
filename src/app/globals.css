@@ -131,8 +131,12 @@ html.light aside[data-sidebar] * {
     box-shadow: var(--cp-shadow-sm), inset 0 1px 0 rgb(255 255 255 / 0.08);
     will-change: transform;
   }
-  .btn-primary { background-color: theme('colors.brand.400'); color: #000; }
-  .btn-primary:hover:not(:disabled) { filter: brightness(1.05); box-shadow: var(--cp-shadow), inset 0 1px 0 rgb(255 255 255 / 0.12); }
+  .btn-primary {
+    background-image: linear-gradient(180deg, #52ffb0 0%, #3dffa0 55%, #00d97e 100%);
+    color: #000;
+    box-shadow: var(--cp-shadow-sm), inset 0 1px 0 rgb(255 255 255 / 0.35), 0 0 0 1px rgb(0 217 126 / 0.3);
+  }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.06); box-shadow: var(--cp-shadow), inset 0 1px 0 rgb(255 255 255 / 0.4), 0 0 24px -4px rgb(61 255 160 / 0.4); }
   .btn-primary:active:not(:disabled) { transform: translateY(1px) scale(0.995); filter: brightness(0.92); }
   .btn-danger { background-color: theme('colors.red.500'); color: #fff; }
   .btn-danger:hover:not(:disabled) { filter: brightness(1.06); box-shadow: var(--cp-shadow); }
@@ -185,6 +189,44 @@ html.light aside[data-sidebar] * {
 
   /* Divisores finos reutilizables */
   .hairline { height: 1px; background: linear-gradient(90deg, transparent, var(--cp-border) 20%, var(--cp-border) 80%, transparent); }
+
+  /* Page header premium — título grande + eyebrow + acento */
+  .page-title {
+    font-size: clamp(1.875rem, 4vw, 2.5rem);
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    line-height: 1.05;
+    background: linear-gradient(180deg, var(--cp-text) 0%, var(--cp-text-muted) 180%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .page-eyebrow {
+    @apply inline-flex items-center gap-2 text-[10px] font-mono font-bold uppercase tracking-[0.2em];
+    color: var(--cp-text-muted);
+  }
+  .page-eyebrow::before {
+    content: ""; width: 20px; height: 1px; background: theme('colors.brand.400');
+  }
+
+  /* Stat card premium — con acento lateral y número grande */
+  .stat-premium {
+    position: relative;
+    background-color: var(--cp-surface);
+    border: 1px solid var(--cp-border);
+    box-shadow: var(--cp-shadow-sm);
+    border-radius: 1rem;
+    padding: 1.125rem 1.25rem;
+    overflow: hidden;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+  }
+  .stat-premium::before {
+    content: ""; position: absolute; left: 0; top: 15%; bottom: 15%; width: 3px;
+    background: currentColor; border-radius: 0 3px 3px 0; opacity: 0.9;
+  }
+  .stat-premium:hover { box-shadow: var(--cp-shadow); transform: translateY(-1px); }
+  .stat-premium .stat-label { @apply text-[10px] font-mono font-bold uppercase tracking-[0.15em]; color: var(--cp-text-muted); }
+  .stat-premium .stat-value { font-size: 2rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1; margin-top: 0.5rem; }
+  .stat-premium .stat-sub { @apply text-[11px] font-mono mt-1; color: var(--cp-text-faint); }
 
   /* KBD chip para atajos / códigos */
   .kbd { @apply inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-mono font-semibold;

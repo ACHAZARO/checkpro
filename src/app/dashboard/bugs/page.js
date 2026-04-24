@@ -130,7 +130,7 @@ export default function BugsPage() {
     <div className="p-5 md:p-6 max-w-3xl mx-auto">
       <div className="mb-5 flex items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-extrabold text-white">Bugs y mejoras</h1>
+          <h1 className="page-title">Bugs y mejoras</h1>
           <p className="text-gray-500 text-xs font-mono mt-0.5">REVISIÓN DE REPORTES DE TU EQUIPO</p>
         </div>
         <Link href="/dashboard/help" className="text-xs text-gray-500 hover:text-brand-400 underline">

@@ -79,21 +79,29 @@ export default function DashboardLayout({ children }) {
   return (
     <div className="flex min-h-dvh" style={{ backgroundColor: 'var(--cp-bg)' }}>
       {/* Desktop sidebar */}
-      <aside data-sidebar className="hidden md:flex flex-col w-56 shrink-0" style={{ background: '#101318', borderRight: '1px solid #1f2636' }}>
-        <div className="p-5 border-b border-dark-border">
-          <div className="text-brand-400 font-mono text-xs font-bold tracking-widest">⬡ CHECKPRO</div>
-          {/* FIX: mostrar nombre de la EMPRESA (tenant.name) — el nombre de sucursal se ve dentro de cada pagina */}
-          <div className="text-white font-bold text-sm mt-1 truncate">{tenant?.name || tenant?.config?.branchName || '—'}</div>
-          <div className="text-gray-500 text-xs mt-0.5 truncate">{profile?.name}</div>
+      <aside data-sidebar className="hidden md:flex flex-col w-60 shrink-0 relative" style={{ background: 'linear-gradient(180deg, #0c0f15 0%, #101318 40%, #0e1117 100%)', borderRight: '1px solid #1f2636' }}>
+        <div className="absolute top-0 left-0 right-0 h-px" style={{ background: 'linear-gradient(90deg, transparent, rgba(61,255,160,0.25), transparent)' }} />
+        <div className="p-5 pb-4 border-b border-dark-border">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center font-mono text-[11px] font-bold text-black shrink-0" style={{ background: 'linear-gradient(135deg, #52ffb0, #00d97e)', boxShadow: '0 4px 12px -2px rgba(61,255,160,0.4)' }}>CP</div>
+            <div className="flex-1 min-w-0">
+              <div className="text-white font-bold text-[13px] leading-tight truncate">{tenant?.name || tenant?.config?.branchName || '—'}</div>
+              <div className="text-gray-500 text-[10px] font-mono tracking-wider uppercase mt-0.5 truncate">{profile?.name}</div>
+            </div>
+          </div>
         </div>
-        <nav className="flex-1 py-3">
-          {NAV.filter(n => !n.mixedOnly || tenant?.config?.mixedSchedule?.enabled).map(n => (
-            <Link key={n.href} href={n.href}
-              className={`flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-colors
-                ${pathname === n.href ? 'text-brand-400 bg-brand-400/5 border-l-2 border-brand-400' : 'text-gray-400 hover:text-white hover:bg-dark-700 border-l-2 border-transparent'}`}>
-              <n.Icon size={16} /> {n.label}
-            </Link>
-          ))}
+        <nav className="flex-1 py-3 px-2 space-y-0.5">
+          {NAV.filter(n => !n.mixedOnly || tenant?.config?.mixedSchedule?.enabled).map(n => {
+            const active = pathname === n.href
+            return (
+              <Link key={n.href} href={n.href}
+                className={`relative flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-all
+                  ${active ? 'text-black' : 'text-gray-400 hover:text-white hover:bg-dark-700/60'}`}
+                style={active ? { background: 'linear-gradient(135deg, rgba(82,255,176,0.95), rgba(61,255,160,0.9))', boxShadow: '0 4px 16px -4px rgba(61,255,160,0.3), inset 0 1px 0 rgba(255,255,255,0.2)' } : undefined}>
+                <n.Icon size={16} /> {n.label}
+              </Link>
+            )
+          })}
         </nav>
         <div className="p-4 border-t border-dark-border space-y-2">
           <Link href="/check" target="_blank"

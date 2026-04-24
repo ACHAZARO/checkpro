@@ -103,7 +103,7 @@ export default function SettingsPage() {
   return (
     <div className="p-5 md:p-6 max-w-3xl mx-auto">
       <div className="mb-5">
-        <h1 className="text-2xl font-extrabold text-white">Configuración</h1>
+        <h1 className="page-title">Configuración</h1>
         <p className="text-gray-500 text-xs font-mono mt-0.5">PARÁMETROS DEL SISTEMA</p>
       </div>
 
@@ -807,7 +807,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
           <input className="input text-2xl font-extrabold bg-transparent border-0 border-b border-dark-border rounded-none px-0 focus:border-brand-400"
             value={name} onChange={e => setName(e.target.value)} />
         ) : (
-          <h1 className="text-2xl font-extrabold text-white">{branch.name}</h1>
+          <h1 className="page-title">{branch.name}</h1>
         )}
         <p className="text-gray-500 text-xs font-mono mt-0.5">CONFIGURACIÓN DE ESTA SUCURSAL</p>
       </div>

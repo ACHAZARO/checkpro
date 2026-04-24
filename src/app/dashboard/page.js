@@ -45,10 +45,10 @@ function formatDDMM(iso) {
 
 function StatCard({ label, value, color = 'text-white', sub }) {
   return (
-    <div className="card-sm">
-      <div className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-1">{label}</div>
-      <div className={`text-3xl font-extrabold ${color}`}>{value}</div>
-      {sub && <div className="text-xs text-gray-600 mt-0.5">{sub}</div>}
+    <div className={`stat-premium ${color}`}>
+      <div className="stat-label" style={{ color: 'var(--cp-text-muted)' }}>{label}</div>
+      <div className={`stat-value ${color}`}>{value}</div>
+      {sub && <div className="stat-sub">{sub}</div>}
     </div>
   )
 }
@@ -264,10 +264,11 @@ export default function DashboardPage() {
 
   return (
     <div className="p-5 md:p-6 max-w-5xl mx-auto">
-      <div className="mb-5">
-        <h1 className="text-2xl font-extrabold text-white">Hoy</h1>
-        <p className="text-gray-500 text-xs font-mono mt-0.5">
-          {now.toLocaleDateString('es-MX', { weekday: 'long', day: '2-digit', month: 'long' }).toUpperCase()}
+      <div className="mb-6">
+        <div className="page-eyebrow mb-2">Panel · {now.toLocaleDateString('es-MX', { weekday: 'long' })}</div>
+        <h1 className="page-title">Hoy</h1>
+        <p className="text-[13px] font-mono mt-1.5" style={{ color: 'var(--cp-text-muted)' }}>
+          {now.toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' })} · {employees.length} empleado{employees.length !== 1 ? 's' : ''} activo{employees.length !== 1 ? 's' : ''}
         </p>
       </div>
 

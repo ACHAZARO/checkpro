@@ -512,8 +512,8 @@ export default function EmployeeDetailPage() {
         <button
           onClick={() => setExportOpen(true)}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-dark-700 border border-dark-border text-gray-300 rounded-lg text-xs font-semibold hover:text-white active:bg-dark-600"
-          title="Exportar asistencia a Excel">
-          <Download size={14} /> Exportar Excel
+          title="Exportar asistencia">
+          <Download size={14} /> Exportar
         </button>
       </div>
 
@@ -987,13 +987,13 @@ export default function EmployeeDetailPage() {
                 ))}
               </div>
               <p className="text-[11px] text-gray-600 mt-2">
-                Se exportará un archivo .xlsx con dos hojas: Registros y Resumen.
+                Se exportará un archivo con dos hojas: Registros y Resumen.
               </p>
             </div>
             <div className="px-5 pb-5 pt-2 border-t border-dark-border shrink-0 flex gap-2">
               <button onClick={doExport} disabled={exporting}
                 className="flex-1 px-3 py-2.5 bg-brand-400 text-black font-bold rounded-lg text-sm active:brightness-90 disabled:opacity-50">
-                {exporting ? 'Generando...' : 'Descargar Excel'}
+                {exporting ? 'Generando...' : 'Descargar'}
               </button>
               <button onClick={() => setExportOpen(false)} disabled={exporting}
                 className="px-3 py-2.5 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-sm">

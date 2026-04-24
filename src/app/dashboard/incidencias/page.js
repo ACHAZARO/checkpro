@@ -259,7 +259,7 @@ export default function IncidenciasPage() {
     <div className="p-5 md:p-6 max-w-5xl mx-auto">
       <div className="flex items-end justify-between mb-5 flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-extrabold text-white">Incidencias</h1>
+          <h1 className="page-title">Incidencias</h1>
           <p className="text-gray-500 text-xs font-mono mt-0.5 flex items-center gap-1.5">
             {openCount > 0 ? (
               <span className="text-red-400 inline-flex items-center gap-1.5">

@@ -243,7 +243,7 @@ export default function PlanningPage() {
     <div className="p-5 md:p-6 max-w-6xl mx-auto">
       <div className="flex items-end justify-between mb-5 flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-extrabold text-white">Planificador semanal</h1>
+          <h1 className="page-title">Planificador semanal</h1>
           <p className="text-gray-500 text-xs font-mono mt-0.5">EMPLEADOS MIXTOS · {mixedEmps.length} persona{mixedEmps.length !== 1 ? 's' : ''}</p>
           {savedMeta ? (
             <div className="mt-1 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-brand-400/15 border border-brand-400/30 text-brand-300 text-[11px] font-mono">

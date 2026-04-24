@@ -383,7 +383,7 @@ export default function EmployeesPage() {
     <div className="p-5 md:p-6 max-w-2xl mx-auto">
       <div className="flex items-end justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-extrabold text-white">Empleados</h1>
+          <h1 className="page-title">Empleados</h1>
           <p className="text-gray-500 text-xs font-mono mt-0.5">GESTIÓN DE PERSONAL</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -817,7 +817,7 @@ export default function EmployeesPage() {
               <h3 className="text-lg font-bold text-white inline-flex items-center gap-2">
                 <Users size={18} /> Auditoría de asistencia
               </h3>
-              <p className="text-xs text-gray-500 mt-0.5">Excel con una pestaña por empleado activo + resumen general.</p>
+              <p className="text-xs text-gray-500 mt-0.5">Archivo con una pestaña por empleado activo + resumen general.</p>
             </div>
             <div className="px-5 pb-4 overflow-y-auto flex-1" style={{ touchAction: 'pan-y' }}>
               <div className="grid grid-cols-2 gap-2 mb-3">
@@ -858,7 +858,7 @@ export default function EmployeesPage() {
             <div className="px-5 pb-5 pt-2 border-t border-dark-border shrink-0 flex gap-2">
               <button onClick={doExportAll} disabled={exportingAll}
                 className="flex-1 px-3 py-2.5 bg-brand-400 text-black font-bold rounded-lg text-sm active:brightness-90 disabled:opacity-50">
-                {exportingAll ? 'Generando...' : 'Descargar Excel'}
+                {exportingAll ? 'Generando...' : 'Descargar'}
               </button>
               <button onClick={() => setExportAllOpen(false)} disabled={exportingAll}
                 className="px-3 py-2.5 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-sm">
