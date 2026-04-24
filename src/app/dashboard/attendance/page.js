@@ -199,7 +199,8 @@ export default function AttendancePage() {
 
     if (insertErr) {
       console.error('Error registrando falta:', insertErr)
-      toast.error('No se pudo registrar la falta')
+      const code = insertErr.code ? ` [${insertErr.code}]` : ''
+      toast.error(`No se pudo registrar la falta${code}: ${insertErr.message || 'error'}`, { duration: 8000 })
       setSaving(false)
       return
     }
