@@ -260,7 +260,7 @@ export default function IncidenciasPage() {
       <div className="flex items-end justify-between mb-5 flex-wrap gap-3">
         <div>
           <h1 className="page-title">Incidencias</h1>
-          <p className="text-gray-500 text-xs font-mono mt-0.5 flex items-center gap-1.5">
+          <p className="text-gray-400 text-xs font-mono mt-0.5 flex items-center gap-1.5">
             {openCount > 0 ? (
               <span className="text-red-400 inline-flex items-center gap-1.5">
                 <Lock size={12} /> {openCount} abierta{openCount !== 1 ? 's' : ''} · bloquean el corte
@@ -295,13 +295,13 @@ export default function IncidenciasPage() {
 
       {incidencias.length === 0 ? (
         <div className="card text-center py-10">
-          <div className="flex justify-center mb-3 text-gray-500">
+          <div className="flex justify-center mb-3 text-gray-400">
             {filter === 'open' ? <CheckCircle2 size={40} /> : <Inbox size={40} />}
           </div>
-          <p className="text-gray-300 text-sm font-semibold">
+          <p className="text-gray-200 text-sm font-semibold">
             {filter === 'open' ? 'Ninguna incidencia abierta' : 'Sin incidencias'}
           </p>
-          <p className="text-gray-500 text-xs mt-2">
+          <p className="text-gray-400 text-xs mt-2">
             Las incidencias detectadas automáticamente y las creadas manualmente aparecen aquí.
           </p>
         </div>
@@ -315,11 +315,11 @@ export default function IncidenciasPage() {
                     {KIND_LABEL[inc.kind] || inc.kind}
                   </span>
                   <span className="text-white font-semibold text-sm">{inc.employee_name || '—'}</span>
-                  <span className="text-gray-500 text-[11px] font-mono">· {inc.date_str}</span>
+                  <span className="text-gray-400 text-[11px] font-mono">· {inc.date_str}</span>
                 </div>
-                {inc.description && <p className="text-gray-400 text-xs leading-snug">{inc.description}</p>}
+                {inc.description && <p className="text-gray-300 text-xs leading-snug">{inc.description}</p>}
                 {inc.status !== 'open' && inc.resolution && (
-                  <p className="text-gray-600 text-[11px] font-mono mt-1 inline-flex items-center gap-1">
+                  <p className="text-gray-400 text-[11px] font-mono mt-1 inline-flex items-center gap-1">
                     <CheckCircle2 size={10} /> {inc.resolution}{inc.resolved_by_name ? ` · ${inc.resolved_by_name}` : ''}
                   </p>
                 )}
@@ -343,11 +343,11 @@ export default function IncidenciasPage() {
             <div className="px-5 pt-4 pb-2 flex items-start justify-between shrink-0">
               <div>
                 <h2 className="text-lg font-bold text-white">{KIND_LABEL[detail.kind] || detail.kind}</h2>
-                <p className="text-gray-500 text-xs font-mono mt-0.5">
+                <p className="text-gray-400 text-xs font-mono mt-0.5">
                   {detail.employee_name || '—'} · {detail.date_str}
                 </p>
               </div>
-              <button onClick={() => setDetail(null)} className="text-gray-500 hover:text-white p-1 -mt-1 -mr-1">
+              <button onClick={() => setDetail(null)} className="text-gray-400 hover:text-white hover:bg-white/10 rounded-md p-1 -mt-1 -mr-1 transition-colors">
                 <X size={18} />
               </button>
             </div>
@@ -432,7 +432,7 @@ export default function IncidenciasPage() {
                style={{ maxHeight: '90dvh' }}>
             <div className="px-5 pt-4 pb-2 flex items-start justify-between shrink-0">
               <h2 className="text-lg font-bold text-white">Nueva incidencia</h2>
-              <button onClick={() => setShowNew(false)} className="text-gray-500 hover:text-white p-1 -mt-1 -mr-1">
+              <button onClick={() => setShowNew(false)} className="text-gray-400 hover:text-white hover:bg-white/10 rounded-md p-1 -mt-1 -mr-1 transition-colors">
                 <X size={18} />
               </button>
             </div>

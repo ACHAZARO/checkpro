@@ -244,7 +244,7 @@ export default function PlanningPage() {
       <div className="flex items-end justify-between mb-5 flex-wrap gap-3">
         <div>
           <h1 className="page-title">Planificador semanal</h1>
-          <p className="text-gray-500 text-xs font-mono mt-0.5">EMPLEADOS MIXTOS · {mixedEmps.length} persona{mixedEmps.length !== 1 ? 's' : ''}</p>
+          <p className="text-gray-400 text-xs font-mono mt-0.5">EMPLEADOS MIXTOS · {mixedEmps.length} persona{mixedEmps.length !== 1 ? 's' : ''}</p>
           {savedMeta ? (
             <div className="mt-1 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-brand-400/15 border border-brand-400/30 text-brand-300 text-[11px] font-mono">
               ✓ {savedMeta.title || `Semana ${savedMeta.start_date}`} · guardada{savedMeta.saved_by_name ? ` por ${savedMeta.saved_by_name}` : ''}
@@ -265,8 +265,8 @@ export default function PlanningPage() {
       {mixedEmps.length === 0 ? (
         <div className="card text-center py-10">
           <div className="text-4xl mb-3">🔀</div>
-          <p className="text-gray-300 text-sm font-semibold">No hay empleados mixtos registrados.</p>
-          <p className="text-gray-500 text-xs mt-2">Ve a <strong>Personal</strong> y marca "Horario mixto" al crear o editar un empleado.</p>
+          <p className="text-gray-200 text-sm font-semibold">No hay empleados mixtos registrados.</p>
+          <p className="text-gray-400 text-xs mt-2">Ve a <strong>Personal</strong> y marca "Horario mixto" al crear o editar un empleado.</p>
         </div>
       ) : (
         <>
@@ -290,7 +290,7 @@ export default function PlanningPage() {
                   {dates.map((d, i) => (
                     <th key={d} className="text-center p-2 text-gray-500 font-mono border-b border-dark-border min-w-[120px]">
                       <div className="text-brand-400">{DAY_L[DAYS[i]]}</div>
-                      <div className="text-[10px] text-gray-600 font-normal">{d.slice(5)}</div>
+                      <div className="text-[10px] text-gray-400 font-normal">{d.slice(5)}</div>
                     </th>
                   ))}
                 </tr>
@@ -299,8 +299,8 @@ export default function PlanningPage() {
                 {mixedEmps.map(emp => (
                   <tr key={emp.id} className="border-b border-dark-border/50 hover:bg-dark-700/40">
                     <td className="p-2 align-top sticky left-0 bg-dark-800 z-10">
-                      <div className="font-semibold text-white text-xs whitespace-nowrap">{emp.name}</div>
-                      <div className="text-[10px] text-gray-500 font-mono">{emp.daily_hours || '?'} h/día · {emp.employee_code}</div>
+                      <div className="font-semibold text-white text-xs whitespace-nowrap max-w-[160px] truncate" title={emp.name}>{emp.name}</div>
+                      <div className="text-[10px] text-gray-400 font-mono">{emp.daily_hours || '?'} h/día · {emp.employee_code}</div>
                     </td>
                     {dates.map(d => {
                       const cell = plans[`${emp.id}|${d}`]

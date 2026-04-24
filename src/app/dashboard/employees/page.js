@@ -448,19 +448,19 @@ export default function EmployeesPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-sm text-white">{emp.name}</span>
-                      <span className="text-xs font-mono text-gray-600">{emp.employee_code}</span>
+                      <span className="font-bold text-sm text-white break-words">{emp.name}</span>
+                      <span className="text-xs font-mono text-gray-400">{emp.employee_code}</span>
                       {emp.can_manage && <span className="badge-orange text-[9px]">Gerente</span>}
                       {emp.is_mixed && <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-purple-500/15 border border-purple-400/30 text-purple-300 whitespace-nowrap">🔀 Mixto</span>}
                       {emp.free_schedule && <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-orange-500/15 border border-orange-400/30 text-orange-300 whitespace-nowrap">🔓 Libre</span>}
                       {emp.status === 'inactive' && <span className="badge-gray text-[9px]">Inactivo</span>}
                     </div>
-                    <div className="text-xs text-gray-500 mt-0.5">
+                    <div className="text-xs text-gray-400 mt-0.5">
                       {emp.department && `${emp.department} · `}
-                      {branchName && <span className="text-brand-400/80 inline-flex items-center gap-1"><Building2 size={10} /> {branchName} · </span>}
+                      {branchName && <span className="text-brand-400 inline-flex items-center gap-1"><Building2 size={10} /> {branchName} · </span>}
                       ${(emp.monthly_salary || 0).toLocaleString()}/mes · ${monthlyToHourly(emp).toFixed(2)}/h
                     </div>
-                    <div className="text-xs text-gray-600 font-mono mt-0.5">
+                    <div className="text-xs text-gray-400 font-mono mt-0.5">
                       {emp.is_mixed
                         ? `${emp.daily_hours || '?'} hrs/día · agendado semanalmente`
                         : DAYS.filter(d => emp.schedule?.[d]?.work).map(d => DAY_L[d]).join(' ')}
@@ -476,7 +476,7 @@ export default function EmployeesPage() {
                           <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
                             vacPending
                               ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
-                              : 'bg-dark-700 border-dark-border text-gray-600'
+                              : 'bg-dark-700 border-dark-border text-gray-400'
                           }`}>
                             🏖 {vacDays}d vacaciones{vacPending ? ' pendientes' : (tomadasOk ? ' tomadas ✓' : '')}
                           </span>
@@ -569,7 +569,7 @@ export default function EmployeesPage() {
                     max={todayISO()}
                     value={form.hire_date || ''}
                     onChange={e => F('hire_date', e.target.value)} />
-                  <p className="text-[10px] text-gray-600 font-mono mt-1 leading-snug">
+                  <p className="text-[10px] text-gray-400 font-mono mt-1 leading-snug">
                     Si el empleado tiene antigüedad previa, el sistema asume que ya tomó las vacaciones de años anteriores. Solo contará a partir del próximo aniversario.
                   </p>
                 </div>
@@ -590,7 +590,7 @@ export default function EmployeesPage() {
                     <option value="efectivo">Efectivo</option>
                     <option value="transferencia">Transferencia</option>
                   </select>
-                  <p className="text-[10px] text-gray-600 font-mono mt-1">Aparecerá en los recibos firmados. Los cambios solo afectan nuevos pagos.</p>
+                  <p className="text-[10px] text-gray-400 font-mono mt-1">Aparecerá en los recibos firmados. Los cambios solo afectan nuevos pagos.</p>
                 </div>
 
                 <div>
@@ -599,7 +599,7 @@ export default function EmployeesPage() {
                   <input id="emp-birth-date" className="input" type="date"
                     max={todayISO()}
                     value={form.birth_date || ''} onChange={e => F('birth_date', e.target.value)} />
-                  <p className="text-[10px] text-gray-600 font-mono mt-1">Se usa para felicitarlo el día de su cumpleaños.</p>
+                  <p className="text-[10px] text-gray-400 font-mono mt-1">Se usa para felicitarlo el día de su cumpleaños.</p>
                 </div>
 
                 <div>
@@ -610,7 +610,7 @@ export default function EmployeesPage() {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <p className="text-sm font-semibold text-white">Gerente / Puede gestionar</p>
-                    <p className="text-xs text-gray-500">Acceso al panel de administración</p>
+                    <p className="text-xs text-gray-400">Acceso al panel de administración</p>
                   </div>
                   <button onClick={() => F('can_manage', !form.can_manage)}
                     className={`w-10 h-6 rounded-full relative transition-colors ${form.can_manage ? 'bg-brand-400' : 'bg-dark-600'}`}>
@@ -621,7 +621,7 @@ export default function EmployeesPage() {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <p className="text-sm font-semibold text-white">Turno de piso</p>
-                    <p className="text-xs text-gray-500">Aparece en checada y nómina</p>
+                    <p className="text-xs text-gray-400">Aparece en checada y nómina</p>
                   </div>
                   <button onClick={() => F('has_shift', !form.has_shift)}
                     className={`w-10 h-6 rounded-full relative transition-colors ${form.has_shift ? 'bg-brand-400' : 'bg-dark-600'}`}>
@@ -634,7 +634,7 @@ export default function EmployeesPage() {
                   <div className="flex items-center justify-between py-2 border-t border-dark-border pt-3">
                     <div>
                       <p className="text-sm font-semibold text-white">Horario mixto <span className="text-[10px] font-mono text-gray-500 ml-1">ROTATIVO</span></p>
-                      <p className="text-xs text-gray-500">El gerente agenda su horario cada semana</p>
+                      <p className="text-xs text-gray-400">El gerente agenda su horario cada semana</p>
                     </div>
                     <button onClick={() => F('is_mixed', !form.is_mixed)}
                       className={`w-10 h-6 rounded-full relative transition-colors ${form.is_mixed ? 'bg-brand-400' : 'bg-dark-600'}`}>
@@ -649,7 +649,7 @@ export default function EmployeesPage() {
                     <div className="flex items-center justify-between py-1">
                       <div>
                         <p className="text-sm font-semibold text-white">Horario libre <span className="text-[10px] font-mono text-orange-400 ml-1">GERENTE</span></p>
-                        <p className="text-xs text-gray-500 leading-snug">Nómina íntegra. Checa solo para tracking. Alertas si incumple mínimos.</p>
+                        <p className="text-xs text-gray-400 leading-snug">Nómina íntegra. Checa solo para tracking. Alertas si incumple mínimos.</p>
                       </div>
                       <button onClick={() => F('free_schedule', !form.free_schedule)}
                         className={`w-10 h-6 rounded-full relative transition-colors shrink-0 ${form.free_schedule ? 'bg-orange-400' : 'bg-dark-600'}`}>
@@ -673,7 +673,7 @@ export default function EmployeesPage() {
                               onChange={e => F('free_min_hours_week', e.target.value)} />
                           </div>
                         </div>
-                        <p className="text-[10px] text-gray-500 leading-snug">
+                        <p className="text-[10px] text-gray-400 leading-snug">
                           Si checa menos de estos umbrales en la semana, aparece una alerta en Dashboard y tarjeta del empleado.
                         </p>
                       </div>
@@ -699,7 +699,7 @@ export default function EmployeesPage() {
                       value={form.daily_hours ?? ''}
                       onChange={e => F('daily_hours', e.target.value)}
                       placeholder="8" />
-                    <p className="text-[10px] text-gray-600 font-mono mt-1 leading-snug">
+                    <p className="text-[10px] text-gray-400 font-mono mt-1 leading-snug">
                       El empleado trabajará esta cantidad de horas cada día que el gerente lo agende en el <strong>Planificador</strong>. No se define día/hora fija aquí.
                     </p>
                   </div>
@@ -817,7 +817,7 @@ export default function EmployeesPage() {
               <h3 className="text-lg font-bold text-white inline-flex items-center gap-2">
                 <Users size={18} /> Auditoría de asistencia
               </h3>
-              <p className="text-xs text-gray-500 mt-0.5">Archivo con una pestaña por empleado activo + resumen general.</p>
+              <p className="text-xs text-gray-400 mt-0.5">Archivo con una pestaña por empleado activo + resumen general.</p>
             </div>
             <div className="px-5 pb-4 overflow-y-auto flex-1" style={{ touchAction: 'pan-y' }}>
               <div className="grid grid-cols-2 gap-2 mb-3">
@@ -851,7 +851,7 @@ export default function EmployeesPage() {
                   </button>
                 ))}
               </div>
-              <p className="text-[11px] text-gray-600 mt-2">
+              <p className="text-[11px] text-gray-400 mt-2">
                 Empleados activos: <span className="text-white font-semibold">{emps.filter(e => e.status === 'active').length}</span>
               </p>
             </div>

@@ -297,12 +297,12 @@ function TenantIdentityTab({ tenant, onSaved }) {
         <div>
           <label className="label">Nombre de la empresa</label>
           <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Mi Empresa" />
-          <p className="text-[10px] text-gray-600 font-mono mt-1">Nombre comercial. Cada sucursal puede elegir si usar este o el suyo en impresos.</p>
+          <p className="text-[10px] text-gray-400 font-mono mt-1">Nombre comercial. Cada sucursal puede elegir si usar este o el suyo en impresos.</p>
         </div>
         <div>
           <label className="label">Razón social <span className="text-gray-600 font-normal">(opcional)</span></label>
           <input className="input" value={cfg.razonSocial || ''} onChange={e => F('razonSocial', e.target.value)} placeholder="Mi Empresa S.A. de C.V." />
-          <p className="text-[10px] text-gray-600 font-mono mt-1">Solo si necesitas que aparezca el nombre legal/fiscal en impresos.</p>
+          <p className="text-[10px] text-gray-400 font-mono mt-1">Solo si necesitas que aparezca el nombre legal/fiscal en impresos.</p>
         </div>
         <div>
           <label className="label">Logo principal (URL)</label>
@@ -314,7 +314,7 @@ function TenantIdentityTab({ tenant, onSaved }) {
               <span className="text-[10px] text-gray-500 font-mono">Vista previa</span>
             </div>
           )}
-          <p className="text-[10px] text-gray-600 font-mono mt-1">
+          <p className="text-[10px] text-gray-400 font-mono mt-1">
             Cada sucursal puede sobrescribir el logo para sus hojas impresas.
           </p>
         </div>
@@ -324,9 +324,9 @@ function TenantIdentityTab({ tenant, onSaved }) {
             value={cfg.payrollLegend ?? DEFAULT_LEYENDA}
             onChange={e => F('payrollLegend', e.target.value)} placeholder={DEFAULT_LEYENDA} />
           <div className="flex items-center justify-between mt-1">
-            <p className="text-[10px] text-gray-600 font-mono">Cada sucursal puede sobrescribirla desde su propia configuración.</p>
+            <p className="text-[10px] text-gray-400 font-mono">Cada sucursal puede sobrescribirla desde su propia configuración.</p>
             <button onClick={() => F('payrollLegend', DEFAULT_LEYENDA)}
-              className="text-[10px] text-gray-600 hover:text-gray-400 font-mono">↻ Restaurar texto por defecto</button>
+              className="text-[10px] text-gray-400 hover:text-white font-mono">↻ Restaurar texto por defecto</button>
           </div>
         </div>
       </div>
@@ -375,7 +375,7 @@ function TenantIdentityTab({ tenant, onSaved }) {
                   Ilimitados
                 </label>
               </div>
-              <p className="text-[10px] text-gray-600 font-mono mt-1">Vacío o "Ilimitados" = sin tope. El sistema bloquea registrar más mixtos que el tope definido.</p>
+              <p className="text-[10px] text-gray-400 font-mono mt-1">Vacío o "Ilimitados" = sin tope. El sistema bloquea registrar más mixtos que el tope definido.</p>
             </div>
             <div className="text-[11px] text-brand-300/80 bg-brand-400/5 border border-brand-400/20 rounded-lg p-2.5 leading-snug">
               💡 Los empleados mixtos aparecen en la pestaña <strong>Planificador</strong>. El gerente los agenda cada semana (ideal: el día del corte).
@@ -599,7 +599,7 @@ function DangerZone({ tenantName: fallbackName }) {
                     autoComplete="current-password"
                     disabled={deleting}
                   />
-                  <p className="text-[10px] text-gray-600 font-mono mt-1">
+                  <p className="text-[10px] text-gray-400 font-mono mt-1">
                     Se valida contra Supabase Auth antes de borrar nada.
                   </p>
                 </div>
@@ -668,7 +668,7 @@ function BranchesTab({ branches, isOwner, myBranchId, onOpen, onChanged }) {
   return (
     <div className="space-y-3">
       {visible.length === 0 && (
-        <div className="card text-center py-8 text-gray-600 text-sm font-mono">
+        <div className="card text-center py-8 text-gray-400 text-sm font-mono">
           <div className="text-3xl mb-2">🏢</div>
           {isOwner ? 'Aún no hay sucursales. Crea la primera abajo.' : 'No tienes sucursal asignada.'}
         </div>
@@ -864,7 +864,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
           className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40">
           {locating ? '📡 Obteniendo...' : '📍 Usar mi ubicación actual'}
         </button>
-        <p className="text-[10px] text-gray-600 font-mono -mt-2">
+        <p className="text-[10px] text-gray-400 font-mono -mt-2">
           Párate en el punto exacto de la sucursal y toca el botón. Tu navegador pedirá permiso.
         </p>
 
@@ -887,7 +887,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
           <input type="range" min="30" max="1000" step="10"
             value={cfg.location?.radius || 300} onChange={e => FL('radius', parseInt(e.target.value))}
             className="w-full accent-brand-400" />
-          <div className="flex justify-between text-[10px] text-gray-600 font-mono mt-1">
+          <div className="flex justify-between text-[10px] text-gray-400 font-mono mt-1">
             <span>30 m</span><span>1 km</span>
           </div>
         </div>
@@ -937,7 +937,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
       {/* Holidays */}
       <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Días feriados <span className="normal-case text-gray-600">(pago ×3)</span></p>
       <div className="card mb-4">
-        {(cfg.holidays || []).length === 0 && <p className="text-gray-600 text-xs font-mono mb-3">Sin feriados registrados</p>}
+        {(cfg.holidays || []).length === 0 && <p className="text-gray-400 text-xs font-mono mb-3">Sin feriados registrados</p>}
         {(cfg.holidays || []).map(h => (
           <div key={h.id} className="flex items-center justify-between py-2 border-b border-dark-border last:border-0">
             <div><div className="font-semibold text-sm text-white">{h.name}</div><div className="text-xs text-gray-500 font-mono">{h.date} · ×3</div></div>
@@ -954,7 +954,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
       {/* Rest days */}
       <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Días de descanso colectivo <span className="normal-case text-gray-600">(día libre pagado)</span></p>
       <div className="card mb-4">
-        {(cfg.restDays || []).length === 0 && <p className="text-gray-600 text-xs font-mono mb-3">Sin días registrados</p>}
+        {(cfg.restDays || []).length === 0 && <p className="text-gray-400 text-xs font-mono mb-3">Sin días registrados</p>}
         {(cfg.restDays || []).map(r => (
           <div key={r.id} className="flex items-center justify-between py-2 border-b border-dark-border last:border-0">
             <div><div className="font-semibold text-sm text-white">{r.name}</div><div className="text-xs text-gray-500 font-mono">{r.date}</div></div>
@@ -975,13 +975,13 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
           <div>
             {cfg.ip
               ? <p className="text-xs text-brand-400 font-mono">🌐 {cfg.ip}</p>
-              : <p className="text-[10px] text-gray-600">Sin IP registrada — solo GPS</p>}
+              : <p className="text-[10px] text-gray-400">Sin IP registrada — solo GPS</p>}
           </div>
           <button onClick={detectIp} className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600">
             {cfg.ip ? '↻ Actualizar' : '📡 Detectar'}
           </button>
         </div>
-        <p className="text-[9px] text-gray-600 font-mono mt-2">Toca "Detectar" mientras estés conectado al WiFi de esta sucursal.</p>
+        <p className="text-[9px] text-gray-400 font-mono mt-2">Toca "Detectar" mientras estés conectado al WiFi de esta sucursal.</p>
       </div>
 
       {/* Printing — owner only (manager has no preview anyway) */}
@@ -1087,7 +1087,7 @@ function TeamTab({ branches, onChanged }) {
       <div>
         <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Invitaciones activas</p>
         {loading && <p className="text-xs text-gray-500 font-mono">Cargando...</p>}
-        {!loading && invs.length === 0 && <p className="text-xs text-gray-600 font-mono">Sin invitaciones activas.</p>}
+        {!loading && invs.length === 0 && <p className="text-xs text-gray-400 font-mono">Sin invitaciones activas.</p>}
         {invs.map(i => {
           const branch = branches.find(b => b.id === i.branch_id)
           const expired = new Date(i.expires_at) < new Date()

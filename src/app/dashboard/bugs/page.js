@@ -171,7 +171,7 @@ export default function BugsPage() {
           ) : filtered.length === 0 ? (
             <div className="card text-center py-8">
               <p className="text-gray-400 text-sm">No hay mensajes en esta sección.</p>
-              <p className="text-gray-600 text-xs font-mono mt-1">
+              <p className="text-gray-400 text-xs font-mono mt-1">
                 {tab === 'awaiting_approval' && 'Cuando el análisis semanal termine, los fixes propuestos aparecerán aquí.'}
                 {tab === 'open' && 'Nadie ha reportado nada nuevo.'}
               </p>
@@ -202,12 +202,12 @@ export default function BugsPage() {
                             </span>
                           )}
                         </div>
-                        <span className="text-[10px] font-mono text-gray-600 shrink-0">{fmtDate(m.created_at)}</span>
+                        <span className="text-[10px] font-mono text-gray-400 shrink-0">{fmtDate(m.created_at)}</span>
                       </div>
                       <h3 className="text-white font-bold text-sm">{m.title}</h3>
                       <p className="text-gray-400 text-xs mt-1 line-clamp-2">{m.description}</p>
                       {m.reporter_name && (
-                        <p className="text-[10px] font-mono text-gray-600 mt-2">
+                        <p className="text-[10px] font-mono text-gray-400 mt-2">
                           👤 {m.reporter_name} {m.reporter_email && `· ${m.reporter_email}`}
                         </p>
                       )}
@@ -219,8 +219,8 @@ export default function BugsPage() {
                           <p className="label">Reporte original completo</p>
                           <p className="text-sm text-gray-300 whitespace-pre-wrap">{m.description}</p>
                           {m.page_context && (
-                            <p className="text-[10px] font-mono text-gray-600 mt-2">
-                              Pantalla: <span className="text-gray-500">{m.page_context}</span>
+                            <p className="text-[10px] font-mono text-gray-400 mt-2">
+                              Pantalla: <span className="text-gray-300">{m.page_context}</span>
                             </p>
                           )}
                         </div>
@@ -238,7 +238,7 @@ export default function BugsPage() {
                               </div>
                             )}
                             {m.analyzed_at && (
-                              <p className="text-[10px] font-mono text-gray-600">
+                              <p className="text-[10px] font-mono text-gray-400">
                                 Análisis: {fmtDate(m.analyzed_at)}
                               </p>
                             )}

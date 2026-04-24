@@ -146,7 +146,7 @@ export default function AttendancePage() {
       <div className="mb-5">
         <p className="page-eyebrow">Historial · Jornadas registradas</p>
         <h1 className="page-title">Registros</h1>
-        <p className="text-gray-500 text-xs mt-1">Consulta, filtra y exporta las jornadas. Las faltas se gestionan desde <span className="text-brand-400">Incidencias</span>.</p>
+        <p className="text-gray-400 text-xs mt-1">Consulta, filtra y exporta las jornadas. Las faltas se gestionan desde <span className="text-brand-400">Incidencias</span>.</p>
       </div>
 
       {/* ── Exportar XLS ──────────────────────────────────────────────────── */}
@@ -170,7 +170,7 @@ export default function AttendancePage() {
               onClick={() => handleExportXLS('filtered')}
               className="w-full text-left px-4 py-3 hover:bg-dark-700 active:bg-dark-600 border-b border-dark-border/50">
               <p className="text-sm font-semibold text-white flex items-center gap-1.5"><ClipboardList size={14} /> Filtro actual</p>
-              <p className="text-xs text-gray-500 mt-0.5">
+              <p className="text-xs text-gray-400 mt-0.5">
                 {filtered.length} registros · {filterFrom} → {filterTo}
                 {filterEmp !== 'all' ? ' · ' + getEmpName(filterEmp) : ''}
                 {filterBranch !== 'all' ? ' · ' + (branches.find(b=>b.id===filterBranch)?.name||'') : ''}
@@ -180,7 +180,7 @@ export default function AttendancePage() {
               onClick={() => handleExportXLS('all')}
               className="w-full text-left px-4 py-3 hover:bg-dark-700 active:bg-dark-600">
               <p className="text-sm font-semibold text-white flex items-center gap-1.5"><Package size={14} /> Todo el período cargado</p>
-              <p className="text-xs text-gray-500 mt-0.5">
+              <p className="text-xs text-gray-400 mt-0.5">
                 {shifts.length} registros · {filterFrom} → {filterTo} · todos los empleados y sucursales
               </p>
             </button>
@@ -234,9 +234,9 @@ export default function AttendancePage() {
 
       {loading ? <p className="text-gray-500 font-mono text-sm">Cargando...</p> : (
         <>
-          <p className="text-xs text-gray-600 font-mono mb-3">{filtered.length} registro(s)</p>
+          <p className="text-xs text-gray-400 font-mono mb-3">{filtered.length} registro(s)</p>
           <div className="space-y-2">
-            {filtered.length === 0 && <div className="card text-center py-10 text-gray-500 font-mono text-sm">Sin registros en este período</div>}
+            {filtered.length === 0 && <div className="card text-center py-10 text-gray-400 font-mono text-sm">Sin registros en este período</div>}
             {filtered.map(s => {
               const bid = empBranchMap[s.employee_id]
               const bn = bid ? branches.find(b => b.id === bid)?.name : null
@@ -257,15 +257,15 @@ export default function AttendancePage() {
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-gray-500 font-mono mt-1">
+                      <div className="text-xs text-gray-400 font-mono mt-1">
                         {s.date_str}
                         {s.status !== 'absent' && ` · ${fmtTime(s.entry_time)} – ${s.exit_time ? fmtTime(s.exit_time) : '—'}`}
                         {s.duration_hours ? ` · ${s.duration_hours}h` : ''}
                       </div>
                       {s.classification?.label && s.status !== 'absent' && (
-                        <div className="text-xs text-gray-600 mt-0.5">{s.classification.label}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">{s.classification.label}</div>
                       )}
-                      {bn && <div className="text-[10px] text-gray-600 font-mono mt-0.5 flex items-center gap-1"><Building2 size={10} /> {bn}</div>}
+                      {bn && <div className="text-[10px] text-gray-400 font-mono mt-0.5 flex items-center gap-1"><Building2 size={10} /> {bn}</div>}
                       {s.covering_employee_id && (
                         <div className="text-xs text-blue-400 font-mono mt-0.5">Cubriendo: {getEmpName(s.covering_employee_id)}</div>
                       )}
@@ -307,7 +307,7 @@ export default function AttendancePage() {
             <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-2 shrink-0"/>
             <div className="px-5 pb-10 overflow-y-auto overscroll-contain" style={{touchAction:'pan-y'}}>
               <h3 className="text-lg font-bold text-white mb-1">Corrección de Jornada</h3>
-              <p className="text-xs text-gray-500 font-mono mb-4">{getEmpName(corrSheet.employee_id)} · {corrSheet.date_str}</p>
+              <p className="text-xs text-gray-400 font-mono mb-4">{getEmpName(corrSheet.employee_id)} · {corrSheet.date_str}</p>
               <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 text-yellow-400 text-xs font-semibold mb-4">
                 ⚠ Esta acción quedará registrada en auditoría.
               </div>
@@ -332,7 +332,7 @@ export default function AttendancePage() {
             <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-2 shrink-0"/>
             <div className="px-5 pb-10 overflow-y-auto overscroll-contain" style={{touchAction:'pan-y'}}>
               <h3 className="text-lg font-bold text-white mb-1">Marcar Incidencia</h3>
-              <p className="text-xs text-gray-500 font-mono mb-4">{getEmpName(flagSheet.employee_id)} · entrada {fmtTime(flagSheet.entry_time)}</p>
+              <p className="text-xs text-gray-400 font-mono mb-4">{getEmpName(flagSheet.employee_id)} · entrada {fmtTime(flagSheet.entry_time)}</p>
               <div className="mb-3"><label className="label">Tipo</label>
                 <select className="input" value={flagForm.type} onChange={e=>setFlagForm(f=>({...f,type:e.target.value}))}>
                   <option value="olvido_salida">Olvido de salida</option>

@@ -85,8 +85,8 @@ export default function DashboardLayout({ children }) {
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center font-mono text-[11px] font-bold text-black shrink-0" style={{ background: 'linear-gradient(135deg, #52ffb0, #00d97e)', boxShadow: '0 4px 12px -2px rgba(61,255,160,0.4)' }}>CP</div>
             <div className="flex-1 min-w-0">
-              <div className="text-white font-bold text-[13px] leading-tight truncate">{tenant?.name || tenant?.config?.branchName || '—'}</div>
-              <div className="text-gray-500 text-[10px] font-mono tracking-wider uppercase mt-0.5 truncate">{profile?.name}</div>
+              <div className="text-white font-bold text-[13px] leading-tight truncate" title={tenant?.name || tenant?.config?.branchName || '—'}>{tenant?.name || tenant?.config?.branchName || '—'}</div>
+              <div className="text-gray-400 text-[10px] font-mono tracking-wider uppercase mt-0.5 truncate" title={profile?.name}>{profile?.name}</div>
             </div>
           </div>
         </div>
@@ -96,7 +96,7 @@ export default function DashboardLayout({ children }) {
             return (
               <Link key={n.href} href={n.href}
                 className={`relative flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-all
-                  ${active ? 'text-black' : 'text-gray-400 hover:text-white hover:bg-dark-700/60'}`}
+                  ${active ? 'text-black' : 'text-gray-300 hover:text-white hover:bg-dark-700'}`}
                 style={active ? { background: 'linear-gradient(135deg, rgba(82,255,176,0.95), rgba(61,255,160,0.9))', boxShadow: '0 4px 16px -4px rgba(61,255,160,0.3), inset 0 1px 0 rgba(255,255,255,0.2)' } : undefined}>
                 <n.Icon size={16} /> {n.label}
               </Link>
@@ -105,19 +105,19 @@ export default function DashboardLayout({ children }) {
         </nav>
         <div className="p-4 border-t border-dark-border space-y-2">
           <Link href="/check" target="_blank"
-            className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500 hover:text-brand-400 transition-colors rounded-lg hover:bg-dark-700">
+            className="flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:text-brand-400 transition-colors rounded-lg hover:bg-dark-700">
             <MapPin size={13} /> Abrir checador
           </Link>
           {['owner','manager','super_admin'].includes(profile?.role) && (
             <Link href="/dashboard/bugs"
               className={`flex items-center gap-2 px-3 py-2 text-xs transition-colors rounded-lg hover:bg-dark-700 ${
-                pathname === '/dashboard/bugs' ? 'text-brand-400' : 'text-gray-500 hover:text-brand-400'
+                pathname === '/dashboard/bugs' ? 'text-brand-400' : 'text-gray-400 hover:text-brand-400'
               }`}>
               <Wrench size={13} /> Bugs y mejoras
             </Link>
           )}
           <button onClick={signOut}
-            className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500 hover:text-red-400 transition-colors w-full rounded-lg hover:bg-dark-700">
+            className="flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:text-red-400 transition-colors w-full rounded-lg hover:bg-dark-700">
             <LogOut size={13} /> Cerrar sesión
           </button>
         </div>
@@ -127,11 +127,11 @@ export default function DashboardLayout({ children }) {
       <main className="flex-1 flex flex-col min-w-0">
         {/* Mobile top bar */}
         <div className={`md:hidden sticky top-0 z-30 backdrop-blur border-b px-5 py-3 flex items-center justify-between ${theme === 'dark' ? 'bg-dark-900/92 border-dark-border' : 'bg-white/95 border-gray-200'}`}>
-          <div>
+          <div className="min-w-0 flex-1 pr-3">
             <div className="text-xs font-mono text-brand-400 tracking-widest">⬡ CHECKPRO</div>
-            <div className="text-sm font-bold text-white">{tenant?.name || tenant?.config?.branchName}</div>
+            <div className="text-sm font-bold text-white truncate" title={tenant?.name || tenant?.config?.branchName}>{tenant?.name || tenant?.config?.branchName}</div>
           </div>
-          <button onClick={signOut} className="text-xs text-gray-500 font-mono px-2 py-1 rounded border border-dark-border active:bg-dark-700">
+          <button onClick={signOut} className="shrink-0 text-xs text-gray-300 font-mono px-2 py-1 rounded border border-dark-border active:bg-dark-700">
             Salir
           </button>
         </div>
@@ -159,7 +159,7 @@ export default function DashboardLayout({ children }) {
               <Link key={n.href} href={n.href}
                 prefetch
                 className={`flex-1 flex flex-col items-center gap-1 py-2.5 transition-colors duration-150
-                  ${active ? 'text-brand-400' : 'text-gray-500'}`}>
+                  ${active ? 'text-brand-400' : 'text-gray-400'}`}>
                 <n.Icon size={18} />
                 <span className="text-[10px] font-semibold">{n.label}</span>
               </Link>

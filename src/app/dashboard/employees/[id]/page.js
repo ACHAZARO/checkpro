@@ -548,15 +548,15 @@ export default function EmployeeDetailPage() {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl font-extrabold text-white">{employee.name}</h1>
+              <h1 className="text-xl font-extrabold text-white break-words leading-tight">{employee.name}</h1>
               {employee.status === 'inactive' && <span className="badge-gray text-[10px]">Inactivo</span>}
             </div>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p className="text-xs text-gray-400 mt-0.5">
               {employee.role_label || 'Empleado'}
               {employee.department && ` · ${employee.department}`}
-              {branchName && <span className="text-brand-400/80 inline-flex items-center gap-1"> · <Building2 size={10} /> {branchName}</span>}
+              {branchName && <span className="text-brand-400 inline-flex items-center gap-1"> · <Building2 size={10} /> {branchName}</span>}
             </p>
-            <p className="text-[11px] text-gray-600 font-mono mt-1">
+            <p className="text-[11px] text-gray-400 font-mono mt-1">
               <Calendar size={12} className="inline" /> Ingreso: {fmtLongDate(employee.hire_date)}
               {(antig.years > 0 || antig.months > 0) && (
                 <> · {antig.years > 0 ? `${antig.years} año${antig.years !== 1 ? 's' : ''}` : ''}
@@ -607,19 +607,19 @@ export default function EmployeeDetailPage() {
           <div className="grid grid-cols-4 gap-2">
             <div>
               <p className="text-xl font-extrabold text-blue-400 leading-none">{balance.pendingDays}</p>
-              <p className="text-[9px] text-gray-500 font-mono mt-0.5 leading-tight">Pendientes</p>
+              <p className="text-[9px] text-gray-400 font-mono mt-0.5 leading-tight">Pendientes</p>
             </div>
             <div>
               <p className="text-xl font-extrabold text-yellow-400 leading-none">{balance.pospuestasDays}</p>
-              <p className="text-[9px] text-gray-500 font-mono mt-0.5 leading-tight">Pospuestos</p>
+              <p className="text-[9px] text-gray-400 font-mono mt-0.5 leading-tight">Pospuestos</p>
             </div>
             <div>
               <p className="text-xl font-extrabold text-green-400 leading-none">{balance.activeDays || 0}</p>
-              <p className="text-[9px] text-gray-500 font-mono mt-0.5 leading-tight">Activos hoy</p>
+              <p className="text-[9px] text-gray-400 font-mono mt-0.5 leading-tight">Activos hoy</p>
             </div>
             <div>
               <p className="text-xl font-extrabold text-red-400 leading-none">{balance.expiredDays || 0}</p>
-              <p className="text-[9px] text-gray-500 font-mono mt-0.5 leading-tight">Prescritos</p>
+              <p className="text-[9px] text-gray-400 font-mono mt-0.5 leading-tight">Prescritos</p>
             </div>
           </div>
           {expiredPeriods.length > 0 && (
@@ -854,7 +854,7 @@ export default function EmployeeDetailPage() {
             <label className="label" htmlFor="vac-comp-anniv">Aniversario</label>
             <input id="vac-comp-anniv" type="number" className="input" value={form.anniversary_year ?? 1}
               onChange={e => F('anniversary_year', e.target.value)} />
-            <p className="text-[10px] text-gray-600 font-mono mt-1">
+            <p className="text-[10px] text-gray-400 font-mono mt-1">
               El API toma el periodo pendiente correspondiente.
             </p>
           </div>
@@ -872,7 +872,7 @@ export default function EmployeeDetailPage() {
               <option value="efectivo">Efectivo</option>
               <option value="transferencia">Transferencia</option>
             </select>
-            <p className="text-[10px] text-gray-600 font-mono mt-1">
+            <p className="text-[10px] text-gray-400 font-mono mt-1">
               Default heredado del empleado ({employee.payment_type || 'efectivo'}).
             </p>
           </div>
@@ -886,7 +886,7 @@ export default function EmployeeDetailPage() {
           <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
             <p className="text-[10px] font-mono text-blue-400 uppercase tracking-wider mb-1">Monto calculado</p>
             <p className="text-lg font-extrabold text-white">{fmtMoney(compMonto)}</p>
-            <p className="text-[10px] text-gray-500 font-mono mt-1">
+            <p className="text-[10px] text-gray-300 font-mono mt-1">
               Doble pago = {compDays} días × {fmtMoney(dr)}/día × 2
             </p>
           </div>
@@ -926,7 +926,7 @@ export default function EmployeeDetailPage() {
               min={form.start_date || todayISO()}
               value={form.end_date || ''}
               onChange={e => F('end_date', e.target.value)} />
-            <p className="text-[10px] text-gray-600 font-mono mt-1">
+            <p className="text-[10px] text-gray-400 font-mono mt-1">
               Si se omite, el API calcula automáticamente según días disponibles.
             </p>
           </div>
@@ -1008,7 +1008,7 @@ export default function EmployeeDetailPage() {
                   </button>
                 ))}
               </div>
-              <p className="text-[11px] text-gray-600 mt-2">
+              <p className="text-[11px] text-gray-400 mt-2">
                 Se exportará un archivo con dos hojas: Registros y Resumen (incluye tarifa/hora y neto a pagar).
               </p>
 
@@ -1024,7 +1024,7 @@ export default function EmployeeDetailPage() {
                   </span>
                   <span className="text-[10px] font-mono text-brand-400">ignora rango</span>
                 </button>
-                <p className="text-[11px] text-gray-600 mt-2 leading-snug">
+                <p className="text-[11px] text-gray-400 mt-2 leading-snug">
                   Trae cada registro de entrada y salida del empleado desde su alta. Pensado para auditorías, terminación laboral o finiquito.
                 </p>
               </div>

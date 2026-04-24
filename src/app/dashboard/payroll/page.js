@@ -558,7 +558,7 @@ export default function PayrollPage() {
         <div className="card text-center py-10">
           <div className="flex justify-center mb-3 text-gray-500"><Building2 size={40} /></div>
           <p className="text-gray-400 text-sm mb-2">No hay sucursales configuradas.</p>
-          <p className="text-gray-600 text-xs">Ve a <span className="text-brand-400">Configuración → Sucursales</span> para crear al menos una antes de generar cortes de nómina.</p>
+          <p className="text-gray-400 text-xs">Ve a <span className="text-brand-400">Configuración → Sucursales</span> para crear al menos una antes de generar cortes de nómina.</p>
         </div>
       </div>
     )
@@ -595,7 +595,7 @@ export default function PayrollPage() {
               <option key={b.id} value={b.id}>{b.name}</option>
             ))}
           </select>
-          <p className="text-[10px] text-gray-600 font-mono mt-1.5">
+          <p className="text-[10px] text-gray-400 font-mono mt-1.5">
             💡 Cambia de sucursal para generar el corte de cada una. Los empleados, turnos e incidencias se filtran automáticamente.
           </p>
         </div>
@@ -681,15 +681,15 @@ export default function PayrollPage() {
             <div key={emp.id} className="card">
               <div className="flex items-start justify-between mb-2">
                 <div>
-                  <div className="font-bold text-white text-sm">{emp.name}</div>
-                  <div className="text-xs text-gray-500">{emp.department} · ${monthlyToHourly(emp).toFixed(2)}/h</div>
+                  <div className="font-bold text-white text-sm break-words">{emp.name}</div>
+                  <div className="text-xs text-gray-400">{emp.department} · ${monthlyToHourly(emp).toFixed(2)}/h</div>
                 </div>
                 <div className="text-right">
                   <div className="text-xl font-extrabold text-brand-400 font-mono">${netWithVac.toFixed(0)}</div>
-                  <div className="text-[9px] text-gray-600 font-mono">NETO EST.</div>
+                  <div className="text-[9px] text-gray-400 font-mono">NETO EST.</div>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-3 text-xs text-gray-500 font-mono mb-2">
+              <div className="flex flex-wrap gap-3 text-xs text-gray-400 font-mono mb-2">
                 <span>{s.totalH}h trabajadas</span>
                 {s.otHours > 0 && <span className="text-blue-400">+{s.otHours}h extra (×2)</span>}
                 <span>Bruto: ${grossWithVac.toFixed(2)}</span>

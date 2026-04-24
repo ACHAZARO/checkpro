@@ -393,7 +393,7 @@ export default function DashboardPage() {
         <div className="card">
           <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Cake size={12} /> Cumpleaños esta semana</p>
           {upcomingBirthdays.length === 0 ? (
-            <p className="text-xs text-gray-600">No hay cumpleaños en los próximos 7 días.</p>
+            <p className="text-xs text-gray-400">No hay cumpleaños en los próximos 7 días.</p>
           ) : (
             <div className="space-y-2">
               {upcomingBirthdays.map(e => {
@@ -435,7 +435,7 @@ export default function DashboardPage() {
           <div className="card">
             <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Award size={12} /> Aniversarios próximos (30d)</p>
             {vacUpcoming.items.length === 0 ? (
-              <p className="text-xs text-gray-600">Sin aniversarios en los próximos 30 días.</p>
+              <p className="text-xs text-gray-400">Sin aniversarios en los próximos 30 días.</p>
             ) : (
               <div className="space-y-2">
                 {vacUpcoming.items.map(({ employee, info, entitled_days_next }) => {
@@ -471,7 +471,7 @@ export default function DashboardPage() {
           <div className="card">
             <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Palmtree size={12} /> En vacaciones hoy</p>
             {vacActive.items.length === 0 ? (
-              <p className="text-xs text-gray-600">Nadie de vacaciones hoy.</p>
+              <p className="text-xs text-gray-400">Nadie de vacaciones hoy.</p>
             ) : (
               <div className="space-y-2">
                 {vacActive.items.map(({ period, employee, coverage }) => {
@@ -507,7 +507,7 @@ export default function DashboardPage() {
           <div className="card">
             <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5"><AlertTriangle size={12} /> Prescripciones</p>
             {vacExpired.items.length === 0 ? (
-              <p className="text-xs text-gray-600">Sin periodos prescritos.</p>
+              <p className="text-xs text-gray-400">Sin periodos prescritos.</p>
             ) : (
               <div className="space-y-2">
                 {vacExpired.items.map(({ period, employee }) => (
@@ -551,7 +551,7 @@ export default function DashboardPage() {
             <div key={s.id} className="flex items-center justify-between py-2.5 border-b border-dark-border last:border-0">
               <div>
                 <div className="font-semibold text-sm text-white">{getEmpName(s.employee_id)}</div>
-                <div className="text-xs text-gray-500 font-mono">{fmtTime(s.entry_time)} · {diffMin(s.entry_time, now.toISOString())} min</div>
+                <div className="text-xs text-gray-400 font-mono">{fmtTime(s.entry_time)} · {diffMin(s.entry_time, now.toISOString())} min</div>
               </div>
               <span className="badge-blue">Activo</span>
             </div>
@@ -567,7 +567,7 @@ export default function DashboardPage() {
             <div key={e.id} className="flex items-center justify-between py-2.5 border-b border-dark-border last:border-0">
               <div>
                 <div className="font-semibold text-sm text-white">{e.name}</div>
-                <div className="text-xs text-gray-500">{e.department} · desde {e.schedule?.[DAYS[now.getDay()===0?6:now.getDay()-1]]?.start || '—'}</div>
+                <div className="text-xs text-gray-400">{e.department} · desde {e.schedule?.[DAYS[now.getDay()===0?6:now.getDay()-1]]?.start || '—'}</div>
               </div>
               <span className="badge-gray">Sin registro</span>
             </div>
@@ -583,7 +583,7 @@ export default function DashboardPage() {
             <div key={s.id} className="flex items-center justify-between py-2.5 border-b border-dark-border last:border-0">
               <div>
                 <div className="font-semibold text-sm text-white">{getEmpName(s.employee_id)}</div>
-                <div className="text-xs text-gray-500 font-mono">
+                <div className="text-xs text-gray-400 font-mono">
                   {fmtTime(s.entry_time)} – {s.exit_time ? fmtTime(s.exit_time) : '—'}
                   {s.duration_hours ? ` · ${s.duration_hours}h` : ''}
                 </div>
@@ -598,7 +598,7 @@ export default function DashboardPage() {
       )}
 
       {checkedIn.length === 0 && notYet.length === 0 && (
-        <div className="text-center py-12 text-gray-600">
+        <div className="text-center py-12 text-gray-400">
           <div className="flex justify-center mb-3"><ClipboardList size={40} /></div>
           <p className="font-mono text-sm">Sin empleados registrados aún.</p>
           <Link href="/dashboard/employees" className="text-brand-400 text-sm font-semibold mt-2 inline-block">+ Agregar empleados →</Link>
