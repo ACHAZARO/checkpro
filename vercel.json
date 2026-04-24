@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/detect-absences",
+      "schedule": "15 8 * * *"
+    }
+  ]
+}

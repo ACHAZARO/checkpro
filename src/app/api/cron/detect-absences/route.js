@@ -1,0 +1,180 @@
+// src/app/api/cron/detect-absences/route.js
+// Cron diario: detecta empleados con turno programado sin registro de entrada
+// y crea incidencias kind='falta' en estado 'open'.
+// El gerente las gestiona desde /dashboard/incidencias (injustificada / justif. pagada / justif. sin pago).
+//
+// Autenticación: header `Authorization: Bearer $CRON_SECRET`
+// Uso manual (debug): GET ?date=YYYY-MM-DD  (default = ayer CST)
+//
+// Idempotente: si ya existe incidencia kind='falta' para (employee, date), no duplica.
+// Exclusiones: feriados del tenant, vacaciones activas, shift registrado (de cualquier status),
+// empleados con has_shift=false, tenants con mixedSchedule habilitado (se planea aparte).
+import { NextResponse } from 'next/server'
+import { createServiceClient } from '@/lib/supabase'
+import { formatInTimeZone } from 'date-fns-tz'
+
+const TZ = process.env.APP_TIMEZONE || 'America/Mexico_City'
+const DAY_MAP = { mon: 'lun', tue: 'mar', wed: 'mie', thu: 'jue', fri: 'vie', sat: 'sab', sun: 'dom' }
+
+export const maxDuration = 60
+export const dynamic = 'force-dynamic'
+
+function isoDateInTz(date, tz) {
+  return formatInTimeZone(date, tz, 'yyyy-MM-dd')
+}
+function dayKeyInTz(date, tz) {
+  const wd = formatInTimeZone(date, tz, 'EEE').toLowerCase()
+  return DAY_MAP[wd] || 'lun'
+}
+
+export async function GET(req) {
+  const auth = req.headers.get('authorization') || ''
+  const secret = process.env.CRON_SECRET
+  if (!secret) {
+    return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 })
+  }
+  if (auth !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  }
+
+  const url = new URL(req.url)
+  const dateParam = url.searchParams.get('date')
+  const dryRun = url.searchParams.get('dry') === '1'
+
+  // Por defecto: ayer en CST (corrimos temprano en la mañana del día siguiente)
+  const now = new Date()
+  const yesterday = new Date(now.getTime() - 24 * 3600 * 1000)
+  const targetDate = dateParam || isoDateInTz(yesterday, TZ)
+  const targetDayKey = dayKeyInTz(new Date(`${targetDate}T12:00:00Z`), TZ)
+
+  const admin = createServiceClient()
+
+  const { data: tenants, error: tErr } = await admin
+    .from('tenants')
+    .select('id, name, config')
+  if (tErr) return NextResponse.json({ error: tErr.message }, { status: 500 })
+
+  const summary = {
+    target_date: targetDate,
+    day_key: targetDayKey,
+    dry_run: dryRun,
+    tenants_scanned: 0,
+    absences_created: 0,
+    details: [],
+  }
+
+  for (const tenant of tenants || []) {
+    summary.tenants_scanned++
+    const cfg = tenant.config || {}
+
+    // Si el tenant usa horario mixto (planificación semanal), el "turno programado"
+    // vive en shift_plans, no en employees.schedule. Para v1 se skippean y se
+    // soportarán en una segunda iteración.
+    if (cfg.mixedSchedule?.enabled === true) {
+      summary.details.push({ tenant_id: tenant.id, skipped: 'mixed_schedule' })
+      continue
+    }
+
+    // Feriado del tenant
+    const holidays = Array.isArray(cfg.holidays) ? cfg.holidays : []
+    const isHoliday = holidays.some(h => {
+      if (typeof h === 'string') return h === targetDate
+      if (h && typeof h === 'object') return h.date === targetDate
+      return false
+    })
+    if (isHoliday) {
+      summary.details.push({ tenant_id: tenant.id, skipped: 'holiday' })
+      continue
+    }
+
+    const { data: emps } = await admin
+      .from('employees')
+      .select('id, name, schedule, has_shift, free_schedule')
+      .eq('tenant_id', tenant.id)
+      .eq('status', 'active')
+
+    // Candidatos: empleados con turno (has_shift != false) y horario fijo que
+    // marque workday en targetDayKey. free_schedule (gerentes libres) no aplica.
+    const candidates = (emps || []).filter(e => {
+      if (e.has_shift === false) return false
+      if (e.free_schedule === true) return false
+      return e.schedule?.[targetDayKey]?.work === true
+    })
+    if (candidates.length === 0) {
+      summary.details.push({ tenant_id: tenant.id, candidates: 0 })
+      continue
+    }
+    const empIds = candidates.map(e => e.id)
+
+    // Shifts existentes para ese día (cualquier status)
+    const { data: existingShifts } = await admin
+      .from('shifts')
+      .select('employee_id')
+      .eq('tenant_id', tenant.id)
+      .eq('date_str', targetDate)
+      .in('employee_id', empIds)
+    const shiftsByEmp = new Set((existingShifts || []).map(s => s.employee_id))
+
+    // Vacaciones que cubren ese día (tipo=tomadas, status vivo)
+    const { data: vacs } = await admin
+      .from('vacation_periods')
+      .select('employee_id, start_date, end_date, tipo, status')
+      .eq('tenant_id', tenant.id)
+      .in('employee_id', empIds)
+      .lte('start_date', targetDate)
+      .gte('end_date', targetDate)
+    const onVacation = new Set(
+      (vacs || [])
+        .filter(v => v.tipo === 'tomadas' && ['active', 'completed', 'pending', 'postponed'].includes(v.status))
+        .map(v => v.employee_id)
+    )
+
+    // Incidencias kind='falta' ya registradas para ese día (dedupe)
+    const { data: existingIncs } = await admin
+      .from('incidencias')
+      .select('employee_id')
+      .eq('tenant_id', tenant.id)
+      .eq('date_str', targetDate)
+      .eq('kind', 'falta')
+      .in('employee_id', empIds)
+    const alreadyFlagged = new Set((existingIncs || []).map(i => i.employee_id))
+
+    const inserts = candidates
+      .filter(e => !shiftsByEmp.has(e.id) && !onVacation.has(e.id) && !alreadyFlagged.has(e.id))
+      .map(e => ({
+        tenant_id: tenant.id,
+        employee_id: e.id,
+        employee_name: e.name,
+        date_str: targetDate,
+        kind: 'falta',
+        description: 'Detectada automáticamente: empleado con turno programado y sin registro de entrada.',
+        status: 'open',
+      }))
+
+    if (inserts.length > 0) {
+      if (!dryRun) {
+        const { error: insErr } = await admin.from('incidencias').insert(inserts)
+        if (insErr) {
+          summary.details.push({ tenant_id: tenant.id, error: insErr.message, would_insert: inserts.length })
+          continue
+        }
+      }
+      summary.absences_created += inserts.length
+      summary.details.push({
+        tenant_id: tenant.id,
+        tenant_name: tenant.name,
+        candidates: candidates.length,
+        created: inserts.length,
+        employees: inserts.map(i => i.employee_name),
+      })
+    } else {
+      summary.details.push({
+        tenant_id: tenant.id,
+        candidates: candidates.length,
+        created: 0,
+      })
+    }
+  }
+
+  return NextResponse.json(summary)
+}

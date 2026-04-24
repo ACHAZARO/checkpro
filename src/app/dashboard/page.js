@@ -92,6 +92,38 @@ function WidgetError({ title, onRetry }) {
   )
 }
 
+// Banner con botón X que persiste el "descartado" en localStorage.
+// Si la firma del banner cambia (ej. sube el conteo de incidencias), se vuelve
+// a mostrar porque la alertKey cambia.
+function DismissibleBanner({ alertKey, className, children }) {
+  const [dismissed, setDismissed] = useState(null) // null = pre-hydrate
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      setDismissed(localStorage.getItem(`cp-dismissed:${alertKey}`) === '1')
+    } catch {
+      setDismissed(false)
+    }
+  }, [alertKey])
+  if (dismissed === null) return null
+  if (dismissed) return null
+  return (
+    <div className={`relative ${className || ''}`}>
+      {children}
+      <button
+        onClick={() => {
+          try { localStorage.setItem(`cp-dismissed:${alertKey}`, '1') } catch {}
+          setDismissed(true)
+        }}
+        aria-label="Descartar alerta"
+        title="Descartar"
+        className="absolute top-2 right-2 p-1 rounded-md text-gray-400/80 hover:text-white hover:bg-white/10 transition-colors">
+        <X size={14} />
+      </button>
+    </div>
+  )
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -273,65 +305,78 @@ export default function DashboardPage() {
       </div>
 
       {incidents.length > 0 && (
-        <Link href="/dashboard/attendance?filter=incident" className="flex items-center gap-3 px-4 py-3 mb-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm font-semibold">
-          🚩 {incidents.length} incidencia(s) sin resolver — toca para revisar →
-        </Link>
+        <DismissibleBanner alertKey={`${tenantId}:incidents:${incidents.length}`} className="mb-3">
+          <Link href="/dashboard/incidencias" className="flex items-center gap-3 pl-4 pr-10 py-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm font-semibold">
+            <AlertTriangle size={16} /> {incidents.length} incidencia{incidents.length !== 1 ? 's' : ''} sin resolver — toca para revisar →
+          </Link>
+        </DismissibleBanner>
       )}
 
       {graveAlerts.length > 0 && (
-        <div className="px-4 py-3 mb-3 bg-red-600/15 border border-red-600/30 rounded-xl">
-          <p className="text-red-400 text-sm font-bold mb-1">
-            🚨 ALERTA: {graveAlerts.length} empleado{graveAlerts.length > 1 ? 's' : ''} con 3+ faltas graves
-          </p>
-          {graveAlerts.map(e => {
-            const n = countGraveIncidents(graveShifts, e.id)
-            return (
-              <div key={e.id} className="text-red-400/80 text-xs font-mono">
-                {e.name} — {n} faltas injustificadas (posible causal de despido)
-              </div>
-            )
-          })}
-          <Link href="/dashboard/attendance" className="inline-block mt-2 text-red-400 text-xs font-bold underline">
-            Ver historial →
-          </Link>
-        </div>
+        <DismissibleBanner
+          alertKey={`${tenantId}:grave:${graveAlerts.map(e => `${e.id}:${countGraveIncidents(graveShifts, e.id)}`).sort().join(',')}`}
+          className="mb-3">
+          <div className="pl-4 pr-10 py-3 bg-red-600/15 border border-red-600/30 rounded-xl">
+            <p className="text-red-400 text-sm font-bold mb-1 flex items-center gap-1.5">
+              <AlertTriangle size={14} /> ALERTA: {graveAlerts.length} empleado{graveAlerts.length > 1 ? 's' : ''} con 3+ faltas graves
+            </p>
+            {graveAlerts.map(e => {
+              const n = countGraveIncidents(graveShifts, e.id)
+              return (
+                <div key={e.id} className="text-red-400/80 text-xs font-mono">
+                  {e.name} — {n} faltas injustificadas (posible causal de despido)
+                </div>
+              )
+            })}
+            <Link href="/dashboard/incidencias" className="inline-block mt-2 text-red-400 text-xs font-bold underline">
+              Ver incidencias →
+            </Link>
+          </div>
+        </DismissibleBanner>
       )}
 
       {freeAlerts.length > 0 && (
-        <div className="px-4 py-3 mb-3 bg-orange-500/10 border border-orange-500/30 rounded-xl">
-          <p className="text-orange-300 text-sm font-bold mb-1 flex items-center gap-1.5">
-            <Unlock size={14} /> Gerentes con horario libre — {freeAlerts.length} alerta(s) esta semana
-          </p>
-          <div className="space-y-1 mt-1">
-            {freeAlerts.map((a, i) => (
-              <div key={`${a.employee.id}_${a.code}_${i}`} className={`text-xs font-mono ${a.level === 'error' ? 'text-red-400' : 'text-orange-300/90'}`}>
-                {a.level === 'error' ? <X size={12} className="inline" /> : <AlertTriangle size={12} className="inline" />} {a.employee.name} — {a.message}
-              </div>
-            ))}
+        <DismissibleBanner
+          alertKey={`${tenantId}:free:${freeAlerts.map(a => `${a.employee.id}:${a.code}:${a.level}`).sort().join(',')}`}
+          className="mb-3">
+          <div className="pl-4 pr-10 py-3 bg-orange-500/10 border border-orange-500/30 rounded-xl">
+            <p className="text-orange-300 text-sm font-bold mb-1 flex items-center gap-1.5">
+              <Unlock size={14} /> Gerentes con horario libre — {freeAlerts.length} alerta{freeAlerts.length !== 1 ? 's' : ''} esta semana
+            </p>
+            <div className="space-y-1 mt-1">
+              {freeAlerts.map((a, i) => (
+                <div key={`${a.employee.id}_${a.code}_${i}`} className={`text-xs font-mono ${a.level === 'error' ? 'text-red-400' : 'text-orange-300/90'}`}>
+                  {a.level === 'error' ? <X size={12} className="inline" /> : <AlertTriangle size={12} className="inline" />} {a.employee.name} — {a.message}
+                </div>
+              ))}
+            </div>
+            <Link href="/dashboard/employees" className="inline-block mt-2 text-orange-300 text-xs font-bold underline">
+              Ver panel de gerentes →
+            </Link>
           </div>
-          <Link href="/dashboard/employees" className="inline-block mt-2 text-orange-300 text-xs font-bold underline">
-            Ver panel de gerentes →
-          </Link>
-        </div>
+        </DismissibleBanner>
       )}
 
       {vacationPending.length > 0 && (
-        <div className="px-4 py-3 mb-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
-          <p className="text-yellow-400 text-sm font-bold mb-1 flex items-center gap-1.5">
-            <Palmtree size={14} /> {vacationPending.length} empleado{vacationPending.length > 1 ? 's' : ''} con vacaciones pendientes
-          </p>
-          <div className="flex flex-wrap gap-1 mt-1">
-            {vacationPending.map(e => (
-              <span key={e.id} className="text-[10px] font-mono bg-yellow-500/10 border border-yellow-500/20 px-2 py-0.5 rounded-full text-yellow-400">
-                {/* FIX R6: usar e.hire_date (columna real) en lugar del legacy e.schedule?.hireDate */}
-                {e.name} · {calcVacationDays(e.hire_date || e.schedule?.hireDate, vacTable)}d
-              </span>
-            ))}
+        <DismissibleBanner
+          alertKey={`${tenantId}:vac:${vacationPending.map(e => e.id).sort().join(',')}`}
+          className="mb-4">
+          <div className="pl-4 pr-10 py-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
+            <p className="text-yellow-400 text-sm font-bold mb-1 flex items-center gap-1.5">
+              <Palmtree size={14} /> {vacationPending.length} empleado{vacationPending.length > 1 ? 's' : ''} con vacaciones pendientes
+            </p>
+            <div className="flex flex-wrap gap-1 mt-1">
+              {vacationPending.map(e => (
+                <span key={e.id} className="text-[10px] font-mono bg-yellow-500/10 border border-yellow-500/20 px-2 py-0.5 rounded-full text-yellow-400">
+                  {e.name} · {calcVacationDays(e.hire_date || e.schedule?.hireDate, vacTable)}d
+                </span>
+              ))}
+            </div>
+            <Link href="/dashboard/employees" className="inline-block mt-2 text-yellow-400 text-xs font-bold underline">
+              Gestionar empleados →
+            </Link>
           </div>
-          <Link href="/dashboard/employees" className="inline-block mt-2 text-yellow-400 text-xs font-bold underline">
-            Gestionar empleados →
-          </Link>
-        </div>
+        </DismissibleBanner>
       )}
 
       <div className="grid grid-cols-2 gap-3 mb-5">
