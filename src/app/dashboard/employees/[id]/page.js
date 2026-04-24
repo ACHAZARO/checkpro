@@ -157,9 +157,12 @@ export default function EmployeeDetailPage() {
 
   useEffect(() => { load() }, [load])
 
-  async function doExport() {
-    if (!expFrom || !expTo) { toast.error('Selecciona el rango de fechas'); return }
-    if (expFrom > expTo) { toast.error('La fecha inicial debe ser menor o igual a la final'); return }
+  async function doExport(mode = 'range') {
+    const isFull = mode === 'full'
+    if (!isFull) {
+      if (!expFrom || !expTo) { toast.error('Selecciona el rango de fechas'); return }
+      if (expFrom > expTo) { toast.error('La fecha inicial debe ser menor o igual a la final'); return }
+    }
     setExporting(true)
     try {
       const supabase = createClient()
@@ -168,28 +171,45 @@ export default function EmployeeDetailPage() {
       const { data: prof } = await supabase.from('profiles').select('tenant_id').eq('id', session.user.id).single()
       if (!prof?.tenant_id) { toast.error('Sin tenant'); setExporting(false); return }
 
+      let shiftsQuery = supabase.from('shifts').select('*')
+        .eq('tenant_id', prof.tenant_id)
+        .eq('employee_id', employeeId)
+        .order('date_str', { ascending: true })
+      if (!isFull) {
+        shiftsQuery = shiftsQuery.gte('date_str', expFrom).lte('date_str', expTo)
+      }
+
       const [{ data: shifts, error: shErr }, { data: tenant }, { data: branches }, { data: allEmps }] = await Promise.all([
-        supabase.from('shifts').select('*')
-          .eq('tenant_id', prof.tenant_id)
-          .eq('employee_id', employeeId)
-          .gte('date_str', expFrom)
-          .lte('date_str', expTo)
-          .order('date_str', { ascending: true }),
+        shiftsQuery,
         supabase.from('tenants').select('name, config').eq('id', prof.tenant_id).single(),
         supabase.from('branches').select('id, name').eq('tenant_id', prof.tenant_id),
         supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).eq('status', 'active'),
       ])
       if (shErr) { toast.error(`Error: ${shErr.message}`); setExporting(false); return }
+
+      // Para historial completo, el periodo real va de hire_date/fecha del primer
+      // registro hasta hoy (o la fecha del último registro).
+      let periodFrom = expFrom
+      let periodTo = expTo
+      if (isFull) {
+        const first = (shifts && shifts[0]?.date_str) || employee?.hire_date?.slice(0, 10) || '2020-01-01'
+        const last = (shifts && shifts.length > 0) ? shifts[shifts.length - 1].date_str : new Date().toISOString().slice(0, 10)
+        periodFrom = first
+        periodTo = last
+      }
+
       generateEmployeeAttendanceXLSX({
         employee: employee,
         shifts: shifts || [],
         branches: branches || [],
-        periodFrom: expFrom,
-        periodTo: expTo,
+        periodFrom,
+        periodTo,
         companyName: tenant?.name || 'CheckPro',
         allEmployees: allEmps || [employee],
       })
-      toast.success(`Exportado · ${shifts?.length || 0} registros`)
+      toast.success(isFull
+        ? `Historial completo · ${shifts?.length || 0} registros`
+        : `Exportado · ${shifts?.length || 0} registros`)
       setExportOpen(false)
     } catch (e) {
       toast.error('Error al exportar')
@@ -989,13 +1009,30 @@ export default function EmployeeDetailPage() {
                 ))}
               </div>
               <p className="text-[11px] text-gray-600 mt-2">
-                Se exportará un archivo con dos hojas: Registros y Resumen.
+                Se exportará un archivo con dos hojas: Registros y Resumen (incluye tarifa/hora y neto a pagar).
               </p>
+
+              <div className="mt-4 pt-4 border-t border-dark-border">
+                <p className="text-[10px] font-mono uppercase tracking-wider text-gray-500 mb-2">Historial completo</p>
+                <button
+                  type="button"
+                  onClick={() => doExport('full')}
+                  disabled={exporting}
+                  className="w-full px-3 py-2.5 bg-dark-700 border border-dark-border rounded-lg text-sm text-white font-semibold hover:bg-dark-600 active:bg-dark-600 disabled:opacity-50 flex items-center justify-between">
+                  <span className="inline-flex items-center gap-2">
+                    <Download size={14} /> Exportar TODO el historial
+                  </span>
+                  <span className="text-[10px] font-mono text-brand-400">ignora rango</span>
+                </button>
+                <p className="text-[11px] text-gray-600 mt-2 leading-snug">
+                  Trae cada registro de entrada y salida del empleado desde su alta. Pensado para auditorías, terminación laboral o finiquito.
+                </p>
+              </div>
             </div>
             <div className="px-5 pb-5 pt-2 border-t border-dark-border shrink-0 flex gap-2">
-              <button onClick={doExport} disabled={exporting}
+              <button onClick={() => doExport('range')} disabled={exporting}
                 className="flex-1 px-3 py-2.5 bg-brand-400 text-black font-bold rounded-lg text-sm active:brightness-90 disabled:opacity-50">
-                {exporting ? 'Generando...' : 'Descargar'}
+                {exporting ? 'Generando...' : 'Descargar período'}
               </button>
               <button onClick={() => setExportOpen(false)} disabled={exporting}
                 className="px-3 py-2.5 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-sm">

@@ -137,21 +137,34 @@ export default function DashboardLayout({ children }) {
         </div>
 
         {/* Page content */}
-        <div className="flex-1 overflow-y-auto pb-[72px] md:pb-0">
+        <div
+          className="flex-1 overflow-y-auto pb-[calc(72px+env(safe-area-inset-bottom,0px))] md:pb-0"
+          style={{ overscrollBehavior: 'contain' }}>
           {children}
         </div>
 
-        {/* Mobile bottom nav */}
-        <nav className={`md:hidden fixed bottom-0 left-0 right-0 backdrop-blur border-t flex z-50 ${theme === 'dark' ? 'bg-dark-900/95 border-dark-border' : 'bg-white/95 border-gray-200'}`}
-          style={{ paddingBottom: 'env(safe-area-inset-bottom,0)' }}>
-          {NAV.filter(n => !n.mixedOnly || tenant?.config?.mixedSchedule?.enabled).map(n => (
-            <Link key={n.href} href={n.href}
-              className={`flex-1 flex flex-col items-center gap-1 py-2.5 transition-colors
-                ${pathname === n.href ? 'text-brand-400' : 'text-gray-500'}`}>
-              <n.Icon size={18} />
-              <span className="text-[10px] font-semibold">{n.label}</span>
-            </Link>
-          ))}
+        {/* Mobile bottom nav — promovida a capa propia para evitar flicker al navegar */}
+        <nav
+          data-bottom-nav
+          className={`md:hidden fixed bottom-0 left-0 right-0 backdrop-blur border-t flex z-50 ${theme === 'dark' ? 'bg-dark-900/95 border-dark-border' : 'bg-white/95 border-gray-200'}`}
+          style={{
+            paddingBottom: 'env(safe-area-inset-bottom,0)',
+            transform: 'translateZ(0)',
+            willChange: 'transform',
+            backfaceVisibility: 'hidden',
+          }}>
+          {NAV.filter(n => !n.mixedOnly || tenant?.config?.mixedSchedule?.enabled).map(n => {
+            const active = pathname === n.href
+            return (
+              <Link key={n.href} href={n.href}
+                prefetch
+                className={`flex-1 flex flex-col items-center gap-1 py-2.5 transition-colors duration-150
+                  ${active ? 'text-brand-400' : 'text-gray-500'}`}>
+                <n.Icon size={18} />
+                <span className="text-[10px] font-semibold">{n.label}</span>
+              </Link>
+            )
+          })}
         </nav>
       </main>
     </div>
