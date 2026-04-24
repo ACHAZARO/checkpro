@@ -168,7 +168,7 @@ export default function EmployeeDetailPage() {
       const { data: prof } = await supabase.from('profiles').select('tenant_id').eq('id', session.user.id).single()
       if (!prof?.tenant_id) { toast.error('Sin tenant'); setExporting(false); return }
 
-      const [{ data: shifts, error: shErr }, { data: tenant }, { data: branches }] = await Promise.all([
+      const [{ data: shifts, error: shErr }, { data: tenant }, { data: branches }, { data: allEmps }] = await Promise.all([
         supabase.from('shifts').select('*')
           .eq('tenant_id', prof.tenant_id)
           .eq('employee_id', employeeId)
@@ -177,6 +177,7 @@ export default function EmployeeDetailPage() {
           .order('date_str', { ascending: true }),
         supabase.from('tenants').select('name, config').eq('id', prof.tenant_id).single(),
         supabase.from('branches').select('id, name').eq('tenant_id', prof.tenant_id),
+        supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).eq('status', 'active'),
       ])
       if (shErr) { toast.error(`Error: ${shErr.message}`); setExporting(false); return }
       generateEmployeeAttendanceXLSX({
@@ -186,6 +187,7 @@ export default function EmployeeDetailPage() {
         periodFrom: expFrom,
         periodTo: expTo,
         companyName: tenant?.name || 'CheckPro',
+        allEmployees: allEmps || [employee],
       })
       toast.success(`Exportado · ${shifts?.length || 0} registros`)
       setExportOpen(false)

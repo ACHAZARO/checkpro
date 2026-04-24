@@ -3,16 +3,31 @@
 // Compatible con la Secretaría del Trabajo — incluye detalle diario + resumen totales.
 
 import * as XLSX from 'xlsx'
+import { calcShiftPay, monthlyToHourly, empWeekSummary } from '@/lib/utils'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const fmtT = d => d ? new Date(d).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : ''
 const fmtD = d => d ? new Date(d + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }) : ''
+const round2 = n => parseFloat((Number(n) || 0).toFixed(2))
 
 function classLabel(s) {
   if (s.status === 'absent') return s.classification?.label || 'Falta'
   if (s.status === 'open') return 'Jornada abierta'
   if (s.status === 'incident') return 'Incidencia'
   return s.classification?.label || 'Completa'
+}
+
+// Pago del día para un shift individual. Si el empleado está cubriendo a alguien
+// o pagas "quien cubre/menor", mejor pasar empsById para resolver; por simplicidad
+// en exports de un solo empleado usamos 'own' (se paga al trabajador).
+function shiftPayForEmp(shift, employee, empsById = {}, coveragePayMode = 'own') {
+  if (!employee) return 0
+  const cov = shift.covering_employee_id ? empsById[shift.covering_employee_id] || null : null
+  try {
+    return calcShiftPay(shift, employee, cov, coveragePayMode)
+  } catch {
+    return 0
+  }
 }
 
 // Aplica estilo de encabezado a un rango de celdas
@@ -291,10 +306,14 @@ export function generatePayrollXLSX({ cut, weekShifts, emps, branchName, empWeek
 
 // ── EXPORTAR ASISTENCIA POR EMPLEADO ──────────────────────────────────────────
 // Un solo empleado en un rango de fechas. Hoja "Registros" + "Resumen".
-export function generateEmployeeAttendanceXLSX({ employee, shifts, branches, periodFrom, periodTo, companyName }) {
+// Incluye montos $: tarifa/hora, pago de cada día, extra, feriado x3,
+// descuentos por retardo e incidencia, y neto.
+export function generateEmployeeAttendanceXLSX({ employee, shifts, branches, periodFrom, periodTo, companyName, allEmployees }) {
   const wb = XLSX.utils.book_new()
   const branchMap = Object.fromEntries((branches || []).map(b => [b.id, b]))
   const branchName = employee?.branch_id ? (branchMap[employee.branch_id]?.name || '') : ''
+  const empsById = Object.fromEntries((allEmployees || []).map(e => [e.id, e]))
+  const hourlyRate = employee ? monthlyToHourly(employee) : 0
 
   const infoRows = [
     ['REPORTE DE ASISTENCIA — ' + (companyName || 'CheckPro')],
@@ -302,6 +321,9 @@ export function generateEmployeeAttendanceXLSX({ employee, shifts, branches, per
     ['Código:', employee?.employee_code || ''],
     ['Departamento:', employee?.department || ''],
     ['Sucursal:', branchName],
+    ['Puesto / Tipo:', employee?.is_mixed ? 'Horario mixto' : (employee?.free_schedule ? 'Horario libre' : 'Horario fijo')],
+    ['Salario base:', `$${round2(employee?.monthly_salary || 0)} / ${employee?.schedule?.salary_period === 'weekly' ? 'semana' : 'mes'}`],
+    ['Tarifa calculada/hora:', `$${round2(hourlyRate)}`],
     ['Período:', periodFrom + ' al ' + periodTo],
     ['Generado:', new Date().toLocaleString('es-MX')],
     [],
@@ -312,20 +334,65 @@ export function generateEmployeeAttendanceXLSX({ employee, shifts, branches, per
 
   const detailRows = sorted.map(s => {
     const dateObj = new Date(s.date_str + 'T12:00:00')
+    const pagoDia = shiftPayForEmp(s, employee, empsById, 'own')
+    const extraH = Number(s.corrections?.overtime?.hours || 0)
+    const extraPago = extraH * hourlyRate
+    const retardoMin = s.classification?.type === 'retardo'
+      ? Number((s.classification?.label || '').match(/(\d+)/)?.[1] || 0)
+      : 0
+    const descRetardo = s.classification?.type === 'retardo' ? (hourlyRate * 0.5) : 0
+    const descIncid = s.status === 'incident' ? (hourlyRate * 8) : 0
+    const totalDia = round2(Math.max(0, pagoDia - descRetardo - descIncid))
     return {
       'Fecha': s.date_str,
       'Día': dayNames[dateObj.getDay()],
       'Hora Entrada': fmtT(s.entry_time),
       'Hora Salida': fmtT(s.exit_time),
-      'Horas Trabajadas': s.duration_hours || 0,
-      'Horas Extra': s.corrections?.overtime?.hours || 0,
+      'Horas Trabajadas': round2(s.duration_hours || 0),
+      'Horas Extra': round2(extraH),
       'Estatus': s.status === 'closed' ? 'Cerrada' : s.status === 'open' ? 'Abierta' : s.status === 'incident' ? 'Incidencia' : s.status === 'absent' ? 'Falta' : s.status,
       'Clasificación': classLabel(s),
-      'Retardo': s.classification?.type === 'retardo' ? 'SÍ' : 'No',
-      'Feriado': s.is_holiday ? 'SÍ' : 'No',
+      'Retardo (min)': retardoMin || '',
+      'Feriado': s.is_holiday ? 'SÍ (x3)' : 'No',
+      'Pago Jornada ($)': round2(pagoDia),
+      'Pago Extra ($)': round2(extraPago),
+      'Desc. Retardo ($)': round2(descRetardo),
+      'Desc. Incidencia ($)': round2(descIncid),
+      'Total Día ($)': totalDia,
       'Incidencias': (s.incidents || []).map(i => i.type + (i.note ? ': ' + i.note : '')).join(' | '),
       'Notas': Array.isArray(s.corrections) ? s.corrections.map(c => c?.note).filter(Boolean).join(' | ') : ''
     }
+  })
+
+  // Fila totales
+  const totRow = detailRows.reduce((acc, r) => ({
+    'Horas Trabajadas': acc['Horas Trabajadas'] + (r['Horas Trabajadas'] || 0),
+    'Horas Extra': acc['Horas Extra'] + (r['Horas Extra'] || 0),
+    'Pago Jornada ($)': acc['Pago Jornada ($)'] + (r['Pago Jornada ($)'] || 0),
+    'Pago Extra ($)': acc['Pago Extra ($)'] + (r['Pago Extra ($)'] || 0),
+    'Desc. Retardo ($)': acc['Desc. Retardo ($)'] + (r['Desc. Retardo ($)'] || 0),
+    'Desc. Incidencia ($)': acc['Desc. Incidencia ($)'] + (r['Desc. Incidencia ($)'] || 0),
+    'Total Día ($)': acc['Total Día ($)'] + (r['Total Día ($)'] || 0),
+  }), { 'Horas Trabajadas': 0, 'Horas Extra': 0, 'Pago Jornada ($)': 0, 'Pago Extra ($)': 0, 'Desc. Retardo ($)': 0, 'Desc. Incidencia ($)': 0, 'Total Día ($)': 0 })
+
+  detailRows.push({
+    'Fecha': '',
+    'Día': '',
+    'Hora Entrada': '',
+    'Hora Salida': 'TOTALES →',
+    'Horas Trabajadas': round2(totRow['Horas Trabajadas']),
+    'Horas Extra': round2(totRow['Horas Extra']),
+    'Estatus': '',
+    'Clasificación': '',
+    'Retardo (min)': '',
+    'Feriado': '',
+    'Pago Jornada ($)': round2(totRow['Pago Jornada ($)']),
+    'Pago Extra ($)': round2(totRow['Pago Extra ($)']),
+    'Desc. Retardo ($)': round2(totRow['Desc. Retardo ($)']),
+    'Desc. Incidencia ($)': round2(totRow['Desc. Incidencia ($)']),
+    'Total Día ($)': round2(totRow['Total Día ($)']),
+    'Incidencias': '',
+    'Notas': ''
   })
 
   const ws1 = XLSX.utils.aoa_to_sheet(infoRows)
@@ -346,14 +413,44 @@ export function generateEmployeeAttendanceXLSX({ employee, shifts, branches, per
   const incidencias = shifts.filter(s => s.status === 'incident').length
   const feriados = worked.filter(s => s.is_holiday).length
 
+  // Si tenemos allEmployees, calcular bruto/neto con empWeekSummary (más preciso)
+  let grossPay = 0, retardoDesc = 0, incidentDesc = 0, netPay = 0
+  if (employee && allEmployees) {
+    try {
+      const s = empWeekSummary(employee, shifts, allEmployees, 'own')
+      grossPay = s.grossPay || 0
+      retardoDesc = s.retardoDesc || 0
+      incidentDesc = s.incidentDesc || 0
+      netPay = s.netPay || 0
+    } catch {
+      grossPay = totRow['Pago Jornada ($)'] + totRow['Pago Extra ($)']
+      retardoDesc = totRow['Desc. Retardo ($)']
+      incidentDesc = totRow['Desc. Incidencia ($)']
+      netPay = Math.max(0, grossPay - retardoDesc - incidentDesc)
+    }
+  } else {
+    grossPay = totRow['Pago Jornada ($)'] + totRow['Pago Extra ($)']
+    retardoDesc = totRow['Desc. Retardo ($)']
+    incidentDesc = totRow['Desc. Incidencia ($)']
+    netPay = Math.max(0, grossPay - retardoDesc - incidentDesc)
+  }
+
   const summary = [
     ['RESUMEN — ' + (employee?.name || '—')],
     ['Período:', periodFrom + ' al ' + periodTo],
     [],
-    ['Métrica', 'Valor'],
+    ['── DATOS DEL EMPLEADO ──', ''],
+    ['Código', employee?.employee_code || ''],
+    ['Departamento', employee?.department || ''],
+    ['Sucursal', branchName],
+    ['Tipo de horario', employee?.is_mixed ? 'Mixto' : (employee?.free_schedule ? 'Libre' : 'Fijo')],
+    ['Salario base', `$${round2(employee?.monthly_salary || 0)} / ${employee?.schedule?.salary_period === 'weekly' ? 'semana' : 'mes'}`],
+    ['Tarifa por hora', `$${round2(hourlyRate)}`],
+    [],
+    ['── ASISTENCIA DEL PERÍODO ──', ''],
     ['Días Trabajados', worked.length],
-    ['Total Horas', parseFloat(totalH.toFixed(2))],
-    ['Horas Extra', parseFloat(otH.toFixed(2))],
+    ['Total Horas', round2(totalH)],
+    ['Horas Extra', round2(otH)],
     ['Entradas Puntuales', puntual],
     ['Con Tolerancia', tolerancia],
     ['Retardos', retardos],
@@ -362,9 +459,15 @@ export function generateEmployeeAttendanceXLSX({ employee, shifts, branches, per
     ['Faltas Just. Pagadas', faltasJP],
     ['Faltas Just. S/Pago', faltasJNP],
     ['Días Feriado Trabajado', feriados],
+    [],
+    ['── PAGO DEL PERÍODO ──', ''],
+    ['Salario Bruto ($)', round2(grossPay)],
+    ['Descuento Retardos ($)', round2(retardoDesc)],
+    ['Descuento Incidencias ($)', round2(incidentDesc)],
+    ['NETO A PAGAR ($)', round2(netPay)],
   ]
   const ws2 = XLSX.utils.aoa_to_sheet(summary)
-  ws2['!cols'] = [{ wch: 28 }, { wch: 14 }]
+  ws2['!cols'] = [{ wch: 32 }, { wch: 18 }]
   XLSX.utils.book_append_sheet(wb, ws2, 'Resumen')
 
   const safe = (employee?.name || 'empleado').replace(/[^\w\s-]/g, '').replace(/\s+/g, '_').slice(0, 40)
@@ -401,22 +504,60 @@ export function generateAllEmployeesBySheetXLSX({ emps, shifts, branches, period
     const totalH = worked.reduce((a, s) => a + (s.duration_hours || 0), 0)
     const otH = worked.reduce((a, s) => a + (s.corrections?.overtime?.hours || 0), 0)
     const branchName = emp.branch_id ? (branchMap[emp.branch_id]?.name || '') : ''
+    const rate = monthlyToHourly(emp)
+    let gross = 0, retDesc = 0, incDesc = 0, net = 0
+    try {
+      const s = empWeekSummary(emp, mine, emps, 'own')
+      gross = s.grossPay || 0
+      retDesc = s.retardoDesc || 0
+      incDesc = s.incidentDesc || 0
+      net = s.netPay || 0
+    } catch { /* noop */ }
     return {
       'Empleado': emp.name,
       'Código': emp.employee_code || '',
       'Departamento': emp.department || '',
       'Sucursal': branchName,
+      'Tarifa/Hora ($)': round2(rate),
       'Días Trabajados': worked.length,
-      'Total Horas': parseFloat(totalH.toFixed(2)),
-      'Horas Extra': parseFloat(otH.toFixed(2)),
+      'Total Horas': round2(totalH),
+      'Horas Extra': round2(otH),
       'Retardos': worked.filter(s => s.classification?.type === 'retardo').length,
       'Incidencias': mine.filter(s => s.status === 'incident').length,
       'Faltas Inj.': mine.filter(s => s.classification?.type === 'falta_injustificada').length,
       'Faltas Just. Pag.': mine.filter(s => s.classification?.type === 'falta_justificada_pagada').length,
       'Faltas Just. S/Pag.': mine.filter(s => s.classification?.type === 'falta_justificada_no_pagada').length,
       'Feriados Trab.': worked.filter(s => s.is_holiday).length,
+      'Bruto ($)': round2(gross),
+      'Desc. Retardos ($)': round2(retDesc),
+      'Desc. Incidencias ($)': round2(incDesc),
+      'Neto ($)': round2(net),
     }
   }).sort((a, b) => a['Empleado'].localeCompare(b['Empleado'], 'es'))
+
+  // Totales
+  const grandTot = summaryRows.reduce((a, r) => ({
+    'Total Horas': a['Total Horas'] + (r['Total Horas'] || 0),
+    'Horas Extra': a['Horas Extra'] + (r['Horas Extra'] || 0),
+    'Bruto ($)': a['Bruto ($)'] + (r['Bruto ($)'] || 0),
+    'Desc. Retardos ($)': a['Desc. Retardos ($)'] + (r['Desc. Retardos ($)'] || 0),
+    'Desc. Incidencias ($)': a['Desc. Incidencias ($)'] + (r['Desc. Incidencias ($)'] || 0),
+    'Neto ($)': a['Neto ($)'] + (r['Neto ($)'] || 0),
+  }), { 'Total Horas': 0, 'Horas Extra': 0, 'Bruto ($)': 0, 'Desc. Retardos ($)': 0, 'Desc. Incidencias ($)': 0, 'Neto ($)': 0 })
+  if (summaryRows.length > 0) {
+    summaryRows.push({
+      'Empleado': '--- TOTALES ---',
+      'Código': '', 'Departamento': '', 'Sucursal': '', 'Tarifa/Hora ($)': '',
+      'Días Trabajados': '', 'Total Horas': round2(grandTot['Total Horas']),
+      'Horas Extra': round2(grandTot['Horas Extra']),
+      'Retardos': '', 'Incidencias': '', 'Faltas Inj.': '',
+      'Faltas Just. Pag.': '', 'Faltas Just. S/Pag.': '', 'Feriados Trab.': '',
+      'Bruto ($)': round2(grandTot['Bruto ($)']),
+      'Desc. Retardos ($)': round2(grandTot['Desc. Retardos ($)']),
+      'Desc. Incidencias ($)': round2(grandTot['Desc. Incidencias ($)']),
+      'Neto ($)': round2(grandTot['Neto ($)']),
+    })
+  }
 
   const headerRows = [
     ['AUDITORÍA DE ASISTENCIA — ' + (companyName || 'CheckPro')],
@@ -432,31 +573,59 @@ export function generateAllEmployeesBySheetXLSX({ emps, shifts, branches, period
 
   // Hoja por empleado (solo empleados con registros o todos — todos para auditoría)
   const sortedEmps = [...emps].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'es'))
+  const empsById = Object.fromEntries(emps.map(e => [e.id, e]))
   sortedEmps.forEach((emp, idx) => {
     const mine = shifts.filter(s => s.employee_id === emp.id).sort((a, b) => a.date_str.localeCompare(b.date_str))
     const branchName = emp.branch_id ? (branchMap[emp.branch_id]?.name || '') : ''
+    const rate = monthlyToHourly(emp)
+    let gross = 0, retDesc = 0, incDesc = 0, net = 0
+    try {
+      const s = empWeekSummary(emp, mine, emps, 'own')
+      gross = s.grossPay || 0
+      retDesc = s.retardoDesc || 0
+      incDesc = s.incidentDesc || 0
+      net = s.netPay || 0
+    } catch { /* noop */ }
     const infoRows = [
       [emp.name],
       ['Código:', emp.employee_code || ''],
       ['Departamento:', emp.department || ''],
       ['Sucursal:', branchName],
+      ['Tipo horario:', emp.is_mixed ? 'Mixto' : (emp.free_schedule ? 'Libre' : 'Fijo')],
+      ['Salario base:', `$${round2(emp.monthly_salary || 0)} / ${emp.schedule?.salary_period === 'weekly' ? 'semana' : 'mes'}`],
+      ['Tarifa/hora:', `$${round2(rate)}`],
       ['Período:', periodFrom + ' al ' + periodTo],
       ['Registros:', mine.length],
+      ['Bruto ($):', round2(gross)],
+      ['Desc. Retardos ($):', round2(retDesc)],
+      ['Desc. Incidencias ($):', round2(incDesc)],
+      ['NETO ($):', round2(net)],
       [],
     ]
     const rows = mine.map(s => {
       const dateObj = new Date(s.date_str + 'T12:00:00')
+      const pagoDia = shiftPayForEmp(s, emp, empsById, 'own')
+      const extraH = Number(s.corrections?.overtime?.hours || 0)
+      const extraPago = extraH * rate
+      const descRet = s.classification?.type === 'retardo' ? (rate * 0.5) : 0
+      const descInc = s.status === 'incident' ? (rate * 8) : 0
+      const totalDia = Math.max(0, pagoDia - descRet - descInc)
       return {
         'Fecha': s.date_str,
         'Día': dayNames[dateObj.getDay()],
         'Entrada': fmtT(s.entry_time),
         'Salida': fmtT(s.exit_time),
-        'Horas': s.duration_hours || 0,
-        'Extra': s.corrections?.overtime?.hours || 0,
+        'Horas': round2(s.duration_hours || 0),
+        'Extra': round2(extraH),
         'Estatus': s.status === 'closed' ? 'Cerrada' : s.status === 'open' ? 'Abierta' : s.status === 'incident' ? 'Incidencia' : s.status === 'absent' ? 'Falta' : s.status,
         'Clasificación': classLabel(s),
         'Retardo': s.classification?.type === 'retardo' ? 'SÍ' : 'No',
-        'Feriado': s.is_holiday ? 'SÍ' : 'No',
+        'Feriado': s.is_holiday ? 'SÍ (x3)' : 'No',
+        'Pago Jornada ($)': round2(pagoDia),
+        'Pago Extra ($)': round2(extraPago),
+        'Desc. Retardo ($)': round2(descRet),
+        'Desc. Incidencia ($)': round2(descInc),
+        'Total Día ($)': round2(totalDia),
         'Incidencias': (s.incidents || []).map(i => i.type + (i.note ? ': ' + i.note : '')).join(' | '),
         'Notas': Array.isArray(s.corrections) ? s.corrections.map(c => c?.note).filter(Boolean).join(' | ') : ''
       }
