@@ -16,6 +16,13 @@
   --cp-text-muted:#64748b;
   --cp-text-faint:#94a3b8;
   --cp-input-bg:  #f1f5f9;
+  /* Elevation system (light) */
+  --cp-shadow-sm: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 1px -1px rgb(15 23 42 / 0.03);
+  --cp-shadow:    0 4px 14px -4px rgb(15 23 42 / 0.08), 0 2px 4px -2px rgb(15 23 42 / 0.04);
+  --cp-shadow-lg: 0 20px 40px -12px rgb(15 23 42 / 0.12), 0 8px 16px -8px rgb(15 23 42 / 0.06);
+  --cp-ring:      0 0 0 3px rgb(61 255 160 / 0.25);
+  --cp-bg-radial: radial-gradient(1200px 600px at 80% -10%, rgb(61 255 160 / 0.06), transparent 60%),
+                  radial-gradient(900px 500px at -10% 110%, rgb(100 116 139 / 0.05), transparent 60%);
 }
 
 html.dark {
@@ -29,16 +36,42 @@ html.dark {
   --cp-text-muted:#94a3b8;
   --cp-text-faint:#64748b;
   --cp-input-bg:  #171b24;
+  /* Elevation system (dark) */
+  --cp-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.35), 0 1px 1px -1px rgb(0 0 0 / 0.25);
+  --cp-shadow:    0 8px 24px -10px rgb(0 0 0 / 0.6), 0 2px 6px -3px rgb(0 0 0 / 0.35);
+  --cp-shadow-lg: 0 24px 48px -16px rgb(0 0 0 / 0.7), 0 8px 16px -8px rgb(0 0 0 / 0.4);
+  --cp-ring:      0 0 0 3px rgb(61 255 160 / 0.3);
+  --cp-bg-radial: radial-gradient(1400px 700px at 85% -15%, rgb(61 255 160 / 0.045), transparent 60%),
+                  radial-gradient(900px 500px at -10% 110%, rgb(56 189 248 / 0.035), transparent 60%);
 }
 
 * { -webkit-tap-highlight-color: transparent; }
+
+html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
 
 body {
   min-height: 100dvh;
   overscroll-behavior: none;
   background-color: var(--cp-bg);
+  background-image: var(--cp-bg-radial);
+  background-attachment: fixed;
   color: var(--cp-text);
   transition: background-color 0.2s ease, color 0.2s ease;
+  font-feature-settings: "cv11", "ss01", "ss03";
+}
+
+/* Tipografía refinada: headings con tracking ajustado */
+h1, h2, h3, h4 { letter-spacing: -0.02em; }
+h1 { letter-spacing: -0.025em; }
+
+/* Selección alineada con el brand */
+::selection { background: rgb(61 255 160 / 0.25); color: var(--cp-text); }
+
+/* Focus visible accesible (solo teclado) */
+:focus { outline: none; }
+:focus-visible { outline: none; box-shadow: var(--cp-ring); border-radius: 0.5rem; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  box-shadow: var(--cp-ring);
 }
 
 /* Scrollbar hide */
@@ -76,25 +109,35 @@ html.light aside[data-sidebar] * {
   .card {
     background-color: var(--cp-surface);
     border: 1px solid var(--cp-border);
+    box-shadow: var(--cp-shadow-sm);
     @apply rounded-2xl p-5;
-    transition: background-color 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
   }
+  .card:hover { box-shadow: var(--cp-shadow); }
   .card-sm {
     background-color: var(--cp-surface);
     border: 1px solid var(--cp-border);
+    box-shadow: var(--cp-shadow-sm);
     @apply rounded-xl p-4;
-    transition: background-color 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   }
-  .btn-primary {
+  .card-sm:hover { box-shadow: var(--cp-shadow); }
+
+  /* Botones: base compartida con micro-interacción táctil */
+  .btn-primary, .btn-danger {
     @apply flex items-center justify-center gap-2 w-full py-3.5 px-5 rounded-xl
-           bg-brand-400 text-black font-bold text-base active:brightness-90
-           disabled:opacity-40 disabled:cursor-not-allowed transition-all;
+           font-bold text-base disabled:opacity-40 disabled:cursor-not-allowed;
+    transition: transform 0.12s ease, box-shadow 0.2s ease, filter 0.15s ease, background-color 0.15s ease;
+    box-shadow: var(--cp-shadow-sm), inset 0 1px 0 rgb(255 255 255 / 0.08);
+    will-change: transform;
   }
-  .btn-danger {
-    @apply flex items-center justify-center gap-2 w-full py-3.5 px-5 rounded-xl
-           bg-red-500 text-white font-bold text-base active:brightness-90
-           disabled:opacity-40 transition-all;
-  }
+  .btn-primary { background-color: theme('colors.brand.400'); color: #000; }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.05); box-shadow: var(--cp-shadow), inset 0 1px 0 rgb(255 255 255 / 0.12); }
+  .btn-primary:active:not(:disabled) { transform: translateY(1px) scale(0.995); filter: brightness(0.92); }
+  .btn-danger { background-color: theme('colors.red.500'); color: #fff; }
+  .btn-danger:hover:not(:disabled) { filter: brightness(1.06); box-shadow: var(--cp-shadow); }
+  .btn-danger:active:not(:disabled) { transform: translateY(1px) scale(0.995); filter: brightness(0.92); }
+
   .btn-ghost {
     display: flex;
     align-items: center;
@@ -107,9 +150,11 @@ html.light aside[data-sidebar] * {
     font-weight: 600;
     font-size: 0.875rem;
     border: 1px solid var(--cp-border);
-    transition: all 0.15s ease;
+    box-shadow: var(--cp-shadow-sm);
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease, box-shadow 0.2s ease;
   }
-  .btn-ghost:active { background-color: var(--cp-hover); }
+  .btn-ghost:hover { background-color: var(--cp-hover); box-shadow: var(--cp-shadow); }
+  .btn-ghost:active { transform: translateY(1px) scale(0.995); background-color: var(--cp-hover); }
   .btn-sm {
     @apply py-2 px-3 text-xs rounded-lg;
   }
@@ -122,18 +167,32 @@ html.light aside[data-sidebar] * {
     font-size: 1rem;
     padding: 0.75rem 1rem;
     outline: none;
-    transition: border-color 0.15s ease, background-color 0.2s ease;
+    transition: border-color 0.15s ease, background-color 0.2s ease, box-shadow 0.15s ease;
   }
-  .input:focus { border-color: theme('colors.brand.400'); }
+  .input:hover { border-color: var(--cp-hover); }
+  .input:focus { border-color: theme('colors.brand.400'); box-shadow: var(--cp-ring); }
   .input::placeholder { color: var(--cp-text-faint); }
   .label {
-    @apply block text-xs font-bold uppercase tracking-wider mb-1.5 font-mono;
+    @apply block text-[11px] font-bold uppercase tracking-[0.12em] mb-1.5 font-mono;
     color: var(--cp-text-muted);
   }
-  .badge-green  { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-brand-400/10 text-brand-400; }
-  .badge-red    { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-red-500/10 text-red-400; }
-  .badge-orange { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-orange-500/10 text-orange-400; }
-  .badge-blue   { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-blue-500/10 text-blue-400; }
-  .badge-gray   { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-gray-500/10 text-gray-400; }
-  .badge-purple { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-purple-500/10 text-purple-400; }
+  .badge-green  { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono bg-brand-400/10 text-brand-400 ring-1 ring-inset ring-brand-400/20; }
+  .badge-red    { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono bg-red-500/10 text-red-400 ring-1 ring-inset ring-red-500/20; }
+  .badge-orange { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono bg-orange-500/10 text-orange-400 ring-1 ring-inset ring-orange-500/20; }
+  .badge-blue   { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono bg-blue-500/10 text-blue-400 ring-1 ring-inset ring-blue-500/20; }
+  .badge-gray   { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono bg-gray-500/10 text-gray-400 ring-1 ring-inset ring-gray-500/20; }
+  .badge-purple { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono bg-purple-500/10 text-purple-400 ring-1 ring-inset ring-purple-500/20; }
+
+  /* Divisores finos reutilizables */
+  .hairline { height: 1px; background: linear-gradient(90deg, transparent, var(--cp-border) 20%, var(--cp-border) 80%, transparent); }
+
+  /* KBD chip para atajos / códigos */
+  .kbd { @apply inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-mono font-semibold;
+    background-color: var(--cp-elevated); border: 1px solid var(--cp-border); color: var(--cp-text-muted);
+  }
+}
+
+/* Reducir motion para usuarios que lo prefieren */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
