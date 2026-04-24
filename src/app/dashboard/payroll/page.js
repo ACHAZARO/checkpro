@@ -510,7 +510,13 @@ export default function PayrollPage() {
     }
 
     await load()
-    const { data: fresh } = await supabase.from('week_cuts').select('*').eq('id', cut.id).single()
+    const { data: fresh, error: freshErr } = await supabase.from('week_cuts').select('*').eq('id', cut.id).single()
+    if (freshErr || !fresh) {
+      console.error('Error recargando corte:', freshErr)
+      toast.error('No se pudo cargar el reporte del corte')
+      setClosing(false)
+      return
+    }
     setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered'))
     setClosing(false)
   }

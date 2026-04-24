@@ -60,7 +60,8 @@ export async function POST(req) {
         detail: `FALLO al auto-cerrar: ${upErr.message}`,
         success: false,
       })
-      return NextResponse.json({ ok: false, msg: 'Error al cerrar turno', detail: upErr.message }, { status: 500 })
+      console.error('[check/abandon] update error:', upErr)
+      return NextResponse.json({ ok: false, msg: 'Error al cerrar turno' }, { status: 500 })
     }
 
     await supabase.from('audit_log').insert({

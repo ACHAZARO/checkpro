@@ -86,7 +86,7 @@ export async function POST(req) {
         .select('config')
         .eq('id', tenantId)
         .maybeSingle()
-      const tz = tenantRow?.config?.timezone || process.env.APP_TIMEZONE || 'America/Mexico_City'
+      const tz = tenantRow?.config?.timezone || 'America/Mexico_City'
       const dateStr = isoDate(new Date().toISOString(), tz)
       const { data: plan } = await supabase
         .from('shift_plans')

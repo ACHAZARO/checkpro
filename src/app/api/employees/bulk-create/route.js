@@ -124,7 +124,10 @@ export async function POST(req) {
       // is_mixed marca el flag. El planificador se encarga del horario diario.
       is_mixed: !!n.is_mixed,
       daily_hours: n.is_mixed ? n.daily_hours : null,
-      schedule: buildSchedulePayload(n.schedule, branch, n.fecha_ingreso),
+      free_schedule: !!n.free_schedule,
+      free_min_days_week: n.free_schedule ? n.free_min_days_week : null,
+      free_min_hours_week: n.free_schedule ? n.free_min_hours_week : null,
+      schedule: n.free_schedule ? {} : buildSchedulePayload(n.schedule, branch, n.fecha_ingreso),
       status: 'active',
     })
   }
@@ -145,8 +148,7 @@ export async function POST(req) {
   if (insErr) {
     console.error('[employees/bulk-create] db error', insErr)
     return NextResponse.json({
-      error: insErr.message || 'Error de base de datos al importar',
-      detail: insErr.details || null,
+      error: 'Error al importar empleados. Revisa el archivo e intenta de nuevo.',
     }, { status: 500 })
   }
 

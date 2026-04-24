@@ -154,8 +154,8 @@ export default function BulkUploadModal({ branches, onClose, onImported }) {
   const hasBranches = branches && branches.length > 0
 
   return (
-    <div className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end" style={{ touchAction: 'none' }}>
-      <div className="bg-dark-800 rounded-t-2xl overflow-y-scroll no-scrollbar"
+    <div className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end">
+      <div className="bg-dark-800 rounded-t-2xl overflow-y-auto overscroll-contain no-scrollbar"
         style={{ height: '90vh', touchAction: 'pan-y' }}>
         <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-4" />
         <div className="px-5 pb-10">

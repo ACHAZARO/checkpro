@@ -85,7 +85,6 @@ export function BottomSheet({ open, onClose, title, children, footer }) {
   return (
     <div
       className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end"
-      style={{ touchAction: 'none' }}
       onClick={onClose}
     >
       <div
@@ -94,7 +93,7 @@ export function BottomSheet({ open, onClose, title, children, footer }) {
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="bg-dark-800 rounded-t-2xl overflow-y-scroll no-scrollbar focus:outline-none"
+        className="bg-dark-800 rounded-t-2xl overflow-y-auto overscroll-contain no-scrollbar focus:outline-none"
         style={{ maxHeight: '90vh', touchAction: 'pan-y' }}
         onClick={e => e.stopPropagation()}
       >

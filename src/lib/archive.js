@@ -5,7 +5,7 @@ import { PDFDocument, StandardFonts } from 'pdf-lib'
 import crypto from 'crypto'
 import { formatInTimeZone } from 'date-fns-tz'
 
-const TZ = process.env.APP_TIMEZONE || 'America/Mexico_City'
+const TZ = 'America/Mexico_City'
 
 export function sha256(buf) {
   return crypto.createHash('sha256').update(buf).digest('hex')

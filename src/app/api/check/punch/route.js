@@ -92,7 +92,7 @@ export async function POST(req) {
     // Cargar config del tenant
     const { data: tenant } = await supabase.from('tenants').select('config').eq('id', tenantId).single()
     const cfg = tenant?.config || {}
-    const tz = cfg.timezone || process.env.APP_TIMEZONE || 'America/Mexico_City'
+    const tz = cfg.timezone || 'America/Mexico_City'
 
     // R7: cumpleanios. La RPC validate_employee_pin no expone birth_date (PII),
     // asi que lo leemos aqui post-PIN por emp.id. Solo exponemos un booleano
@@ -334,7 +334,7 @@ export async function POST(req) {
     }).eq('id', openShift.id)
     if (outErr) {
       console.error('[check/punch] exit update error:', outErr)
-      return NextResponse.json({ error: 'No se pudo registrar la salida', detail: outErr.message }, { status: 500 })
+      return NextResponse.json({ error: 'No se pudo registrar la salida' }, { status: 500 })
     }
 
     await supabase.from('audit_log').insert({

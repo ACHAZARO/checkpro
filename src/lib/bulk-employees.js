@@ -21,6 +21,9 @@ export const TEMPLATE_COLUMNS = [
   'fecha_nacimiento',
   'horario_mixto',      // feat/mixed-schedule: marca al empleado como mixto
   'horas_diarias',      // feat/mixed-schedule: duracion diaria cuando es mixto
+  'horario_libre',      // feat/free-schedule: gerente con horario libre
+  'min_dias_semana',    // feat/free-schedule: dias mínimos/semana (0-7)
+  'min_horas_semana',   // feat/free-schedule: horas mínimas/semana (0-168)
   'lun_inicio', 'lun_fin',
   'mar_inicio', 'mar_fin',
   'mie_inicio', 'mie_fin',
@@ -43,6 +46,9 @@ export const TEMPLATE_LABELS = {
   fecha_nacimiento: 'fecha_nacimiento',
   horario_mixto: 'horario_mixto',
   horas_diarias: 'horas_diarias',
+  horario_libre: 'horario_libre',
+  min_dias_semana: 'min_dias_semana',
+  min_horas_semana: 'min_horas_semana',
   lun_inicio: 'lun_inicio', lun_fin: 'lun_fin',
   mar_inicio: 'mar_inicio', mar_fin: 'mar_fin',
   mie_inicio: 'mie_inicio', mie_fin: 'mie_fin',
@@ -65,7 +71,10 @@ export const TEMPLATE_HELP = [
   ['fecha_nacimiento', 'Opcional. Formato YYYY-MM-DD. No puede ser futura.'],
   ['horario_mixto', 'Opcional. sí/no. Marca empleados con horario que cambia semana a semana (el gerente los agenda en el Planificador). Requiere activar "Horario mixto" en Configuración.'],
   ['horas_diarias', 'Requerido si horario_mixto = sí. Número de horas que trabaja por día (ej. 8). El gerente luego asigna a qué hora entra cada día.'],
-  ['lun_inicio / lun_fin', 'Hora de entrada y salida del lunes en formato HH:MM (24h). Si ambas están vacías = descanso. Se ignora si horario_mixto = sí.'],
+  ['horario_libre', 'Opcional. sí/no. Solo para gerentes (puede_administrar=sí). Incompatible con horario_mixto. Nómina íntegra; checan entradas/salidas libremente.'],
+  ['min_dias_semana', 'Opcional. Número 0-7 (default 5). Solo aplica si horario_libre=sí. Días mínimos que debe asistir por semana.'],
+  ['min_horas_semana', 'Opcional. Número 0-168 (default 40). Solo aplica si horario_libre=sí. Horas mínimas por semana.'],
+  ['lun_inicio / lun_fin', 'Hora de entrada y salida del lunes en formato HH:MM (24h). Si ambas están vacías = descanso. Se ignora si horario_mixto = sí o horario_libre = sí.'],
   ['mar..dom', 'Mismo formato que lunes para cada día. Al menos 1 día debe tener horario (si no es mixto).'],
 ]
 
@@ -83,6 +92,9 @@ export const TEMPLATE_EXAMPLE_ROW = {
   fecha_nacimiento: '1995-08-30',
   horario_mixto: 'no',
   horas_diarias: '',
+  horario_libre: 'no',
+  min_dias_semana: '',
+  min_horas_semana: '',
   lun_inicio: '09:00', lun_fin: '18:00',
   mar_inicio: '09:00', mar_fin: '18:00',
   mie_inicio: '09:00', mie_fin: '18:00',
@@ -118,6 +130,9 @@ const HEADER_ALIASES = {
   nacimiento: 'fecha_nacimiento', cumpleanos: 'fecha_nacimiento', birth_date: 'fecha_nacimiento', fecha_de_nacimiento: 'fecha_nacimiento',
   mixto: 'horario_mixto', es_mixto: 'horario_mixto', is_mixed: 'horario_mixto', horario_rotativo: 'horario_mixto',
   horas_por_dia: 'horas_diarias', daily_hours: 'horas_diarias', jornada_diaria: 'horas_diarias',
+  libre: 'horario_libre', es_libre: 'horario_libre', free_schedule: 'horario_libre', flexible: 'horario_libre', horario_flexible: 'horario_libre',
+  dias_semana: 'min_dias_semana', min_days_week: 'min_dias_semana', free_min_days_week: 'min_dias_semana', dias_minimos: 'min_dias_semana',
+  horas_semana: 'min_horas_semana', min_hours_week: 'min_horas_semana', free_min_hours_week: 'min_horas_semana', horas_minimas: 'min_horas_semana',
   lunes_inicio: 'lun_inicio', lunes_fin: 'lun_fin',
   martes_inicio: 'mar_inicio', martes_fin: 'mar_fin',
   miercoles_inicio: 'mie_inicio', miercoles_fin: 'mie_fin',
@@ -271,6 +286,37 @@ export function validateRow(row, ctx = {}) {
     }
   }
 
+  // Libre: horario_libre (bool) + min_dias_semana (0-7, default 5) + min_horas_semana (0-168, default 40).
+  // Solo aplica a gerentes (puede_administrar=sí). Incompatible con horario_mixto.
+  // Si horario_libre=sí, se ignora el schedule semanal (se guarda vacío) — igual que el form individual.
+  const isFree = coerceBool(row.horario_libre)
+  let freeMinDays = null
+  let freeMinHours = null
+  if (isFree) {
+    if (isMixed) {
+      errors.push('horario_libre y horario_mixto son mutuamente excluyentes')
+    }
+    if (!coerceBool(row.puede_administrar)) {
+      errors.push('horario_libre=sí solo aplica a gerentes (puede_administrar=sí)')
+    }
+    const mdRaw = row.min_dias_semana === '' || row.min_dias_semana == null
+      ? 5
+      : parseInt(String(row.min_dias_semana).trim(), 10)
+    if (!Number.isFinite(mdRaw) || mdRaw < 0 || mdRaw > 7) {
+      errors.push('min_dias_semana fuera de rango (0-7)')
+    } else {
+      freeMinDays = mdRaw
+    }
+    const mhRaw = row.min_horas_semana === '' || row.min_horas_semana == null
+      ? 40
+      : parseFloat(String(row.min_horas_semana).replace(',', '.'))
+    if (!Number.isFinite(mhRaw) || mhRaw < 0 || mhRaw > 168) {
+      errors.push('min_horas_semana fuera de rango (0-168)')
+    } else {
+      freeMinHours = mhRaw
+    }
+  }
+
   // Schedule: para empleados fijos, validar que si hay inicio haya fin y
   // viceversa, que estén en HH:MM y que end > start. Para mixtos, schedule
   // queda todo en work:false (no aplica).
@@ -311,12 +357,12 @@ export function validateRow(row, ctx = {}) {
     schedule[d] = { work: true, start, end, custom: false }
     anyWorkingDay = true
   }
-  // Regla "al menos 1 día" solo aplica a empleados fijos.
-  if (!isMixed && !anyWorkingDay && errors.length === 0) {
+  // Regla "al menos 1 día" solo aplica a empleados fijos (no mixtos ni libres).
+  if (!isMixed && !isFree && !anyWorkingDay && errors.length === 0) {
     errors.push('Debe tener al menos 1 día con horario (L-D todos vacíos = sin turno)')
   }
-  // Mixto ignora cualquier schedule que traiga el archivo: lo reseteamos.
-  if (isMixed) {
+  // Mixto/libre ignoran cualquier schedule que traiga el archivo: lo reseteamos.
+  if (isMixed || isFree) {
     for (const d of DAYS) {
       schedule[d] = { work: false, start: '09:00', end: '18:00', custom: false }
     }
@@ -351,6 +397,9 @@ export function validateRow(row, ctx = {}) {
     fecha_nacimiento: fechaNacimiento || null,
     is_mixed: isMixed,
     daily_hours: isMixed ? dailyHours : null,
+    free_schedule: isFree,
+    free_min_days_week: isFree ? freeMinDays : null,
+    free_min_hours_week: isFree ? freeMinHours : null,
     schedule,
   }
 

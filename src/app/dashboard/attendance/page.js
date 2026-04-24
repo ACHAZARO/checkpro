@@ -184,7 +184,7 @@ export default function AttendancePage() {
     const label = typeLabels[absenceForm.type] || absenceForm.type
     const isGrave = absenceForm.type === 'falta_injustificada'
 
-    await supabase.from('shifts').insert({
+    const { error: insertErr } = await supabase.from('shifts').insert({
       tenant_id: tenantId,
       employee_id: emp.id,
       date_str: dateStr,
@@ -194,8 +194,15 @@ export default function AttendancePage() {
       status: 'absent',
       classification: { type: absenceForm.type, label },
       incidents: isGrave ? [{ type: 'grave', note: absenceForm.note || 'Falta injustificada registrada por gerente', ts: new Date().toISOString() }] : [],
-      corrections: {},
+      corrections: [],
     })
+
+    if (insertErr) {
+      console.error('Error registrando falta:', insertErr)
+      toast.error('No se pudo registrar la falta')
+      setSaving(false)
+      return
+    }
 
     await supabase.from('audit_log').insert({
       tenant_id: tenantId, action: 'ABSENCE',
@@ -435,8 +442,8 @@ export default function AttendancePage() {
 
       {/* ── Register absence sheet ─────────────────────────────────────────── */}
       {absenceSheet && (
-        <div className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end" style={{touchAction:'none'}}>
-          <div className="bg-dark-800 rounded-t-2xl overflow-y-scroll no-scrollbar" style={{maxHeight:'80vh',touchAction:'pan-y'}}>
+        <div className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end">
+          <div className="bg-dark-800 rounded-t-2xl overflow-y-auto overscroll-contain no-scrollbar" style={{maxHeight:'80vh',touchAction:'pan-y'}}>
             <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-4"/>
             <div className="px-5 pb-10">
               <h3 className="text-lg font-bold text-white mb-1">Registrar Falta</h3>
@@ -491,8 +498,8 @@ export default function AttendancePage() {
 
       {/* Correction sheet */}
       {corrSheet && (
-        <div className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end" style={{touchAction:'none'}}>
-          <div className="bg-dark-800 rounded-t-2xl overflow-y-scroll no-scrollbar" style={{height:'75vh',touchAction:'pan-y'}}>
+        <div className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end">
+          <div className="bg-dark-800 rounded-t-2xl overflow-y-auto overscroll-contain no-scrollbar" style={{height:'75vh',touchAction:'pan-y'}}>
             <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-4"/>
             <div className="px-5 pb-10">
               <h3 className="text-lg font-bold text-white mb-1">Corrección de Jornada</h3>
@@ -516,8 +523,8 @@ export default function AttendancePage() {
 
       {/* Flag incident sheet */}
       {flagSheet && (
-        <div className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end" style={{touchAction:'none'}}>
-          <div className="bg-dark-800 rounded-t-2xl overflow-y-scroll no-scrollbar" style={{height:'65vh',touchAction:'pan-y'}}>
+        <div className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end">
+          <div className="bg-dark-800 rounded-t-2xl overflow-y-auto overscroll-contain no-scrollbar" style={{height:'65vh',touchAction:'pan-y'}}>
             <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-4"/>
             <div className="px-5 pb-10">
               <h3 className="text-lg font-bold text-white mb-1">Marcar Incidencia</h3>
