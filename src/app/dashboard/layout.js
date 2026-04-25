@@ -12,13 +12,13 @@ import {
 } from 'lucide-react'
 
 const NAV = [
-  { href: '/dashboard',              label: 'Hoy',          Icon: Home },
-  { href: '/dashboard/employees',    label: 'Personal',     Icon: Users },
-  { href: '/dashboard/attendance',   label: 'Registros',    Icon: CalendarCheck },
-  { href: '/dashboard/planning',     label: 'Planificador', Icon: ClipboardList, mixedOnly: true },
-  { href: '/dashboard/incidencias',  label: 'Incidencias',  Icon: AlertTriangle },
-  { href: '/dashboard/payroll',      label: 'Nómina',       Icon: DollarSign },
-  { href: '/dashboard/settings',     label: 'Config',       Icon: SettingsIcon },
+  { href: '/dashboard',              label: 'Hoy',          shortLabel: 'Hoy',     Icon: Home },
+  { href: '/dashboard/employees',    label: 'Personal',     shortLabel: 'Equipo',  Icon: Users },
+  { href: '/dashboard/attendance',   label: 'Registros',    shortLabel: 'Asist.',  Icon: CalendarCheck },
+  { href: '/dashboard/planning',     label: 'Planificador', shortLabel: 'Plan',    Icon: ClipboardList, mixedOnly: true },
+  { href: '/dashboard/incidencias',  label: 'Incidencias',  shortLabel: 'Alertas', Icon: AlertTriangle },
+  { href: '/dashboard/payroll',      label: 'Nómina',       shortLabel: 'Nómina',  Icon: DollarSign },
+  { href: '/dashboard/settings',     label: 'Config',       shortLabel: 'Config',  Icon: SettingsIcon },
 ]
 
 export default function DashboardLayout({ children }) {
@@ -83,7 +83,7 @@ export default function DashboardLayout({ children }) {
         <div className="absolute top-0 left-0 right-0 h-px" style={{ background: 'linear-gradient(90deg, transparent, rgba(61,255,160,0.25), transparent)' }} />
         <div className="p-5 pb-4 border-b border-dark-border">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center font-mono text-[11px] font-bold text-black shrink-0" style={{ background: 'linear-gradient(135deg, #52ffb0, #00d97e)', boxShadow: '0 4px 12px -2px rgba(61,255,160,0.4)' }}>CP</div>
+            <img src="/logo-icon.svg" alt="CheckPro" className="w-7 h-7 shrink-0" style={{ filter: 'drop-shadow(0 4px 8px rgba(61,255,160,0.35))' }} />
             <div className="flex-1 min-w-0">
               <div className="text-white font-bold text-[13px] leading-tight truncate" title={tenant?.name || tenant?.config?.branchName || '—'}>{tenant?.name || tenant?.config?.branchName || '—'}</div>
               <div className="text-gray-400 text-[10px] font-mono tracking-wider uppercase mt-0.5 truncate" title={profile?.name}>{profile?.name}</div>
@@ -126,12 +126,15 @@ export default function DashboardLayout({ children }) {
       {/* Main content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Mobile top bar */}
-        <div className={`md:hidden sticky top-0 z-30 backdrop-blur border-b px-5 py-3 flex items-center justify-between ${theme === 'dark' ? 'bg-dark-900/92 border-dark-border' : 'bg-white/95 border-gray-200'}`}>
-          <div className="min-w-0 flex-1 pr-3">
-            <div className="text-xs font-mono text-brand-400 tracking-widest">⬡ CHECKPRO</div>
-            <div className="text-sm font-bold text-white truncate" title={tenant?.name || tenant?.config?.branchName}>{tenant?.name || tenant?.config?.branchName}</div>
+        <div className={`md:hidden sticky top-0 z-30 backdrop-blur border-b px-4 py-3 flex items-center justify-between ${theme === 'dark' ? 'bg-dark-900/92 border-dark-border' : 'bg-white/95 border-gray-200'}`}>
+          <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-3">
+            <img src="/logo-icon.svg" alt="CheckPro" className="w-7 h-7 shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[10px] font-mono text-brand-400 tracking-widest leading-none mb-0.5">CHECKPRO</div>
+              <div className={`text-sm font-bold truncate leading-tight ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`} title={tenant?.name || tenant?.config?.branchName}>{tenant?.name || tenant?.config?.branchName}</div>
+            </div>
           </div>
-          <button onClick={signOut} className="shrink-0 text-xs text-gray-300 font-mono px-2 py-1 rounded border border-dark-border active:bg-dark-700">
+          <button onClick={signOut} className={`shrink-0 text-xs font-mono px-2.5 py-1.5 rounded-lg border transition-colors ${theme === 'dark' ? 'text-gray-400 border-dark-border hover:text-gray-200 hover:bg-dark-700' : 'text-gray-500 border-gray-300 hover:text-gray-800 hover:bg-gray-100'}`}>
             Salir
           </button>
         </div>
@@ -158,10 +161,10 @@ export default function DashboardLayout({ children }) {
             return (
               <Link key={n.href} href={n.href}
                 prefetch
-                className={`flex-1 flex flex-col items-center gap-1 py-2.5 transition-colors duration-150
+                className={`flex-1 flex flex-col items-center gap-0.5 py-2 transition-colors duration-150 min-w-0
                   ${active ? 'text-brand-400' : 'text-gray-400'}`}>
-                <n.Icon size={18} />
-                <span className="text-[10px] font-semibold">{n.label}</span>
+                <n.Icon size={18} className="shrink-0" />
+                <span className="text-[9px] font-semibold truncate w-full text-center leading-tight">{n.shortLabel}</span>
               </Link>
             )
           })}

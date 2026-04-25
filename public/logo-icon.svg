@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <linearGradient id="hexGrad" x1="15%" y1="0%" x2="85%" y2="100%">
+      <stop offset="0%" stop-color="#52ffb0"/>
+      <stop offset="100%" stop-color="#00d97e"/>
+    </linearGradient>
+    <linearGradient id="shineGrad" x1="0%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- Flat-top hexagon -->
+  <polygon points="88,28 50,6 12,28 12,72 50,94 88,72" fill="url(#hexGrad)"/>
+  <!-- Top-left shine for depth -->
+  <polygon points="88,28 50,6 12,28 12,72 50,94 88,72" fill="url(#shineGrad)"/>
+  <!-- Checkmark: M27,50 L43,67 L73,33 -->
+  <path d="M27,50 L43,67 L73,33" stroke="#041a0a" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
