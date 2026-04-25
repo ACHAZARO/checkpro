@@ -4,6 +4,7 @@
 // by the old broken flow where RLS blocked tenants INSERT).
 import { NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
+import { findAuthUserByEmail } from '@/lib/supabase-server'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -66,13 +67,11 @@ export async function POST(req) {
 
       // User exists — look them up and verify the password before doing anything else.
       // (Password verification is the ONLY signal that this caller actually owns the account.)
-      const lookup = await admin.auth.admin.listUsers({ page: 1, perPage: 200 })
-      if (lookup.error) {
-        return NextResponse.json({ error: lookup.error.message }, { status: 500 })
+      let existing
+      try { existing = await findAuthUserByEmail(admin, emailLower) } catch (e) {
+        return NextResponse.json({ error: e.message }, { status: 500 })
       }
-      const existing = (lookup.data?.users || []).find(u => (u.email || '').toLowerCase() === emailLower)
       if (!existing) {
-        // Edge case: create said exists, but listUsers didn't find. Ask user to retry.
         return NextResponse.json({ error: 'No se encontró el usuario. Intenta de nuevo.' }, { status: 409 })
       }
       userId = existing.id

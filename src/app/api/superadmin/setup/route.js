@@ -8,7 +8,7 @@
 // can only elevate a single hard-coded email. Calling it repeatedly has
 // no negative effect.
 import { NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase-server'
+import { createServiceClient, findAuthUserByEmail } from '@/lib/supabase-server'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -24,9 +24,10 @@ export async function POST(req) {
     // 1) find or create auth user
     let userId = null
     {
-      const { data: list, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 500 })
-      if (error) return NextResponse.json({ error: 'listUsers: ' + error.message }, { status: 500 })
-      const existing = (list?.users || []).find(u => (u.email || '').toLowerCase() === SUPER_ADMIN_EMAIL)
+      let existing
+      try { existing = await findAuthUserByEmail(admin, SUPER_ADMIN_EMAIL) } catch (e) {
+        return NextResponse.json({ error: 'listUsers: ' + e.message }, { status: 500 })
+      }
       if (existing) {
         userId = existing.id
         if (!existing.email_confirmed_at) {
@@ -122,8 +123,7 @@ export async function GET() {
   if (process.env.SETUP_ENABLED !== '1') return NextResponse.json({ error: 'Not found' }, { status: 404 })
   try {
     const admin = createServiceClient()
-    const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 500 })
-    const u = (list?.users || []).find(x => (x.email || '').toLowerCase() === SUPER_ADMIN_EMAIL)
+    const u = await findAuthUserByEmail(admin, SUPER_ADMIN_EMAIL)
     if (!u) return NextResponse.json({ ready: false, reason: 'auth user missing' })
     const { data: prof } = await admin.from('profiles').select('role').eq('id', u.id).maybeSingle()
     return NextResponse.json({

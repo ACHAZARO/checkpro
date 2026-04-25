@@ -25,3 +25,16 @@ export function createServiceClient() {
     { auth: { autoRefreshToken: false, persistSession: false } }
   )
 }
+
+export async function findAuthUserByEmail(admin, email) {
+  const target = email.toLowerCase()
+  let page = 1
+  while (true) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 100 })
+    if (error) throw error
+    const found = data.users.find(u => (u.email || '').toLowerCase() === target)
+    if (found) return found
+    if (data.users.length < 100) return null
+    page++
+  }
+}

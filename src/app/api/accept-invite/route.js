@@ -3,7 +3,7 @@
 // given password, creates profile with role=manager + branch_id.
 import { NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
-import { createServiceClient } from '@/lib/supabase-server'
+import { createServiceClient, findAuthUserByEmail } from '@/lib/supabase-server'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -71,10 +71,11 @@ export async function POST(req) {
     // Find or create the auth user
     let userId = null
 
-    // List & find existing user (Supabase inviteUserByEmail may have created one)
-    const list = await admin.auth.admin.listUsers({ page: 1, perPage: 200 })
-    if (list.error) return NextResponse.json({ error: list.error.message }, { status: 500 })
-    const existing = (list.data?.users || []).find(u => (u.email || '').toLowerCase() === email)
+    // Find existing user (Supabase inviteUserByEmail may have created one)
+    let existing
+    try { existing = await findAuthUserByEmail(admin, email) } catch (e) {
+      return NextResponse.json({ error: e.message }, { status: 500 })
+    }
 
     if (existing) {
       userId = existing.id
