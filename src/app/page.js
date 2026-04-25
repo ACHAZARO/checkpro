@@ -7,6 +7,7 @@ import {
   MapPin, Clock, DollarSign, FileText, BarChart3, ShieldCheck,
   CheckCircle2, ArrowRight, Building2, Users, Zap,
 } from 'lucide-react'
+import HeroVisual from './HeroVisual'
 
 const FEATURES = [
   { Icon: MapPin,       title: 'Validación GPS',        desc: 'Checada verificada por ubicación en tiempo real' },
@@ -59,53 +60,59 @@ export default function Home() {
       </header>
 
       {/* ── HERO ── */}
-      <section className="relative flex-1 flex flex-col items-center justify-center px-5 pt-16 pb-12 md:pt-24 md:pb-20 overflow-hidden">
-        {/* Decorative background blobs */}
+      <section className="relative px-5 pt-12 pb-6 md:pt-16 md:pb-10 overflow-hidden">
+        {/* Subtle ambient glow */}
         <div className="pointer-events-none absolute inset-0" aria-hidden>
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[400px] rounded-full opacity-[0.07]"
-            style={{ background: 'radial-gradient(ellipse, #3dffa0 0%, transparent 70%)', filter: 'blur(40px)' }} />
-          <div className="absolute bottom-0 right-0 w-[300px] h-[300px] rounded-full opacity-[0.04]"
-            style={{ background: 'radial-gradient(ellipse, #38bdf8 0%, transparent 70%)', filter: 'blur(60px)' }} />
+          <div className="absolute top-0 left-0 w-full h-full opacity-[0.04]"
+            style={{ background: 'radial-gradient(ellipse 70% 50% at 60% 40%, #3dffa0 0%, transparent 100%)' }} />
         </div>
 
-        <div className="relative z-10 max-w-2xl w-full text-center">
-          {/* Eyebrow pill */}
-          <div className="inline-flex items-center gap-2 mb-6 px-3 py-1 rounded-full border text-[11px] font-mono font-bold uppercase tracking-[0.18em]"
-            style={{ borderColor: 'rgba(61,255,160,0.25)', backgroundColor: 'rgba(61,255,160,0.06)', color: 'var(--cp-text-muted)' }}>
-            <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
-            Sistema profesional de asistencia
+        <div className="relative z-10 max-w-5xl mx-auto grid md:grid-cols-2 gap-8 md:gap-4 items-center">
+          {/* Left — text content */}
+          <div className="flex flex-col items-start text-left">
+            {/* Eyebrow pill */}
+            <div className="inline-flex items-center gap-2 mb-5 px-3 py-1 rounded-full border text-[11px] font-mono font-bold uppercase tracking-[0.18em]"
+              style={{ borderColor: 'rgba(61,255,160,0.25)', backgroundColor: 'rgba(61,255,160,0.06)', color: 'var(--cp-text-muted)' }}>
+              <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
+              Sistema profesional de asistencia
+            </div>
+
+            {/* Headline */}
+            <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight leading-[1.05] mb-4"
+              style={{ letterSpacing: '-0.035em' }}>
+              Control de asistencia
+              <br />
+              <span className="text-brand-400">inteligente</span>
+            </h1>
+
+            <p className="text-base sm:text-lg mb-7 max-w-md" style={{ color: 'var(--cp-text-muted)', lineHeight: '1.65' }}>
+              GPS real, nómina automática y reportes imprimibles para tu empresa. Sin papel, sin excusas.
+            </p>
+
+            {/* CTAs */}
+            <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+              <Link href="/register" className="btn-primary sm:w-auto px-7">
+                Comenzar gratis <ArrowRight size={16} />
+              </Link>
+              <Link href="/login" className="btn-ghost sm:w-auto px-7">
+                Ya tengo cuenta
+              </Link>
+            </div>
+
+            {/* Trust badges */}
+            <div className="flex flex-wrap gap-x-5 gap-y-2 mt-6">
+              {['Sin tarjeta requerida', 'Configuración en minutos', 'Soporte en español'].map(t => (
+                <span key={t} className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: 'var(--cp-text-faint)' }}>
+                  <CheckCircle2 size={12} className="text-brand-400 shrink-0" />
+                  {t}
+                </span>
+              ))}
+            </div>
           </div>
 
-          {/* Headline */}
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tight leading-[1.05] mb-5"
-            style={{ letterSpacing: '-0.035em' }}>
-            Control de asistencia
-            <br />
-            <span className="text-brand-400">inteligente</span>
-          </h1>
-
-          <p className="text-base sm:text-lg mb-8 max-w-lg mx-auto" style={{ color: 'var(--cp-text-muted)', lineHeight: '1.65' }}>
-            GPS real, nómina automática y reportes imprimibles para tu empresa. Sin papel, sin excusas.
-          </p>
-
-          {/* CTAs */}
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Link href="/register" className="btn-primary sm:w-auto px-7">
-              Comenzar gratis <ArrowRight size={16} />
-            </Link>
-            <Link href="/login" className="btn-ghost sm:w-auto px-7">
-              Ya tengo cuenta
-            </Link>
-          </div>
-
-          {/* Trust badges */}
-          <div className="flex items-center justify-center gap-5 mt-8 flex-wrap">
-            {['Sin tarjeta requerida', 'Configuración en minutos', 'Soporte en español'].map(t => (
-              <span key={t} className="flex items-center gap-1.5 text-[12px] font-medium" style={{ color: 'var(--cp-text-faint)' }}>
-                <CheckCircle2 size={13} className="text-brand-400 shrink-0" />
-                {t}
-              </span>
-            ))}
+          {/* Right — animated visual */}
+          <div className="flex items-center justify-center md:justify-end">
+            <HeroVisual />
           </div>
         </div>
       </section>
