@@ -81,7 +81,7 @@ export async function GET(req) {
 
     const { data: emps, error: empErr } = await admin
       .from('employees')
-      .select('id, name, schedule, has_shift, free_schedule, is_mixed')
+      .select('id, name, branch_id, schedule, has_shift, free_schedule, is_mixed')
       .eq('tenant_id', tenant.id)
       .eq('status', 'active')
     if (empErr) {
@@ -89,15 +89,27 @@ export async function GET(req) {
       continue
     }
 
-    // Candidatos: horario fijo (is_mixed != true), con turno, que trabajen ese día.
-    // Empleados mixtos usan shift_plans y se manejan aparte.
+    // Candidatos fijos: horario fijo (is_mixed != true), con turno, que trabajen ese día.
     // free_schedule (gerentes libres) tampoco aplica.
-    const candidates = (emps || []).filter(e => {
+    const fixedCandidates = (emps || []).filter(e => {
       if (e.is_mixed === true) return false
       if (e.has_shift === false) return false
       if (e.free_schedule === true) return false
       return e.schedule?.[targetDayKey]?.work === true
     })
+
+    // Candidatos mixtos: empleados con shift_plan para targetDate.
+    const { data: plans } = await admin
+      .from('shift_plans')
+      .select('employee_id')
+      .eq('tenant_id', tenant.id)
+      .eq('date_str', targetDate)
+    const plannedEmpIds = new Set((plans || []).map(p => p.employee_id))
+    const mixedCandidates = (emps || []).filter(e =>
+      e.is_mixed === true && e.has_shift !== false && plannedEmpIds.has(e.id)
+    )
+
+    const candidates = [...fixedCandidates, ...mixedCandidates]
     if (candidates.length === 0) {
       summary.details.push({ tenant_id: tenant.id, candidates: 0 })
       continue
@@ -141,6 +153,7 @@ export async function GET(req) {
       .filter(e => !shiftsByEmp.has(e.id) && !onVacation.has(e.id) && !alreadyFlagged.has(e.id))
       .map(e => ({
         tenant_id: tenant.id,
+        branch_id: e.branch_id || null,
         employee_id: e.id,
         employee_name: e.name,
         date_str: targetDate,

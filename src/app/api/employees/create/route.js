@@ -69,6 +69,15 @@ export async function POST(req) {
     ? Math.max(0, Math.min(168, parseFloat(body.free_min_hours_week ?? 40) || 0))
     : null
 
+  const schedule = free_schedule ? {} : (body.schedule || {})
+
+  if (!is_mixed && !free_schedule && body.has_shift !== false) {
+    const hasWorkDay = Object.values(schedule).some(day => day && day.work === true)
+    if (!hasWorkDay) {
+      return NextResponse.json({ error: 'Horario requerido: selecciona al menos un día laboral.' }, { status: 400 })
+    }
+  }
+
   const payload = {
     tenant_id: profile.tenant_id,
     branch_id,
@@ -83,7 +92,7 @@ export async function POST(req) {
     payment_type: body.payment_type || 'efectivo',
     birth_date: body.birth_date || null,
     hire_date,
-    schedule: free_schedule ? {} : (body.schedule || {}),
+    schedule,
     is_mixed,
     daily_hours,
     free_schedule,
