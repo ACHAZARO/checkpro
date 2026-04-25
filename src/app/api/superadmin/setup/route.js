@@ -17,6 +17,7 @@ const SUPER_ADMIN_EMAIL = 'alepolch@gmail.com'
 const SYSTEM_TENANT_SLUG = 'checkpro-system'
 
 export async function POST(req) {
+  if (process.env.SETUP_ENABLED !== '1') return NextResponse.json({ error: 'Not found' }, { status: 404 })
   try {
     const admin = createServiceClient()
 
@@ -118,6 +119,7 @@ export async function POST(req) {
 
 // GET: lightweight status check
 export async function GET() {
+  if (process.env.SETUP_ENABLED !== '1') return NextResponse.json({ error: 'Not found' }, { status: 404 })
   try {
     const admin = createServiceClient()
     const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 500 })

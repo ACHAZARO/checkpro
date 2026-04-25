@@ -282,6 +282,7 @@ export default function CheckPage() {
   const [branchId, setBranchId] = useState(null)
   const [branchName, setBranchName] = useState('')
   const [slug, setSlug]         = useState('')
+  const [tenantToken, setTenantToken] = useState(null)
 
   // Device ID (persistent, bound to this browser)
   const [deviceId, setDeviceId] = useState(null)
@@ -340,6 +341,8 @@ export default function CheckPage() {
     const params = new URLSearchParams(window.location.search)
     const urlSlug = params.get('tenant')
     const urlBranch = params.get('branch')
+    const urlTenantToken = params.get('tenantToken')
+    if (urlTenantToken) setTenantToken(urlTenantToken)
 
     async function init() {
       // FIX: merge branch.config sobre tenant.config cuando hay urlBranch.
@@ -400,18 +403,18 @@ export default function CheckPage() {
 
   // ── Create session when tenant + deviceId are ready ───────────────────────
   useEffect(() => {
-    if (!tenantId || !deviceId) return
+    if (!tenantId || !deviceId || !tenantToken) return
     setSessionLoading(true)
     fetch('/api/check/session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenantId, branchId, deviceId })
+      body: JSON.stringify({ tenantToken, branchId, deviceId })
     })
       .then(r => r.json())
       .then(data => { setSession({ token: data.token, ip: data.ip }); setCurrentIp(data.ip) })
       .catch(() => {})
       .finally(() => setSessionLoading(false))
-  }, [tenantId, branchId, deviceId])
+  }, [tenantId, branchId, deviceId, tenantToken])
 
   // ── GPS one-shot verify ───────────────────────────────────────────────────
   const verifyGps = useCallback(() => {
@@ -756,7 +759,7 @@ export default function CheckPage() {
   }
 
   // ── Not configured ────────────────────────────────────────────────────────
-  if (!tenantId) return (
+  if (!tenantId || !tenantToken) return (
     <main className="min-h-dvh bg-dark-900 flex flex-col items-center justify-center px-5 text-center">
       <div className="text-4xl mb-4">⚙️</div>
       <h2 className="text-xl font-bold text-white mb-2">Checador no configurado</h2>

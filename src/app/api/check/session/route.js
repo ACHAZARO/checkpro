@@ -20,13 +20,11 @@ function secret() {
 
 export async function POST(req) {
   try {
-    const { tenantId, tenantToken, branchId, deviceId } = await req.json()
+    const { tenantToken, branchId, deviceId } = await req.json()
 
-    // Si viene tenantToken firmado, lo validamos. Si no, fallback temporal a tenantId suelto.
-    const verified = tenantToken ? verifyTenant(tenantToken) : null
-    const effectiveTenant = verified || tenantId
+    const effectiveTenant = tenantToken ? verifyTenant(tenantToken) : null
     if (!effectiveTenant) {
-      return NextResponse.json({ error: 'tenantId requerido' }, { status: 400 })
+      return NextResponse.json({ error: 'tenantToken inválido o ausente' }, { status: 401 })
     }
 
     const ip = getClientIp(req)

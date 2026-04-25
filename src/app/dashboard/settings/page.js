@@ -722,6 +722,14 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
   const [locating, setLocating] = useState(false)
   const [newHol, setNewHol] = useState({ name: '', date: '' })
   const [newRest, setNewRest] = useState({ name: '', date: '' })
+  const [tenantToken, setTenantToken] = useState(null)
+
+  useEffect(() => {
+    fetch('/api/dashboard/tenant-token')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.token) setTenantToken(d.token) })
+      .catch(() => {})
+  }, [])
 
   const F = (k, v) => setCfg(c => ({ ...c, [k]: v }))
   const FL = (k, v) => setCfg(c => ({ ...c, location: { ...(c.location || {}), [k]: v } }))
@@ -787,8 +795,12 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
     await onSaved?.()
   }
 
-  const checkUrl = `${origin}/check?tenant=${tenantSlug}&branch=${branch.id}`
-  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(checkUrl)}&size=200x200&bgcolor=0d0d0d&color=3DFFA0&qzone=2`
+  const checkUrl = tenantToken
+    ? `${origin}/check?tenant=${tenantSlug}&branch=${branch.id}&tenantToken=${encodeURIComponent(tenantToken)}`
+    : null
+  const qrSrc = checkUrl
+    ? `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(checkUrl)}&size=200x200&bgcolor=0d0d0d&color=3DFFA0&qzone=2`
+    : null
 
   return (
     <div className="p-5 md:p-6 max-w-3xl mx-auto">
@@ -815,15 +827,17 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
       {/* QR + URL */}
       <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Código QR para empleados</p>
       <div className="card mb-4 flex gap-4 items-start">
-        <div className="shrink-0 p-2 bg-dark-700 border border-dark-border rounded-xl">
-          <img src={qrSrc} alt="QR" width={112} height={112} className="rounded-lg" />
+        <div className="shrink-0 p-2 bg-dark-700 border border-dark-border rounded-xl flex items-center justify-center" style={{width:128,height:128}}>
+          {qrSrc
+            ? <img src={qrSrc} alt="QR" width={112} height={112} className="rounded-lg" />
+            : <div className="w-8 h-8 border-2 border-brand-green border-t-transparent rounded-full animate-spin" />}
         </div>
         <div className="flex-1 min-w-0 space-y-2">
-          <p className="text-[10px] text-gray-500 font-mono break-all leading-relaxed">{checkUrl}</p>
+          <p className="text-[10px] text-gray-500 font-mono break-all leading-relaxed">{checkUrl || 'Generando enlace seguro…'}</p>
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => navigator.clipboard.writeText(checkUrl).then(() => toast.success('URL copiada'))}
-              className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600">📋 Copiar URL</button>
-            <a href={checkUrl} target="_blank" rel="noreferrer"
+            <button disabled={!checkUrl} onClick={() => navigator.clipboard.writeText(checkUrl).then(() => toast.success('URL copiada'))}
+              className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600 disabled:opacity-40">📋 Copiar URL</button>
+            <a href={checkUrl || '#'} target="_blank" rel="noreferrer"
               className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600">↗ Abrir checador</a>
           </div>
         </div>
