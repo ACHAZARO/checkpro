@@ -67,14 +67,6 @@ export async function GET(req) {
     summary.tenants_scanned++
     const cfg = tenant.config || {}
 
-    // Si el tenant usa horario mixto (planificación semanal), el "turno programado"
-    // vive en shift_plans, no en employees.schedule. Para v1 se skippean y se
-    // soportarán en una segunda iteración.
-    if (cfg.mixedSchedule?.enabled === true) {
-      summary.details.push({ tenant_id: tenant.id, skipped: 'mixed_schedule' })
-      continue
-    }
-
     // Feriado del tenant
     const holidays = Array.isArray(cfg.holidays) ? cfg.holidays : []
     const isHoliday = holidays.some(h => {
@@ -87,15 +79,21 @@ export async function GET(req) {
       continue
     }
 
-    const { data: emps } = await admin
+    const { data: emps, error: empErr } = await admin
       .from('employees')
-      .select('id, name, schedule, has_shift, free_schedule')
+      .select('id, name, schedule, has_shift, free_schedule, is_mixed')
       .eq('tenant_id', tenant.id)
       .eq('status', 'active')
+    if (empErr) {
+      summary.details.push({ tenant_id: tenant.id, error: empErr.message })
+      continue
+    }
 
-    // Candidatos: empleados con turno (has_shift != false) y horario fijo que
-    // marque workday en targetDayKey. free_schedule (gerentes libres) no aplica.
+    // Candidatos: horario fijo (is_mixed != true), con turno, que trabajen ese día.
+    // Empleados mixtos usan shift_plans y se manejan aparte.
+    // free_schedule (gerentes libres) tampoco aplica.
     const candidates = (emps || []).filter(e => {
+      if (e.is_mixed === true) return false
       if (e.has_shift === false) return false
       if (e.free_schedule === true) return false
       return e.schedule?.[targetDayKey]?.work === true
