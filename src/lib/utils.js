@@ -244,8 +244,9 @@ function resolvePayEmployee(employee, coveringEmployee, coveragePayMode) {
 
 // CAMBIO — calcShiftPay contempla empleados mixtos:
 //   - pago por horas REALES trabajadas (duration_hours)
-//   - si trabajó > daily_hours → el exceso se paga como overtime (igual rate)
-//   - festivo x3 como siempre
+//   - si trabajó > daily_hours → el exceso se paga como overtime (2x, LFT art. 67)
+//   - festivo x3, día de descanso trabajado x2 (LFT art. 73)
+//   - OT corrections pagadas a 2x; empWeekSummary escala a 3x para OT >9h/semana
 export function calcShiftPay(shift, employee, coveringEmployee, coveragePayMode) {
   if (shift.classification?.type === 'falta_injustificada') return 0
   if (!shift.duration_hours) return 0
@@ -253,14 +254,15 @@ export function calcShiftPay(shift, employee, coveringEmployee, coveragePayMode)
   const rate = monthlyToHourly(payEmp)
   const otCorrection = shift.corrections?.overtime?.hours || 0
   if (shift.is_holiday) return shift.duration_hours * rate * 3
+  if (shift.is_rest_day) return shift.duration_hours * rate * 2
   if (payEmp.is_mixed) {
     const daily = Number(payEmp.daily_hours || 0)
     const worked = Number(shift.duration_hours || 0)
     const extraAuto = daily > 0 ? Math.max(0, worked - daily) : 0
     const base = Math.min(worked, daily || worked)
-    return base * rate + extraAuto * rate + otCorrection * rate
+    return base * rate + extraAuto * rate * 2 + otCorrection * rate * 2
   }
-  return shift.duration_hours * rate + otCorrection * rate
+  return shift.duration_hours * rate + otCorrection * rate * 2
 }
 
 export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMode) {
@@ -310,6 +312,9 @@ export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMo
     grossPay += calcShiftPay(s, employee, cov, coveragePayMode)
   })
   const hr = monthlyToHourly(employee)
+  // LFT art. 68: OT >9h/semana se paga a 3x. calcShiftPay ya pagó 2x; agregamos el 1x extra.
+  const otOver9 = Math.max(0, otHours - 9)
+  if (otOver9 > 0) grossPay += otOver9 * hr
   const retardoDesc = retardos * (hr * 0.5)
   const incidentDesc = incidents * (hr * 8)
   return {
