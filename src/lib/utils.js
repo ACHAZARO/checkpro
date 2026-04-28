@@ -36,10 +36,14 @@ export const dayKey = (d, tz = DEFAULT_TZ) => {
 
 export function hoursInSchedule(schedule, dk) {
   const s = schedule?.[dk]
-  if (!s?.work) return 0
+  if (!s?.work || !s.start || !s.end) return 0
   const [h1,m1] = s.start.split(':').map(Number)
   const [h2,m2] = s.end.split(':').map(Number)
-  return (h2*60+m2-h1*60-m1)/60
+  if (![h1,m1,h2,m2].every(Number.isFinite)) return 0
+  // FIX: soportar turnos que cruzan medianoche y evitar horas negativas.
+  let minutes = (h2 * 60 + m2) - (h1 * 60 + m1)
+  if (minutes < 0) minutes += 24 * 60
+  return Math.max(0, minutes / 60)
 }
 
 // NUEVO — semanas equivalentes para empleados mixtos
@@ -48,18 +52,21 @@ export function hoursInSchedule(schedule, dk) {
 export const MIXED_DEFAULT_DAYS_PER_WEEK = 6
 
 export function monthlyToHourly(employee) {
-  const period = employee.schedule?.salary_period || 'monthly'
-  if (employee.is_mixed) {
-    const daily = Number(employee.daily_hours || 0)
+  const period = employee?.schedule?.salary_period || 'monthly'
+  const salary = Math.max(0, Number(employee?.monthly_salary || 0))
+  if (employee?.is_mixed) {
+    const daily = Number(employee?.daily_hours || 0)
     const wkH = daily * MIXED_DEFAULT_DAYS_PER_WEEK
     if (wkH <= 0) return 0
-    if (period === 'weekly') return employee.monthly_salary / wkH
-    return employee.monthly_salary / (wkH * 4.33)
+    // FIX: normalizar salario para no propagar NaN a nómina.
+    if (period === 'weekly') return salary / wkH
+    return salary / (wkH * 4.33)
   }
-  const wkH = DAYS.reduce((a,d) => a + hoursInSchedule(employee.schedule||{}, d), 0)
+  const wkH = DAYS.reduce((a,d) => a + hoursInSchedule(employee?.schedule||{}, d), 0)
   if (wkH <= 0) return 0
-  if (period === 'weekly') return employee.monthly_salary / wkH
-  return employee.monthly_salary / (wkH * 4.33)
+  // FIX: normalizar salario para no propagar NaN a nómina.
+  if (period === 'weekly') return salary / wkH
+  return salary / (wkH * 4.33)
 }
 
 export function salaryPeriodLabel(employee) {
@@ -67,20 +74,23 @@ export function salaryPeriodLabel(employee) {
 }
 
 export function toMonthlySalary(employee) {
-  if (employee.schedule?.salary_period === 'weekly') return employee.monthly_salary * 4.33
-  return employee.monthly_salary
+  const salary = Math.max(0, Number(employee?.monthly_salary || 0)) // FIX: evitar NaN en conversion de salario.
+  if (employee?.schedule?.salary_period === 'weekly') return salary * 4.33
+  return salary
 }
 
 // CAMBIO — classifyEntry compara en la TZ del tenant
 export function classifyEntry(schedule, entryTime, toleranceMinutes, tz = DEFAULT_TZ) {
   const dk = dayKey(entryTime, tz)
   const s = schedule?.[dk]
+  if (s?.work && (!s.start || !/^\d{2}:\d{2}$/.test(String(s.start)))) return { type:'no_laboral', label:'Horario invalido' } // FIX: evitar Date invalida con horario incompleto.
   if (!s?.work) return { type:'no_laboral', label:'Día no laboral' }
   const dateStr = isoDate(entryTime, tz)
   const refUtc = fromZonedTime(`${dateStr}T${s.start}:00`, tz)
   const diff = Math.round((new Date(entryTime) - refUtc) / 60000)
+  const tolerance = Math.max(0, Number(toleranceMinutes) || 0) // FIX: tolerancia invalida no debe volver NaN la clasificacion.
   if (diff <= 0) return { type:'puntual', label:'Puntual' }
-  if (diff <= toleranceMinutes) return { type:'tolerancia', label:`Tolerancia (${diff} min)` }
+  if (diff <= tolerance) return { type:'tolerancia', label:`Tolerancia (${diff} min)` }
   return { type:'retardo', label:`Retardo (${diff} min)` }
 }
 
@@ -97,11 +107,13 @@ export function classifyEntryMixed(plan, entryTime, toleranceMinutes, tz = DEFAU
   if (!plan || !plan.entry_time_str) {
     return { type:'no_planificado', label:'No estaba agendado' }
   }
+  if (!/^\d{2}:\d{2}$/.test(String(plan.entry_time_str))) return { type:'no_planificado', label:'Plan invalido' } // FIX: evitar Date invalida con plan corrupto.
   const dateStr = isoDate(entryTime, tz)
   const refUtc = fromZonedTime(`${dateStr}T${plan.entry_time_str}:00`, tz)
   const diff = Math.round((new Date(entryTime) - refUtc) / 60000)
+  const tolerance = Math.max(0, Number(toleranceMinutes) || 0) // FIX: tolerancia invalida no debe volver NaN la clasificacion.
   if (diff <= 0) return { type:'puntual', label:'Puntual' }
-  if (diff <= toleranceMinutes) return { type:'tolerancia', label:`Tolerancia (${diff} min)` }
+  if (diff <= tolerance) return { type:'tolerancia', label:`Tolerancia (${diff} min)` }
   return { type:'retardo', label:`Retardo (${diff} min)` }
 }
 
@@ -149,14 +161,21 @@ export function calcOvertimeHours(minutesOver) {
 // CAMBIO — scheduledExitDate usa TZ. Para mixtos usamos el shift_plan del día si existe.
 export function scheduledExitDate(dateStr, employee, tz = DEFAULT_TZ, plan = null) {
   if (employee?.is_mixed) {
-    if (!plan || !plan.entry_time_str || !plan.duration_hours) return null
-    const exitStr = addHoursToTimeStr(plan.entry_time_str, plan.duration_hours)
-    return fromZonedTime(`${dateStr}T${exitStr}:00`, tz)
+    const duration = Number(plan?.duration_hours || 0)
+    if (!plan || !plan.entry_time_str || duration <= 0) return null
+    const entryUtc = fromZonedTime(`${dateStr}T${plan.entry_time_str}:00`, tz)
+    return new Date(entryUtc.getTime() + Math.round(duration * 60) * 60000) // FIX: soportar planes mixtos que cruzan medianoche.
   }
   const dk = dayKey(`${dateStr}T12:00:00Z`, tz)
   const s = employee.schedule?.[dk]
   if (!s?.work || !s.end) return null
-  return fromZonedTime(`${dateStr}T${s.end}:00`, tz)
+  let exitDate = dateStr
+  if (s.start && s.end <= s.start) {
+    const d = new Date(`${dateStr}T00:00:00`)
+    d.setDate(d.getDate() + 1)
+    exitDate = formatInTimeZone(d, tz, 'yyyy-MM-dd') // FIX: salida de turno fijo nocturno cae al dia siguiente.
+  }
+  return fromZonedTime(`${exitDate}T${s.end}:00`, tz)
 }
 
 // ── Vacaciones (LFT 2023) ─────────────────────────────────────────────────────
@@ -249,15 +268,15 @@ function resolvePayEmployee(employee, coveringEmployee, coveragePayMode) {
 //   - OT corrections pagadas a 2x; empWeekSummary escala a 3x para OT >9h/semana
 export function calcShiftPay(shift, employee, coveringEmployee, coveragePayMode) {
   if (shift.classification?.type === 'falta_injustificada') return 0
-  if (!shift.duration_hours) return 0
+  const worked = Math.max(0, Number(shift?.duration_hours || 0)) // FIX: evitar nomina negativa/NaN por duration_hours invalido.
+  if (!worked) return 0
   const payEmp = resolvePayEmployee(employee, coveringEmployee, coveragePayMode)
-  const rate = monthlyToHourly(payEmp)
-  const otCorrection = shift.corrections?.overtime?.hours || 0
-  if (shift.is_holiday) return shift.duration_hours * rate * 3
-  if (shift.is_rest_day) return shift.duration_hours * rate * 2
-  if (payEmp.is_mixed) {
-    const daily = Number(payEmp.daily_hours || 0)
-    const worked = Number(shift.duration_hours || 0)
+  const rate = Math.max(0, Number(monthlyToHourly(payEmp)) || 0) // FIX: evitar propagar NaN si salario/horario estan incompletos.
+  const otCorrection = Math.max(0, Number(shift.corrections?.overtime?.hours || 0)) // FIX: OT manual nunca debe restar pago.
+  if (shift.is_holiday) return worked * rate * 3
+  if (shift.is_rest_day) return worked * rate * 2
+  if (payEmp?.is_mixed) { // FIX: soportar empleado de pago ausente sin romper nomina.
+    const daily = Number(payEmp?.daily_hours || 0)
     const extraAuto = daily > 0 ? Math.max(0, worked - daily) : 0
     const base = Math.min(worked, daily || worked)
     // Usar Math.max para evitar doble conteo cuando otCorrection refleja las mismas HE que extraAuto
@@ -265,15 +284,15 @@ export function calcShiftPay(shift, employee, coveringEmployee, coveragePayMode)
     return base * rate + otHours * rate * 2
   }
   // duration_hours ya incluye las HE a 1x; otCorrection agrega solo la prima adicional (total 2x)
-  return shift.duration_hours * rate + otCorrection * rate
+  return worked * rate + otCorrection * rate
 }
 
 export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMode) {
-  const mine = weekShifts.filter(s => s.employee_id === employee.id)
+  const mine = (weekShifts || []).filter(s => s.employee_id === employee.id)
   const closed = mine.filter(s => ['closed','incident'].includes(s.status))
-  const totalH = closed.reduce((a,s) => a + (s.duration_hours||0), 0)
+  const totalH = closed.reduce((a,s) => a + Math.max(0, Number(s.duration_hours || 0)), 0) // FIX: evitar total de horas negativo o NaN.
   const otHours = closed.reduce((a,s) => {
-    const manual = s.corrections?.overtime?.hours || 0
+    const manual = Math.max(0, Number(s.corrections?.overtime?.hours || 0)) // FIX: OT manual invalida no debe contaminar acumuladores.
     // Mixto: el exceso sobre daily_hours también cuenta visualmente como OT.
     if (employee.is_mixed && employee.daily_hours) {
       const auto = Math.max(0, Number(s.duration_hours||0) - Number(employee.daily_hours))
@@ -291,7 +310,7 @@ export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMo
 
   // feat/gerente-libre: nómina íntegra, sin descuentos por retardo/incidentes.
   if (employee.free_schedule) {
-    const weeklyGross = toMonthlySalary(employee) / 4.33
+    const weeklyGross = Math.max(0, Number(toMonthlySalary(employee)) || 0) / 4.33 // FIX: evitar NaN en gerentes con salario vacio.
     return {
       totalH: parseFloat(totalH.toFixed(2)),
       otHours: 0,
@@ -308,13 +327,13 @@ export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMo
     }
   }
 
-  const empMap = new Map(allEmployees.map(e => [e.id, e]))
+  const empMap = new Map((allEmployees || []).map(e => [e.id, e])) // FIX: soportar llamadas sin lista completa de empleados.
   let grossPay = 0
   closed.forEach(s => {
     const cov = s.covering_employee_id ? empMap.get(s.covering_employee_id) : null
     grossPay += calcShiftPay(s, employee, cov, coveragePayMode)
   })
-  const hr = monthlyToHourly(employee)
+  const hr = Math.max(0, Number(monthlyToHourly(employee)) || 0) // FIX: descuentos no deben ser NaN.
   // LFT art. 68: OT >9h/semana se paga a 3x. calcShiftPay ya pagó 2x; agregamos el 1x extra.
   const otOver9 = Math.max(0, otHours - 9)
   if (otOver9 > 0) grossPay += otOver9 * hr
@@ -322,7 +341,7 @@ export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMo
   const incidentDesc = incidents * (hr * 8)
   return {
     totalH: parseFloat(totalH.toFixed(2)), otHours: parseFloat(otHours.toFixed(2)),
-    retardos, incidents, faltasInjustificadas, faltasJustificadas, grossPay,
+    retardos, incidents, faltasInjustificadas, faltasJustificadas, grossPay: Math.max(0, grossPay),
     retardoDesc, incidentDesc,
     netPay: Math.max(0, grossPay - retardoDesc - incidentDesc),
     shifts: mine

@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import { scheduledExitDate } from '@/lib/utils'
+import { fromZonedTime } from 'date-fns-tz'
 import toast from 'react-hot-toast'
 import {
   AlertCircle, CheckCircle2, Plus, Inbox, Lock, X, RefreshCw,
@@ -187,6 +189,7 @@ export default function IncidenciasPage() {
 
   async function resolveIncidencia() {
     if (!detail) return
+    if (profile?.tenant_id && detail.tenant_id !== profile.tenant_id) { toast.error('Incidencia fuera de tu empresa'); return } // FIX: defensa cliente contra resolucion cross-tenant.
     const opts = RESOLUTION_OPTIONS[detail.kind]
     if (opts && !selectedOption) {
       toast.error('Selecciona una opción')
@@ -210,6 +213,8 @@ export default function IncidenciasPage() {
     try {
       if (detail.kind === 'falta') {
         await resolveFalta(supabase, selectedOption, resolveLabel, resolutionText)
+      } else if (detail.kind === 'abandono' && selectedOption === 'salio_en_hora') {
+        await resolveAbandonoScheduled(supabase, fullNote)
       } else if (detail.kind === 'abandono' && selectedOption === 'registrar_manual') {
         if (!manualTime) { toast.error('Ingresa la hora de salida'); setResolvingId(null); return }
         await resolveAbandonoManual(supabase, fullNote)
@@ -249,7 +254,7 @@ export default function IncidenciasPage() {
         status: 'absent',
         classification: { type: absenceType, label },
         incidents: isGrave ? [{ type: 'grave', note: fullNote, ts: new Date().toISOString() }] : [],
-      }).eq('id', existing.id)
+      }).eq('id', existing.id).eq('tenant_id', profile?.tenant_id) // FIX: no actualizar shifts fuera del tenant cargado.
       if (error) throw error
     } else {
       const { error } = await supabase.from('shifts').insert({
@@ -263,11 +268,12 @@ export default function IncidenciasPage() {
       if (error) throw error
     }
 
-    await supabase.from('incidencias').update({
+    const { error: incErr } = await supabase.from('incidencias').update({
       status: 'resolved', resolution: fullNote,
       resolved_by: profile?.id || null, resolved_by_name: profile?.name || null,
       resolved_at: new Date().toISOString(),
-    }).eq('id', detail.id)
+    }).eq('id', detail.id).eq('tenant_id', profile?.tenant_id) // FIX: resolver solo incidencias del tenant actual.
+    if (incErr) throw incErr
 
     await supabase.from('audit_log').insert({
       tenant_id: detail.tenant_id, action: 'ABSENCE',
@@ -279,29 +285,55 @@ export default function IncidenciasPage() {
   async function resolveAbandonoManual(supabase, fullNote) {
     // Actualizar shift con la hora manual de salida
     if (detail.shift_id) {
-      const exitISO = new Date(`${detail.date_str}T${manualTime}:00`).toISOString()
-      await supabase.from('shifts').update({
+      const { data: shift } = await supabase.from('shifts').select('corrections').eq('id', detail.shift_id).eq('tenant_id', profile?.tenant_id).maybeSingle()
+      const exitISO = fromZonedTime(`${detail.date_str}T${manualTime}:00`, 'America/Mexico_City').toISOString() // FIX: interpretar hora manual en Mexico_City, no en TZ del navegador.
+      const { error } = await supabase.from('shifts').update({
         exit_time: exitISO, status: 'closed',
-        corrections: { manualExit: true, exitRegisteredBy: profile?.name || 'manager' },
-      }).eq('id', detail.shift_id)
+        corrections: { ...(shift?.corrections || {}), manualExit: true, exitRegisteredBy: profile?.name || 'manager' }, // FIX: no borrar correcciones existentes del turno.
+      }).eq('id', detail.shift_id).eq('tenant_id', profile?.tenant_id) // FIX: no cerrar shifts de otro tenant.
+      if (error) throw error
     }
     await resolveGenericOpt(supabase, fullNote)
   }
 
+  async function resolveAbandonoScheduled(supabase, fullNote) {
+    if (!detail.shift_id) { await resolveGenericOpt(supabase, fullNote); return }
+    const [{ data: shift, error: shErr }, { data: emp, error: empErr }, { data: tenant }] = await Promise.all([
+      supabase.from('shifts').select('id, employee_id, date_str, corrections').eq('id', detail.shift_id).eq('tenant_id', profile?.tenant_id).maybeSingle(),
+      supabase.from('employees').select('id, schedule, is_mixed').eq('id', detail.employee_id).eq('tenant_id', profile?.tenant_id).maybeSingle(),
+      supabase.from('tenants').select('config').eq('id', profile?.tenant_id).maybeSingle(),
+    ])
+    if (shErr) throw shErr
+    if (empErr) throw empErr
+    if (!shift || !emp) throw new Error('No se pudo calcular la salida programada')
+    const tz = tenant?.config?.timezone || 'America/Mexico_City'
+    const plan = emp.is_mixed ? shift.corrections?.mixedPlanAtEntry || null : null
+    const exit = scheduledExitDate(shift.date_str, emp, tz, plan)
+    if (!exit) throw new Error('No hay horario programado para registrar la salida')
+    const { error } = await supabase.from('shifts').update({
+      exit_time: exit.toISOString(), status: 'closed',
+      corrections: { ...(shift.corrections || {}), scheduledExitResolved: true, exitRegisteredBy: profile?.name || 'manager' },
+    }).eq('id', shift.id).eq('tenant_id', profile?.tenant_id) // FIX: opcion "salio en hora" debe cerrar el shift esperado dentro del tenant.
+    if (error) throw error
+    await resolveGenericOpt(supabase, fullNote)
+  }
+
   async function resolveFraudeGps(supabase, fullNote) {
-    await supabase.from('incidencias').update({
+    const { error: updErr } = await supabase.from('incidencias').update({
       status: 'resolved', resolution: fullNote,
       resolved_by: profile?.id || null, resolved_by_name: profile?.name || null,
       resolved_at: new Date().toISOString(),
-    }).eq('id', detail.id)
+    }).eq('id', detail.id).eq('tenant_id', profile?.tenant_id) // FIX: resolver solo incidencias del tenant actual.
+    if (updErr) throw updErr
     // Registrar falta grave
-    await supabase.from('incidencias').insert({
+    const { error: insErr } = await supabase.from('incidencias').insert({
       tenant_id: detail.tenant_id, branch_id: detail.branch_id || null,
       employee_id: detail.employee_id, employee_name: detail.employee_name,
       date_str: detail.date_str, kind: 'falta',
       description: `Falta grave: intento de fraude GPS confirmado. ${fullNote}`,
       status: 'open',
     })
+    if (insErr) throw insErr
   }
 
   async function resolveFraudeDevice(supabase, fullNote) {
@@ -309,11 +341,12 @@ export default function IncidenciasPage() {
   }
 
   async function resolveGenericOpt(supabase, fullNote) {
-    await supabase.from('incidencias').update({
+    const { error } = await supabase.from('incidencias').update({
       status: 'resolved', resolution: fullNote,
       resolved_by: profile?.id || null, resolved_by_name: profile?.name || null,
       resolved_at: new Date().toISOString(),
-    }).eq('id', detail.id)
+    }).eq('id', detail.id).eq('tenant_id', profile?.tenant_id) // FIX: resolver solo incidencias del tenant actual.
+    if (error) throw error
   }
 
   async function createIncidencia() {

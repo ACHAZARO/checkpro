@@ -27,6 +27,22 @@ function dayKeyInTz(date, tz) {
   return DAY_MAP[wd] || 'lun'
 }
 
+async function insertIncidenciaOnce(admin, payload) {
+  const { data: existing } = await admin
+    .from('incidencias')
+    .select('id')
+    .eq('tenant_id', payload.tenant_id)
+    .eq('employee_id', payload.employee_id)
+    .eq('date_str', payload.date_str)
+    .eq('kind', payload.kind)
+    .limit(1)
+    .maybeSingle()
+  if (existing?.id) return false
+  const { error } = await admin.from('incidencias').insert(payload)
+  if (error) throw error
+  return true // FIX: dedupe por incidencia individual para reducir duplicados en reintentos.
+}
+
 export async function GET(req) {
   const auth = req.headers.get('authorization') || ''
   const secret = process.env.CRON_SECRET
@@ -162,19 +178,25 @@ export async function GET(req) {
       }))
 
     if (inserts.length > 0) {
+      let createdCount = inserts.length // FIX: reportar solo inserts reales cuando el dedupe omite duplicados.
       if (!dryRun) {
-        const { error: insErr } = await admin.from('incidencias').insert(inserts)
-        if (insErr) {
+        let insertedCount = 0
+        try {
+          for (const payload of inserts) {
+            if (await insertIncidenciaOnce(admin, payload)) insertedCount++
+          }
+        } catch (insErr) {
           summary.details.push({ tenant_id: tenant.id, error: insErr.message, would_insert: inserts.length })
           continue
         }
+        createdCount = insertedCount
       }
-      summary.absences_created += inserts.length
+      summary.absences_created += createdCount
       summary.details.push({
         tenant_id: tenant.id,
         tenant_name: tenant.name,
         candidates: candidates.length,
-        created: inserts.length,
+        created: createdCount,
         employees: inserts.map(i => i.employee_name),
       })
     } else {

@@ -24,23 +24,43 @@ function dayKeyInTz(date, tz) {
 function expectedExitUtc(shift, employee, plansMap, targetDate, targetDayKey) {
   if (employee.is_mixed) {
     const plan = plansMap.get(employee.id)
-    if (!plan || !plan.entry_time_str || !plan.duration_hours) return null
-    const [h, m] = plan.entry_time_str.split(':').map(Number)
-    const totalMin = h * 60 + m + Math.round(Number(plan.duration_hours) * 60)
-    const hh = String(Math.floor(totalMin / 60) % 24).padStart(2, '0')
-    const mm = String(totalMin % 60).padStart(2, '0')
-    return fromZonedTime(`${targetDate}T${hh}:${mm}:00`, TZ)
+    const duration = Number(plan?.duration_hours || 0)
+    if (!plan || !plan.entry_time_str || duration <= 0) return null
+    const entryUtc = fromZonedTime(`${targetDate}T${plan.entry_time_str}:00`, TZ)
+    return new Date(entryUtc.getTime() + Math.round(duration * 60) * 60000) // FIX: soportar planes mixtos que cruzan medianoche.
   }
   const s = employee.schedule?.[targetDayKey]
   if (!s?.work || !s.end) return null
-  return fromZonedTime(`${targetDate}T${s.end}:00`, TZ)
+  let exitDate = targetDate
+  if (s.start && s.end <= s.start) {
+    const d = new Date(`${targetDate}T00:00:00`)
+    d.setDate(d.getDate() + 1)
+    exitDate = formatInTimeZone(d, TZ, 'yyyy-MM-dd') // FIX: salida de turno fijo nocturno cae al dia siguiente.
+  }
+  return fromZonedTime(`${exitDate}T${s.end}:00`, TZ)
+}
+
+async function insertIncidenciaOnce(admin, payload) {
+  const { data: existing } = await admin
+    .from('incidencias')
+    .select('id')
+    .eq('tenant_id', payload.tenant_id)
+    .eq('employee_id', payload.employee_id)
+    .eq('date_str', payload.date_str)
+    .eq('kind', payload.kind)
+    .limit(1)
+    .maybeSingle()
+  if (existing?.id) return false
+  const { error } = await admin.from('incidencias').insert(payload)
+  if (error) return false
+  return true // FIX: reutilizar dedupe por incidencia individual en deteccion manual.
 }
 
 export async function POST(req) {
   // Auth: verificar JWT del usuario vía Bearer token (browser client no funciona server-side)
   const admin = createServiceClient()
   const authHeader = req.headers.get('authorization') || ''
-  const jwt = authHeader.replace('Bearer ', '').trim()
+  const jwt = authHeader.replace(/^Bearer\s+/i, '').trim() // FIX: aceptar Bearer case-insensitive y no truncar tokens con texto similar.
   if (!jwt) return NextResponse.json({ error: 'No autenticado' }, { status: 401 })
 
   const { data: { user }, error: authErr } = await admin.auth.getUser(jwt)
@@ -52,7 +72,7 @@ export async function POST(req) {
     .eq('id', user.id)
     .single()
   if (!profile?.tenant_id) return NextResponse.json({ error: 'Sin tenant' }, { status: 403 })
-  if (!['admin', 'manager', 'superadmin'].includes(profile.role)) {
+  if (!['owner', 'admin', 'manager', 'super_admin'].includes(profile.role)) { // FIX: alinear roles reales y evitar bloquear owners.
     return NextResponse.json({ error: 'Sin permisos' }, { status: 403 })
   }
 
@@ -140,8 +160,9 @@ export async function POST(req) {
         }))
 
       if (absenceInserts.length > 0) {
-        await admin.from('incidencias').insert(absenceInserts)
-        summary.absences = absenceInserts.length
+        for (const payload of absenceInserts) {
+          if (await insertIncidenciaOnce(admin, payload)) summary.absences++
+        }
       }
     }
   }
@@ -245,8 +266,9 @@ export async function POST(req) {
     }
 
     if (shiftInserts.length > 0) {
-      await admin.from('incidencias').insert(shiftInserts)
-      summary.shift_incidents = shiftInserts.length
+      for (const payload of shiftInserts) {
+        if (await insertIncidenciaOnce(admin, payload)) summary.shift_incidents++
+      }
     }
   }
 

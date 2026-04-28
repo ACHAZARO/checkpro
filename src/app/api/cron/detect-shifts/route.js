@@ -31,16 +31,36 @@ function dayKeyInTz(date, tz) {
 function expectedExitUtc(shift, employee, plansMap, targetDate, targetDayKey) {
   if (employee.is_mixed) {
     const plan = plansMap.get(employee.id)
-    if (!plan || !plan.entry_time_str || !plan.duration_hours) return null
-    const [h, m] = plan.entry_time_str.split(':').map(Number)
-    const totalMin = h * 60 + m + Math.round(Number(plan.duration_hours) * 60)
-    const hh = String(Math.floor(totalMin / 60) % 24).padStart(2, '0')
-    const mm = String(totalMin % 60).padStart(2, '0')
-    return fromZonedTime(`${targetDate}T${hh}:${mm}:00`, TZ)
+    const duration = Number(plan?.duration_hours || 0)
+    if (!plan || !plan.entry_time_str || duration <= 0) return null
+    const entryUtc = fromZonedTime(`${targetDate}T${plan.entry_time_str}:00`, TZ)
+    return new Date(entryUtc.getTime() + Math.round(duration * 60) * 60000) // FIX: soportar planes mixtos que cruzan medianoche.
   }
   const s = employee.schedule?.[targetDayKey]
   if (!s?.work || !s.end) return null
-  return fromZonedTime(`${targetDate}T${s.end}:00`, TZ)
+  let exitDate = targetDate
+  if (s.start && s.end <= s.start) {
+    const d = new Date(`${targetDate}T00:00:00`)
+    d.setDate(d.getDate() + 1)
+    exitDate = formatInTimeZone(d, TZ, 'yyyy-MM-dd') // FIX: salida de turno fijo nocturno cae al dia siguiente.
+  }
+  return fromZonedTime(`${exitDate}T${s.end}:00`, TZ)
+}
+
+async function insertIncidenciaOnce(admin, payload) {
+  const { data: existing } = await admin
+    .from('incidencias')
+    .select('id')
+    .eq('tenant_id', payload.tenant_id)
+    .eq('employee_id', payload.employee_id)
+    .eq('date_str', payload.date_str)
+    .eq('kind', payload.kind)
+    .limit(1)
+    .maybeSingle()
+  if (existing?.id) return false
+  const { error } = await admin.from('incidencias').insert(payload)
+  if (error) throw error
+  return true // FIX: dedupe por incidencia individual para reducir duplicados en reintentos.
 }
 
 export async function GET(req) {
@@ -196,18 +216,24 @@ export async function GET(req) {
     }
 
     if (inserts.length > 0) {
+      let createdCount = inserts.length // FIX: reportar solo inserts reales cuando el dedupe omite duplicados.
       if (!dryRun) {
-        const { error: insErr } = await admin.from('incidencias').insert(inserts)
-        if (insErr) {
+        let insertedCount = 0
+        try {
+          for (const payload of inserts) {
+            if (await insertIncidenciaOnce(admin, payload)) insertedCount++
+          }
+        } catch (insErr) {
           summary.details.push({ tenant_id: tenant.id, error: insErr.message, would_insert: inserts.length })
           continue
         }
+        createdCount = insertedCount
       }
-      summary.incidencias_created += inserts.length
+      summary.incidencias_created += createdCount
       summary.details.push({
         tenant_id: tenant.id,
         tenant_name: tenant.name,
-        created: inserts.length,
+        created: createdCount,
         employees: inserts.map(i => ({ name: i.employee_name, kind: i.kind })),
       })
     } else {

@@ -39,6 +39,7 @@ function verifyToken(token) {
 
 const CODE_RE = /^[A-Z0-9]{1,20}$/
 const PIN_RE = /^\d{4,8}$/
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 async function insertIncidenciaOnce(supabase, payload) {
   const { data: existing, error: existingErr } = await supabase
@@ -48,6 +49,7 @@ async function insertIncidenciaOnce(supabase, payload) {
     .eq('employee_id', payload.employee_id)
     .eq('date_str', payload.date_str)
     .eq('kind', payload.kind)
+    .limit(1) // FIX: dedupe no debe fallar si ya existen duplicados historicos.
     .maybeSingle()
 
   if (existingErr) {
@@ -75,6 +77,8 @@ export async function POST(req) {
     if (!tenantId || !employeeCode || !pin || !['in', 'out'].includes(action)) {
       return NextResponse.json({ ok: false, msg: 'Datos incompletos.' }, { status: 400 })
     }
+    if (!UUID_RE.test(String(tenantId))) return NextResponse.json({ ok: false, msg: 'Tenant invalido.' }, { status: 400 }) // FIX: validar tenantId antes de usarlo en RPC/query.
+    if (coveringEmployeeId && !UUID_RE.test(String(coveringEmployeeId))) return NextResponse.json({ ok: false, msg: 'Cobertura invalida.' }, { status: 400 }) // FIX: validar UUID de cobertura.
     const code = String(employeeCode).toUpperCase()
     if (!CODE_RE.test(code)) return NextResponse.json({ ok: false, msg: 'Código inválido.' }, { status: 400 })
     if (!PIN_RE.test(String(pin))) return NextResponse.json({ ok: false, msg: 'PIN inválido.' }, { status: 400 })
@@ -129,6 +133,7 @@ export async function POST(req) {
       const { data: empRow } = await supabase
         .from('employees')
         .select('birth_date')
+        .eq('tenant_id', tenantId)
         .eq('id', emp.id)
         .maybeSingle()
       if (empRow?.birth_date) {
@@ -256,9 +261,18 @@ export async function POST(req) {
 
       const holidays = cfg.holidays || []
       const holiday = holidays.find(h => h.date === dateStr)
-      const coverName = coveringEmployeeId
-        ? (await supabase.from('employees').select('name').eq('id', coveringEmployeeId).single())?.data?.name
-        : null
+      let coverName = null
+      if (coveringEmployeeId) {
+        const { data: coverEmp } = await supabase
+          .from('employees')
+          .select('id, name')
+          .eq('tenant_id', tenantId)
+          .eq('id', coveringEmployeeId)
+          .eq('status', 'active')
+          .maybeSingle()
+        if (!coverEmp) return NextResponse.json({ ok: false, msg: 'Empleado cubierto invalido.' }, { status: 400 }) // FIX: impedir cobertura con empleado de otro tenant/inactivo.
+        coverName = coverEmp.name
+      }
 
       const deviceMismatchOnEntry = sessionDeviceId && deviceId && sessionDeviceId !== deviceId
 
@@ -432,7 +446,7 @@ export async function POST(req) {
         employee_id: emp.id,
         employee_name: emp.name,
         shift_id: openShift.id,
-        date_str: dateStr,
+        date_str: openShift.date_str,
         kind: 'horas_extra',
         description: `Horas extra detectadas: ${overtimeHours}h (${overtimeMinutes} min excedentes).`,
         status: 'open',
@@ -446,7 +460,7 @@ export async function POST(req) {
         employee_id: emp.id,
         employee_name: emp.name,
         shift_id: openShift.id,
-        date_str: dateStr,
+        date_str: openShift.date_str, // FIX: incidencias de salida deben quedarse en la fecha del turno abierto.
         kind: 'device_mismatch',
         description: `Salida desde dispositivo diferente (entrada: ${entryDeviceId}, salida: ${deviceId}).`,
         status: 'open',
@@ -477,7 +491,7 @@ export async function POST(req) {
           branch_id: otherEmp?.branch_id || branchId || null,
           employee_id: otherShift.employee_id,
           employee_name: otherEmp?.name || 'Empleado',
-          date_str: dateStr,
+          date_str: openShift.date_str, // FIX: incidencias relacionadas al mismo dispositivo usan la fecha del turno abierto.
           kind: 'device_mismatch',
           description: `Su dispositivo de entrada (${deviceId}) fue usado para la salida de ${emp.name}.`,
           status: 'open',
@@ -492,7 +506,7 @@ export async function POST(req) {
         employee_id: emp.id,
         employee_name: emp.name,
         shift_id: openShift.id,
-        date_str: dateStr,
+        date_str: openShift.date_str, // FIX: incidencias de salida deben quedarse en la fecha del turno abierto.
         kind: 'ip_mismatch',
         description: `Red diferente entre entrada y salida. Entrada: ${entryIp}; salida: ${currentIp}.`,
         status: 'open',
