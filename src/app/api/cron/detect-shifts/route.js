@@ -87,7 +87,7 @@ export async function GET(req) {
       .eq('tenant_id', tenant.id)
       .eq('date_str', targetDate)
       .not('entry_time', 'is', null)
-      .in('status', ['open', 'completed'])
+      .in('status', ['open', 'closed'])
     if (shErr) {
       summary.details.push({ tenant_id: tenant.id, error: shErr.message })
       continue
@@ -123,7 +123,7 @@ export async function GET(req) {
     // Vacaciones activas
     const { data: vacs } = await admin
       .from('vacation_periods')
-      .select('employee_id')
+      .select('employee_id, tipo, status')
       .eq('tenant_id', tenant.id)
       .in('employee_id', empIds)
       .lte('start_date', targetDate)
@@ -174,7 +174,7 @@ export async function GET(req) {
       }
 
       // salida_temprana: salió más de 15 min antes de la hora de fin
-      if (shift.exit_time && shift.status === 'completed') {
+      if (shift.exit_time && shift.status === 'closed') {
         const exitActual = new Date(shift.exit_time)
         const earlyMs = exitExpected.getTime() - exitActual.getTime()
         const earlyMin = Math.round(earlyMs / 60000)

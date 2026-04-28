@@ -260,9 +260,12 @@ export function calcShiftPay(shift, employee, coveringEmployee, coveragePayMode)
     const worked = Number(shift.duration_hours || 0)
     const extraAuto = daily > 0 ? Math.max(0, worked - daily) : 0
     const base = Math.min(worked, daily || worked)
-    return base * rate + extraAuto * rate * 2 + otCorrection * rate * 2
+    // Usar Math.max para evitar doble conteo cuando otCorrection refleja las mismas HE que extraAuto
+    const otHours = Math.max(extraAuto, otCorrection)
+    return base * rate + otHours * rate * 2
   }
-  return shift.duration_hours * rate + otCorrection * rate * 2
+  // duration_hours ya incluye las HE a 1x; otCorrection agrega solo la prima adicional (total 2x)
+  return shift.duration_hours * rate + otCorrection * rate
 }
 
 export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMode) {
@@ -274,7 +277,7 @@ export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMo
     // Mixto: el exceso sobre daily_hours también cuenta visualmente como OT.
     if (employee.is_mixed && employee.daily_hours) {
       const auto = Math.max(0, Number(s.duration_hours||0) - Number(employee.daily_hours))
-      return a + manual + auto
+      return a + Math.max(auto, manual)
     }
     return a + manual
   }, 0)
