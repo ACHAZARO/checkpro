@@ -41,10 +41,9 @@ export async function GET(req) {
   const dateParam = url.searchParams.get('date')
   const dryRun = url.searchParams.get('dry') === '1'
 
-  // Por defecto: ayer en CST (corrimos temprano en la mañana del día siguiente)
+  // Por defecto: hoy en CST (cron corre a las 11pm México, fin del día laboral)
   const now = new Date()
-  const yesterday = new Date(now.getTime() - 24 * 3600 * 1000)
-  const targetDate = dateParam || isoDateInTz(yesterday, TZ)
+  const targetDate = dateParam || isoDateInTz(now, TZ)
   const targetDayKey = dayKeyInTz(new Date(`${targetDate}T12:00:00Z`), TZ)
 
   const admin = createServiceClient()

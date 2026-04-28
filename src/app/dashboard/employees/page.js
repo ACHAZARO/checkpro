@@ -381,7 +381,7 @@ export default function EmployeesPage() {
 
   return (
     <div className="p-5 md:p-6 max-w-2xl mx-auto">
-      <div className="flex items-end justify-between mb-5">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-5">
         <div>
           <h1 className="page-title">Empleados</h1>
           <p className="text-gray-500 text-xs font-mono mt-0.5">GESTIÓN DE PERSONAL</p>

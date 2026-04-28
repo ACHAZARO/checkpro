@@ -962,7 +962,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
             <button onClick={() => removeHoliday(h.id)} className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg"><Trash2 size={14} aria-label="Eliminar" /></button>
           </div>
         ))}
-        <div className="grid grid-cols-2 gap-2 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
           <input className="input text-sm py-2" placeholder="Nombre" value={newHol.name} onChange={e => setNewHol(f => ({ ...f, name: e.target.value }))} />
           <input className="input text-sm py-2" type="date" value={newHol.date} onChange={e => setNewHol(f => ({ ...f, date: e.target.value }))} />
         </div>
@@ -979,7 +979,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
             <button onClick={() => removeRestDay(r.id)} className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg"><Trash2 size={14} aria-label="Eliminar" /></button>
           </div>
         ))}
-        <div className="grid grid-cols-2 gap-2 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
           <input className="input text-sm py-2" placeholder="Nombre" value={newRest.name} onChange={e => setNewRest(f => ({ ...f, name: e.target.value }))} />
           <input className="input text-sm py-2" type="date" value={newRest.date} onChange={e => setNewRest(f => ({ ...f, date: e.target.value }))} />
         </div>

@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/detect-absences",
-      "schedule": "15 8 * * *"
+      "schedule": "0 4 * * *"
     },
     {
       "path": "/api/cron/detect-shifts",
