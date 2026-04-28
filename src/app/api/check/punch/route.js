@@ -40,6 +40,31 @@ function verifyToken(token) {
 const CODE_RE = /^[A-Z0-9]{1,20}$/
 const PIN_RE = /^\d{4,8}$/
 
+async function insertIncidenciaOnce(supabase, payload) {
+  const { data: existing, error: existingErr } = await supabase
+    .from('incidencias')
+    .select('id')
+    .eq('tenant_id', payload.tenant_id)
+    .eq('employee_id', payload.employee_id)
+    .eq('date_str', payload.date_str)
+    .eq('kind', payload.kind)
+    .maybeSingle()
+
+  if (existingErr) {
+    console.warn('[check/punch] incidencia dedupe error:', existingErr.message)
+    return
+  }
+  if (existing?.id) return
+
+  const { error } = await supabase.from('incidencias').insert(payload)
+  if (error) console.warn('[check/punch] incidencia insert error:', error.message)
+}
+
+function minutesFromLabel(label) {
+  const match = String(label || '').match(/(\d+)\s*min/i)
+  return match ? Number(match[1]) : null
+}
+
 export async function POST(req) {
   try {
     const body = await req.json()
@@ -93,6 +118,8 @@ export async function POST(req) {
     const { data: tenant } = await supabase.from('tenants').select('config').eq('id', tenantId).single()
     const cfg = tenant?.config || {}
     const tz = cfg.timezone || 'America/Mexico_City'
+    const now = new Date().toISOString()
+    const dateStr = isoDate(now, tz)
 
     // R7: cumpleanios. La RPC validate_employee_pin no expone birth_date (PII),
     // asi que lo leemos aqui post-PIN por emp.id. Solo exponemos un booleano
@@ -125,6 +152,7 @@ export async function POST(req) {
     const locCfg = cfg.location
     let geoValid = true
     let dist = null
+    let outOfRange = false
     if (locCfg?.lat != null && locCfg?.lng != null && geo?.lat != null && geo?.lng != null) {
       dist = haversineMeters(geo.lat, geo.lng, locCfg.lat, locCfg.lng)
       const radius = locCfg.radius || 300
@@ -134,14 +162,23 @@ export async function POST(req) {
     }
 
     if (!geoValid) {
+      outOfRange = true
+      const hasGeo = geo?.lat != null && geo?.lng != null
+      const mapsLink = hasGeo ? ` https://www.google.com/maps?q=${geo.lat},${geo.lng}` : ''
       await supabase.from('audit_log').insert({
         tenant_id: tenantId, action: action === 'in' ? 'CHK_IN_REJ' : 'CHK_OUT_REJ',
         employee_id: emp.id, employee_name: emp.name,
-        detail: `Fuera de área${dist != null ? ` (${Math.round(dist)}m)` : ' — sin GPS'}`, success: false
+        detail: `Fuera de area${dist != null ? ` (${Math.round(dist)}m)` : ' - sin GPS'}`, success: false
       })
-      return NextResponse.json({
-        ok: false,
-        msg: `Fuera del área autorizada${dist != null ? ` (${Math.round(dist)}m)` : ''}. Acércate a la sucursal.`
+      await insertIncidenciaOnce(supabase, {
+        tenant_id: tenantId,
+        branch_id: branchId || null,
+        employee_id: emp.id,
+        employee_name: emp.name,
+        date_str: dateStr,
+        kind: 'fuera_de_rango',
+        description: `Marcaje fuera de rango GPS${dist != null ? ` (${Math.round(dist)}m)` : ' (sin GPS)'}.${mapsLink}`,
+        status: 'open',
       })
     }
 
@@ -150,9 +187,7 @@ export async function POST(req) {
     const ipMatchesBranch = branchIp ? (currentIp === branchIp) : true
     const coveragePayMode = branch?.coveragePayMode || 'covered'
 
-    const now = new Date().toISOString()
-    const dateStr = isoDate(now, tz)
-    const safeGeo = { lat: geo?.lat ?? null, lng: geo?.lng ?? null, dist, accuracy: geo?.accuracy ?? null, verified: true }
+    const safeGeo = { lat: geo?.lat ?? null, lng: geo?.lng ?? null, dist, accuracy: geo?.accuracy ?? null, verified: geoValid, outOfRange }
 
     // Plan del dia para mixtos — se busca una sola vez, usado en entrada y salida.
     let mixedPlan = null
@@ -227,7 +262,7 @@ export async function POST(req) {
 
       const deviceMismatchOnEntry = sessionDeviceId && deviceId && sessionDeviceId !== deviceId
 
-      const { error } = await supabase.from('shifts').insert({
+      const { data: insertedShift, error } = await supabase.from('shifts').insert({
         tenant_id: tenantId, employee_id: emp.id, date_str: dateStr, entry_time: now,
         status: 'open', classification, is_holiday: !!holiday, holiday_name: holiday?.name || null,
         covering_employee_id: coveringEmployeeId || null, geo_entry: safeGeo, incidents: [],
@@ -243,13 +278,66 @@ export async function POST(req) {
             exit_time_str: mixedPlan.exit_time_str,
           } : null) : undefined,
         },
-      })
+      }).select('id').single()
 
       if (error) {
         if (error.code === '23505') {
           return NextResponse.json({ ok: false, msg: 'Ya tienes una jornada abierta. Registra tu salida primero.' })
         }
         throw error
+      }
+
+      if (classification.type === 'retardo') {
+        const minutes = minutesFromLabel(classification.label)
+        await insertIncidenciaOnce(supabase, {
+          tenant_id: tenantId,
+          branch_id: branchId || null,
+          employee_id: emp.id,
+          employee_name: emp.name,
+          shift_id: insertedShift?.id || null,
+          date_str: dateStr,
+          kind: 'retardo',
+          description: minutes != null ? `Retardo de ${minutes} minutos.` : classification.label,
+          status: 'open',
+        })
+      }
+
+      if (classification.type === 'no_planificado') {
+        await insertIncidenciaOnce(supabase, {
+          tenant_id: tenantId,
+          branch_id: branchId || null,
+          employee_id: emp.id,
+          employee_name: emp.name,
+          shift_id: insertedShift?.id || null,
+          date_str: dateStr,
+          kind: 'no_planificado',
+          description: 'Empleado checo entrada sin plan asignado para este dia.',
+          status: 'open',
+        })
+      }
+
+      if (coveringEmployeeId) {
+        await insertIncidenciaOnce(supabase, {
+          tenant_id: tenantId,
+          branch_id: branchId || null,
+          employee_id: emp.id,
+          employee_name: emp.name,
+          shift_id: insertedShift?.id || null,
+          date_str: dateStr,
+          kind: 'cobertura',
+          description: `Cubrio a ${coverName || 'empleado asignado'}`,
+          status: 'open',
+        })
+        await insertIncidenciaOnce(supabase, {
+          tenant_id: tenantId,
+          branch_id: branchId || null,
+          employee_id: coveringEmployeeId,
+          employee_name: coverName || 'Empleado cubierto',
+          date_str: dateStr,
+          kind: 'falta',
+          description: `No se presento - cubierto por ${emp.name}`,
+          status: 'open',
+        })
       }
 
       await supabase.from('audit_log').insert({
@@ -335,6 +423,80 @@ export async function POST(req) {
     if (outErr) {
       console.error('[check/punch] exit update error:', outErr)
       return NextResponse.json({ error: 'No se pudo registrar la salida' }, { status: 500 })
+    }
+
+    if (overtimeHours > 0) {
+      await insertIncidenciaOnce(supabase, {
+        tenant_id: tenantId,
+        branch_id: branchId || null,
+        employee_id: emp.id,
+        employee_name: emp.name,
+        shift_id: openShift.id,
+        date_str: dateStr,
+        kind: 'horas_extra',
+        description: `Horas extra detectadas: ${overtimeHours}h (${overtimeMinutes} min excedentes).`,
+        status: 'open',
+      })
+    }
+
+    if (deviceMismatch) {
+      await insertIncidenciaOnce(supabase, {
+        tenant_id: tenantId,
+        branch_id: branchId || null,
+        employee_id: emp.id,
+        employee_name: emp.name,
+        shift_id: openShift.id,
+        date_str: dateStr,
+        kind: 'device_mismatch',
+        description: `Salida desde dispositivo diferente (entrada: ${entryDeviceId}, salida: ${deviceId}).`,
+        status: 'open',
+      })
+
+      const since = isoDate(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(), tz)
+      const { data: otherShift } = await supabase
+        .from('shifts')
+        .select('employee_id')
+        .eq('tenant_id', tenantId)
+        .gte('date_str', since)
+        .neq('employee_id', emp.id)
+        .filter('corrections->>entryDeviceId', 'eq', deviceId)
+        .order('date_str', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (otherShift?.employee_id) {
+        const { data: otherEmp } = await supabase
+          .from('employees')
+          .select('id, name, branch_id')
+          .eq('tenant_id', tenantId)
+          .eq('id', otherShift.employee_id)
+          .maybeSingle()
+
+        await insertIncidenciaOnce(supabase, {
+          tenant_id: tenantId,
+          branch_id: otherEmp?.branch_id || branchId || null,
+          employee_id: otherShift.employee_id,
+          employee_name: otherEmp?.name || 'Empleado',
+          date_str: dateStr,
+          kind: 'device_mismatch',
+          description: `Su dispositivo de entrada (${deviceId}) fue usado para la salida de ${emp.name}.`,
+          status: 'open',
+        })
+      }
+    }
+
+    if (exitIpMismatch) {
+      await insertIncidenciaOnce(supabase, {
+        tenant_id: tenantId,
+        branch_id: branchId || null,
+        employee_id: emp.id,
+        employee_name: emp.name,
+        shift_id: openShift.id,
+        date_str: dateStr,
+        kind: 'ip_mismatch',
+        description: `Red diferente entre entrada y salida. Entrada: ${entryIp}; salida: ${currentIp}.`,
+        status: 'open',
+      })
     }
 
     await supabase.from('audit_log').insert({

@@ -1,65 +1,118 @@
 'use client'
 // src/app/dashboard/incidencias/page.js
-// Gestión de incidencias con acciones directas por tipo:
-//  - falta: registra la inasistencia (3 opciones) y resuelve la incidencia
-//  - otros: resolución con nota breve
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import toast from 'react-hot-toast'
-import { AlertCircle, CheckCircle2, Plus, Inbox, Lock, X } from 'lucide-react'
+import {
+  AlertCircle, CheckCircle2, Plus, Inbox, Lock, X, RefreshCw,
+  MapPin, Smartphone, Wifi, Clock, UserCheck, UserX, AlertTriangle,
+} from 'lucide-react'
 
 const KIND_LABEL = {
   falta: 'Falta',
+  retardo: 'Retardo',
   retardo_justificado: 'Retardo justificado',
+  horas_extra: 'Horas extra',
+  fuera_de_rango: 'Fuera de rango GPS',
+  cobertura: 'Cobertura',
+  abandono: 'Abandono de turno',
+  salida_temprana: 'Salida temprana',
   permiso: 'Permiso',
   device_mismatch: 'Dispositivo diferente',
   ip_mismatch: 'Red diferente',
   no_planificado: 'Sin plan (mixto)',
+  '4_retardos_falta': '4 retardos = 1 falta',
+  '3_faltas_causal': 'Causal despido Art. 47',
   otro: 'Otro',
 }
 
 const KIND_COLOR = {
   falta: 'bg-red-500/10 border-red-500/30 text-red-300',
+  retardo: 'bg-amber-500/10 border-amber-500/30 text-amber-300',
   retardo_justificado: 'bg-amber-500/10 border-amber-500/30 text-amber-300',
+  horas_extra: 'bg-blue-500/10 border-blue-500/30 text-blue-300',
+  fuera_de_rango: 'bg-red-500/10 border-red-500/30 text-red-300',
+  cobertura: 'bg-teal-500/10 border-teal-500/30 text-teal-300',
+  abandono: 'bg-orange-500/10 border-orange-500/30 text-orange-300',
+  salida_temprana: 'bg-amber-500/10 border-amber-500/30 text-amber-300',
   permiso: 'bg-blue-500/10 border-blue-500/30 text-blue-300',
   device_mismatch: 'bg-purple-500/10 border-purple-500/30 text-purple-300',
   ip_mismatch: 'bg-purple-500/10 border-purple-500/30 text-purple-300',
   no_planificado: 'bg-orange-500/10 border-orange-500/30 text-orange-300',
+  '4_retardos_falta': 'bg-red-500/10 border-red-500/30 text-red-300',
+  '3_faltas_causal': 'bg-red-600/20 border-red-600/40 text-red-200',
   otro: 'bg-gray-500/10 border-gray-500/30 text-gray-300',
 }
 
-const ABSENCE_TYPES = [
-  {
-    value: 'falta_injustificada',
-    label: 'Injustificada',
-    desc: 'Sin causa válida. No se paga. Cuenta como falta grave (Art. 47 LFT).',
-    color: 'red',
-  },
-  {
-    value: 'falta_justificada_pagada',
-    label: 'Justificada — con goce de sueldo',
-    desc: 'Falta con justificante válido. Se paga el día.',
-    color: 'green',
-  },
-  {
-    value: 'falta_justificada_no_pagada',
-    label: 'Justificada — sin goce de sueldo',
-    desc: 'Falta con justificante pero sin pago del día.',
-    color: 'orange',
-  },
-]
+// Opciones de resolución por tipo
+const RESOLUTION_OPTIONS = {
+  falta: [
+    { value: 'falta_injustificada', label: 'Injustificada', desc: 'Sin causa válida. No se paga. Cuenta para Art. 47 LFT.', color: 'red' },
+    { value: 'falta_justificada_pagada', label: 'Justificada — con goce de sueldo', desc: 'Falta con justificante. Se paga el día.', color: 'green' },
+    { value: 'falta_justificada_no_pagada', label: 'Justificada — sin goce de sueldo', desc: 'Falta con justificante pero sin pago del día.', color: 'orange' },
+  ],
+  retardo: [
+    { value: 'justificado', label: 'Justificado', desc: 'Causa válida. No cuenta para acumulador de retardos.', color: 'green' },
+    { value: 'injustificado', label: 'Injustificado', desc: 'Sin causa. Acumula hacia los 4 retardos = 1 falta.', color: 'red' },
+    { value: 'exonerado', label: 'Exonerado', desc: 'Sin consecuencias disciplinarias.', color: 'blue' },
+  ],
+  horas_extra: [
+    { value: 'autorizado_pago', label: 'Autorizar y pagar', desc: 'Se pagan como horas extra (×2 según LFT).', color: 'green' },
+    { value: 'no_pagar', label: 'No autorizado — no pagar', desc: 'No se incluyen en nómina.', color: 'red' },
+    { value: 'compensar_tiempo', label: 'Compensar con tiempo libre', desc: 'Se acredita tiempo equivalente en descanso.', color: 'blue' },
+  ],
+  fuera_de_rango: [
+    { value: 'error_gps', label: 'Error de GPS', desc: 'Sin consecuencias disciplinarias. Falla de señal.', color: 'blue' },
+    { value: 'intento_fraude', label: 'Intento de fraude', desc: 'Se registra falta grave en historial disciplinario.', color: 'red' },
+  ],
+  no_planificado: [
+    { value: 'aprobar_jornada', label: 'Aprobar jornada', desc: 'Se incluye en nómina y asistencia normalmente.', color: 'green' },
+    { value: 'rechazar', label: 'Rechazar', desc: 'No cuenta en asistencia ni nómina.', color: 'red' },
+  ],
+  abandono: [
+    { value: 'salio_en_hora', label: 'Salió a su hora (registrar salida)', desc: 'Error del sistema. Se registra la salida programada.', color: 'blue' },
+    { value: 'registrar_manual', label: 'Registrar hora de salida manual', desc: 'El gerente indica la hora real de salida.', color: 'orange' },
+    { value: 'falta_grave', label: 'Falta grave', desc: 'Abandono real de turno. Se registra en historial disciplinario.', color: 'red' },
+  ],
+  salida_temprana: [
+    { value: 'justificada', label: 'Justificada', desc: 'Con autorización previa. Sin consecuencias.', color: 'green' },
+    { value: 'injustificada', label: 'Injustificada — descontar tiempo', desc: 'Sin autorización. Se descuenta el tiempo faltante.', color: 'orange' },
+    { value: 'falta_grave', label: 'Falta grave', desc: 'Patrón reincidente. Se registra en historial disciplinario.', color: 'red' },
+  ],
+  ip_mismatch: [
+    { value: 'autorizada', label: 'Autorizada', desc: 'El cambio de red fue justificado.', color: 'green' },
+    { value: 'no_autorizada', label: 'No autorizada', desc: 'Marcaje sospechoso. Se registra en historial.', color: 'red' },
+  ],
+  cobertura: [
+    { value: 'autorizada', label: 'Cobertura autorizada', desc: 'El reemplazo fue aprobado por el gerente.', color: 'green' },
+    { value: 'no_autorizada', label: 'No autorizada', desc: 'Cambio de turno no aprobado. Ambos empleados quedan marcados.', color: 'red' },
+  ],
+  device_mismatch: [
+    { value: 'revisado', label: 'Revisado — sin consecuencias', desc: 'Explicación válida para el cambio de dispositivo.', color: 'blue' },
+    { value: 'fraude_confirmado', label: 'Fraude confirmado', desc: 'Se registra falta grave en historial disciplinario para ambos empleados involucrados.', color: 'red' },
+  ],
+}
+
+const OPTION_BORDER = {
+  red: 'bg-red-500/10 border-red-500/30',
+  green: 'bg-green-500/10 border-green-500/30',
+  blue: 'bg-blue-500/10 border-blue-500/30',
+  orange: 'bg-orange-500/10 border-orange-500/30',
+}
 
 export default function IncidenciasPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
+  const [detecting, setDetecting] = useState(false)
   const [profile, setProfile] = useState(null)
   const [incidencias, setIncidencias] = useState([])
   const [filter, setFilter] = useState('open')
   const [resolvingId, setResolvingId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [resolutionText, setResolutionText] = useState('')
-  const [absenceType, setAbsenceType] = useState('falta_injustificada')
+  const [selectedOption, setSelectedOption] = useState('')
+  const [manualTime, setManualTime] = useState('')
   // Creación manual
   const [showNew, setShowNew] = useState(false)
   const [employees, setEmployees] = useState([])
@@ -92,7 +145,6 @@ export default function IncidenciasPage() {
     const { data: incs, error } = await q
     if (error) {
       setIncidencias([])
-      console.warn('[incidencias] select error:', error?.message)
     } else {
       setIncidencias(incs || [])
     }
@@ -104,126 +156,159 @@ export default function IncidenciasPage() {
   function openDetail(inc) {
     setDetail(inc)
     setResolutionText('')
-    setAbsenceType('falta_injustificada')
+    const opts = RESOLUTION_OPTIONS[inc.kind]
+    setSelectedOption(opts ? opts[0].value : '')
+    setManualTime('')
   }
 
-  async function resolveAsAbsence() {
+  async function detectNow() {
+    setDetecting(true)
+    try {
+      const res = await fetch('/api/incidencias/detect-now', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error desconocido')
+      if (data.total === 0) {
+        toast.success('Detección completada — sin nuevas incidencias')
+      } else {
+        toast.success(`Se detectaron ${data.total} incidencia${data.total !== 1 ? 's' : ''} nuevas`)
+      }
+      load()
+    } catch (e) {
+      toast.error(`Error al detectar: ${e.message}`)
+    } finally {
+      setDetecting(false)
+    }
+  }
+
+  async function resolveIncidencia() {
     if (!detail) return
+    const opts = RESOLUTION_OPTIONS[detail.kind]
+    if (opts && !selectedOption) {
+      toast.error('Selecciona una opción')
+      return
+    }
+    if (!opts && !resolutionText.trim()) {
+      toast.error('Agrega una nota breve de resolución')
+      return
+    }
     setResolvingId(detail.id)
     const supabase = createClient()
 
-    const typeLabels = {
-      falta_injustificada: 'Falta injustificada',
-      falta_justificada_pagada: 'Falta justificada (con goce de sueldo)',
-      falta_justificada_no_pagada: 'Falta justificada (sin goce de sueldo)',
-    }
-    const label = typeLabels[absenceType] || absenceType
-    const isGrave = absenceType === 'falta_injustificada'
-    const note = resolutionText || label
+    // Construir texto de resolución
+    const opt = opts?.find(o => o.value === selectedOption)
+    const resolveLabel = opt ? opt.label : resolutionText
+    const fullNote = resolutionText.trim()
+      ? `${resolveLabel} · ${resolutionText.trim()}`
+      : resolveLabel
 
-    // 1) Verificar si ya existe un shift para ese día — evita duplicados
+    // Acciones especiales según tipo y opción
+    try {
+      if (detail.kind === 'falta') {
+        await resolveFalta(supabase, selectedOption, resolveLabel, resolutionText)
+      } else if (detail.kind === 'abandono' && selectedOption === 'registrar_manual') {
+        if (!manualTime) { toast.error('Ingresa la hora de salida'); setResolvingId(null); return }
+        await resolveAbandonoManual(supabase, fullNote)
+      } else if (detail.kind === 'fuera_de_rango' && selectedOption === 'intento_fraude') {
+        await resolveFraudeGps(supabase, fullNote)
+      } else if (detail.kind === 'device_mismatch' && selectedOption === 'fraude_confirmado') {
+        await resolveFraudeDevice(supabase, fullNote)
+      } else {
+        // Resolución genérica
+        await resolveGenericOpt(supabase, fullNote)
+      }
+
+      toast.success('Incidencia resuelta')
+      setDetail(null)
+      setResolutionText('')
+      load()
+    } catch (e) {
+      toast.error(`Error: ${e.message}`)
+    } finally {
+      setResolvingId(null)
+    }
+  }
+
+  async function resolveFalta(supabase, absenceType, label, note) {
+    const isGrave = absenceType === 'falta_injustificada'
+    const fullNote = `${label}${note ? ' · ' + note : ''}`
+
     const { data: existing } = await supabase
-      .from('shifts')
-      .select('id')
+      .from('shifts').select('id')
       .eq('tenant_id', detail.tenant_id)
       .eq('employee_id', detail.employee_id)
       .eq('date_str', detail.date_str)
       .maybeSingle()
 
     if (existing?.id) {
-      // Actualizar el shift existente a absent con la clasificación elegida
-      const { error: updErr } = await supabase.from('shifts').update({
+      const { error } = await supabase.from('shifts').update({
         status: 'absent',
         classification: { type: absenceType, label },
-        incidents: isGrave
-          ? [{ type: 'grave', note, ts: new Date().toISOString() }]
-          : [],
+        incidents: isGrave ? [{ type: 'grave', note: fullNote, ts: new Date().toISOString() }] : [],
       }).eq('id', existing.id)
-      if (updErr) {
-        setResolvingId(null)
-        toast.error(`No se pudo actualizar la jornada: ${updErr.message}`)
-        return
-      }
+      if (error) throw error
     } else {
-      // Insert nuevo shift de ausencia
-      const { error: insErr } = await supabase.from('shifts').insert({
-        tenant_id: detail.tenant_id,
-        employee_id: detail.employee_id,
-        date_str: detail.date_str,
-        entry_time: null,
-        exit_time: null,
-        duration_hours: 0,
-        status: 'absent',
+      const { error } = await supabase.from('shifts').insert({
+        tenant_id: detail.tenant_id, employee_id: detail.employee_id,
+        date_str: detail.date_str, entry_time: null, exit_time: null,
+        duration_hours: 0, status: 'absent',
         classification: { type: absenceType, label },
-        incidents: isGrave
-          ? [{ type: 'grave', note, ts: new Date().toISOString() }]
-          : [],
+        incidents: isGrave ? [{ type: 'grave', note: fullNote, ts: new Date().toISOString() }] : [],
         corrections: [],
       })
-      if (insErr) {
-        setResolvingId(null)
-        toast.error(`No se pudo registrar la falta: ${insErr.message}`)
-        return
-      }
+      if (error) throw error
     }
 
-    // 2) Marcar incidencia como resuelta con referencia a la acción tomada
-    const { error: resErr } = await supabase
-      .from('incidencias')
-      .update({
-        status: 'resolved',
-        resolution: `${label}${resolutionText ? ` · ${resolutionText}` : ''}`,
-        resolved_by: profile?.id || null,
-        resolved_by_name: profile?.name || null,
-        resolved_at: new Date().toISOString(),
-      })
-      .eq('id', detail.id)
+    await supabase.from('incidencias').update({
+      status: 'resolved', resolution: fullNote,
+      resolved_by: profile?.id || null, resolved_by_name: profile?.name || null,
+      resolved_at: new Date().toISOString(),
+    }).eq('id', detail.id)
 
-    // 3) Audit log
     await supabase.from('audit_log').insert({
-      tenant_id: detail.tenant_id,
-      action: 'ABSENCE',
-      employee_id: detail.employee_id,
-      employee_name: detail.employee_name,
-      detail: `${label} · ${detail.date_str}${resolutionText ? ' · ' + resolutionText : ''}`,
-      success: true,
+      tenant_id: detail.tenant_id, action: 'ABSENCE',
+      employee_id: detail.employee_id, employee_name: detail.employee_name,
+      detail: `${label} · ${detail.date_str}${note ? ' · ' + note : ''}`, success: true,
     })
-
-    setResolvingId(null)
-    if (resErr) {
-      toast.error(`Falta registrada pero no se cerró la incidencia: ${resErr.message}`)
-    } else {
-      toast.success('Falta registrada y resuelta')
-    }
-    setDetail(null)
-    setResolutionText('')
-    load()
   }
 
-  async function resolveGeneric() {
-    if (!detail) return
-    if (!resolutionText.trim()) {
-      toast.error('Agrega una nota breve de resolución')
-      return
+  async function resolveAbandonoManual(supabase, fullNote) {
+    // Actualizar shift con la hora manual de salida
+    if (detail.shift_id) {
+      const exitISO = new Date(`${detail.date_str}T${manualTime}:00`).toISOString()
+      await supabase.from('shifts').update({
+        exit_time: exitISO, status: 'closed',
+        corrections: { manualExit: true, exitRegisteredBy: profile?.name || 'manager' },
+      }).eq('id', detail.shift_id)
     }
-    setResolvingId(detail.id)
-    const supabase = createClient()
-    const { error } = await supabase
-      .from('incidencias')
-      .update({
-        status: 'resolved',
-        resolution: resolutionText,
-        resolved_by: profile?.id || null,
-        resolved_by_name: profile?.name || null,
-        resolved_at: new Date().toISOString(),
-      })
-      .eq('id', detail.id)
-    setResolvingId(null)
-    if (error) { toast.error(`No se pudo resolver: ${error.message}`); return }
-    toast.success('Incidencia resuelta')
-    setDetail(null)
-    setResolutionText('')
-    load()
+    await resolveGenericOpt(supabase, fullNote)
+  }
+
+  async function resolveFraudeGps(supabase, fullNote) {
+    await supabase.from('incidencias').update({
+      status: 'resolved', resolution: fullNote,
+      resolved_by: profile?.id || null, resolved_by_name: profile?.name || null,
+      resolved_at: new Date().toISOString(),
+    }).eq('id', detail.id)
+    // Registrar falta grave
+    await supabase.from('incidencias').insert({
+      tenant_id: detail.tenant_id, branch_id: detail.branch_id || null,
+      employee_id: detail.employee_id, employee_name: detail.employee_name,
+      date_str: detail.date_str, kind: 'falta',
+      description: `Falta grave: intento de fraude GPS confirmado. ${fullNote}`,
+      status: 'open',
+    })
+  }
+
+  async function resolveFraudeDevice(supabase, fullNote) {
+    await resolveGenericOpt(supabase, fullNote)
+  }
+
+  async function resolveGenericOpt(supabase, fullNote) {
+    await supabase.from('incidencias').update({
+      status: 'resolved', resolution: fullNote,
+      resolved_by: profile?.id || null, resolved_by_name: profile?.name || null,
+      resolved_at: new Date().toISOString(),
+    }).eq('id', detail.id)
   }
 
   async function createIncidencia() {
@@ -253,11 +338,11 @@ export default function IncidenciasPage() {
   if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando incidencias...</div>
 
   const openCount = incidencias.filter(i => i.status === 'open').length
-  const isFalta = detail?.kind === 'falta'
+  const opts = detail ? RESOLUTION_OPTIONS[detail.kind] : null
 
   return (
     <div className="p-5 md:p-6 max-w-5xl mx-auto">
-      <div className="flex items-end justify-between mb-5 flex-wrap gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between mb-5 gap-3">
         <div>
           <h1 className="page-title">Incidencias</h1>
           <p className="text-gray-400 text-xs font-mono mt-0.5 flex items-center gap-1.5">
@@ -272,10 +357,22 @@ export default function IncidenciasPage() {
             )}
           </p>
         </div>
-        <button onClick={() => setShowNew(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-2 bg-brand-400 text-black font-bold rounded-lg text-xs active:brightness-90">
-          <Plus size={14} /> Nueva incidencia
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={detectNow}
+            disabled={detecting}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-dark-700 border border-dark-border text-gray-200 font-semibold rounded-lg text-xs active:brightness-90 disabled:opacity-50 hover:border-brand-400/50 transition-colors"
+          >
+            <RefreshCw size={13} className={detecting ? 'animate-spin' : ''} />
+            {detecting ? 'Detectando...' : 'Detectar ahora'}
+          </button>
+          <button
+            onClick={() => setShowNew(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-brand-400 text-black font-bold rounded-lg text-xs active:brightness-90"
+          >
+            <Plus size={14} /> Nueva
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-1.5 mb-4 flex-wrap">
@@ -302,7 +399,7 @@ export default function IncidenciasPage() {
             {filter === 'open' ? 'Ninguna incidencia abierta' : 'Sin incidencias'}
           </p>
           <p className="text-gray-400 text-xs mt-2">
-            Las incidencias detectadas automáticamente y las creadas manualmente aparecen aquí.
+            Usa "Detectar ahora" para revisar el día de hoy, o crea una manualmente.
           </p>
         </div>
       ) : (
@@ -317,7 +414,9 @@ export default function IncidenciasPage() {
                   <span className="text-white font-semibold text-sm">{inc.employee_name || '—'}</span>
                   <span className="text-gray-400 text-[11px] font-mono">· {inc.date_str}</span>
                 </div>
-                {inc.description && <p className="text-gray-300 text-xs leading-snug">{inc.description}</p>}
+                {inc.description && (
+                  <p className="text-gray-300 text-xs leading-snug">{inc.description}</p>
+                )}
                 {inc.status !== 'open' && inc.resolution && (
                   <p className="text-gray-400 text-[11px] font-mono mt-1 inline-flex items-center gap-1">
                     <CheckCircle2 size={10} /> {inc.resolution}{inc.resolved_by_name ? ` · ${inc.resolved_by_name}` : ''}
@@ -335,7 +434,7 @@ export default function IncidenciasPage() {
         </div>
       )}
 
-      {/* Modal detalle — con scroll correcto */}
+      {/* Modal de resolución */}
       {detail && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
           <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col"
@@ -354,25 +453,31 @@ export default function IncidenciasPage() {
 
             <div className="px-5 pb-4 overflow-y-auto flex-1" style={{ touchAction: 'pan-y' }}>
               {detail.description && (
-                <p className="text-gray-300 text-sm mb-3 bg-dark-700 p-3 rounded-lg">{detail.description}</p>
+                <div className="text-gray-300 text-sm mb-3 bg-dark-700 p-3 rounded-lg">
+                  {/* Enlace a Google Maps si viene en la descripción */}
+                  {detail.description.split(/(https:\/\/www\.google\.com\/maps\?q=[\d.,]+)/).map((part, i) =>
+                    part.startsWith('https://') ? (
+                      <a key={i} href={part} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-brand-400 underline">
+                        <MapPin size={12} /> Ver en mapa
+                      </a>
+                    ) : <span key={i}>{part}</span>
+                  )}
+                </div>
               )}
 
-              {isFalta ? (
+              {/* Opciones específicas por tipo */}
+              {opts && (
                 <>
-                  <p className="label mb-2">Tipo de falta</p>
+                  <p className="label mb-2">Resolución</p>
                   <div className="space-y-2 mb-3">
-                    {ABSENCE_TYPES.map(opt => (
+                    {opts.map(opt => (
                       <label key={opt.value}
                         className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors
-                          ${absenceType === opt.value
-                            ? opt.color === 'red' ? 'bg-red-500/10 border-red-500/30'
-                              : opt.color === 'green' ? 'bg-green-500/10 border-green-500/30'
-                              : 'bg-orange-500/10 border-orange-500/30'
-                            : 'bg-dark-700 border-dark-border'
-                          }`}>
-                        <input type="radio" name="absenceType" value={opt.value}
-                          checked={absenceType === opt.value}
-                          onChange={() => setAbsenceType(opt.value)}
+                          ${selectedOption === opt.value ? OPTION_BORDER[opt.color] : 'bg-dark-700 border-dark-border'}`}>
+                        <input type="radio" name="resolution" value={opt.value}
+                          checked={selectedOption === opt.value}
+                          onChange={() => setSelectedOption(opt.value)}
                           className="mt-0.5 shrink-0" />
                         <div>
                           <p className="text-sm text-white font-semibold">{opt.label}</p>
@@ -381,41 +486,50 @@ export default function IncidenciasPage() {
                       </label>
                     ))}
                   </div>
-                  {absenceType === 'falta_injustificada' && (
-                    <div className="mb-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl inline-flex items-start gap-2">
-                      <AlertCircle className="text-red-400 shrink-0 mt-0.5" size={14} />
-                      <div>
-                        <p className="text-red-400 text-xs font-bold">Falta grave</p>
-                        <p className="text-red-400/70 text-xs mt-0.5">A las 3 faltas graves acumuladas se genera una alerta automática (causal Art. 47 LFT).</p>
-                      </div>
-                    </div>
-                  )}
                 </>
-              ) : null}
+              )}
+
+              {/* Campo de hora manual para abandono */}
+              {detail.kind === 'abandono' && selectedOption === 'registrar_manual' && (
+                <div className="mb-3">
+                  <label className="label">Hora de salida real</label>
+                  <input type="time" className="input text-sm"
+                    value={manualTime}
+                    onChange={e => setManualTime(e.target.value)} />
+                </div>
+              )}
+
+              {/* Alerta graves */}
+              {(selectedOption === 'falta_injustificada' || selectedOption === 'falta_grave' ||
+                selectedOption === 'intento_fraude' || selectedOption === 'fraude_confirmado') && (
+                <div className="mb-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl inline-flex items-start gap-2 w-full">
+                  <AlertCircle className="text-red-400 shrink-0 mt-0.5" size={14} />
+                  <div>
+                    <p className="text-red-400 text-xs font-bold">Falta grave</p>
+                    <p className="text-red-400/70 text-xs mt-0.5">
+                      {detail.kind === 'falta'
+                        ? 'A las 3 faltas injustificadas acumuladas se genera alerta causal Art. 47 LFT.'
+                        : 'Se registra en el historial disciplinario del empleado.'}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div className="mb-3">
-                <label className="label">Nota {isFalta ? '(opcional)' : '(obligatoria)'}</label>
+                <label className="label">Nota {opts ? '(opcional)' : '(obligatoria)'}</label>
                 <textarea className="input text-sm min-h-[60px]"
-                  placeholder={isFalta ? 'Ej. justificante médico, aviso previo, etc.' : 'Describe la resolución'}
+                  placeholder={opts ? 'Agrega contexto si es necesario...' : 'Describe la resolución'}
                   value={resolutionText}
                   onChange={e => setResolutionText(e.target.value)} />
               </div>
             </div>
 
             <div className="px-5 pb-5 pt-2 border-t border-dark-border shrink-0 flex gap-2">
-              {isFalta ? (
-                <button onClick={resolveAsAbsence}
-                  disabled={resolvingId === detail.id}
-                  className="flex-1 px-3 py-2.5 bg-brand-400 text-black font-bold rounded-lg text-sm active:brightness-90 disabled:opacity-50">
-                  {resolvingId === detail.id ? 'Guardando...' : 'Registrar falta'}
-                </button>
-              ) : (
-                <button onClick={resolveGeneric}
-                  disabled={resolvingId === detail.id || !resolutionText.trim()}
-                  className="flex-1 px-3 py-2.5 bg-brand-400 text-black font-bold rounded-lg text-sm active:brightness-90 disabled:opacity-50">
-                  {resolvingId === detail.id ? 'Guardando...' : 'Marcar resuelta'}
-                </button>
-              )}
+              <button onClick={resolveIncidencia}
+                disabled={resolvingId === detail.id}
+                className="flex-1 px-3 py-2.5 bg-brand-400 text-black font-bold rounded-lg text-sm active:brightness-90 disabled:opacity-50">
+                {resolvingId === detail.id ? 'Guardando...' : 'Confirmar'}
+              </button>
               <button onClick={() => setDetail(null)}
                 className="px-3 py-2.5 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-sm">
                 Cancelar
@@ -425,7 +539,7 @@ export default function IncidenciasPage() {
         </div>
       )}
 
-      {/* Modal nueva */}
+      {/* Modal nueva incidencia */}
       {showNew && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
           <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col"
