@@ -58,6 +58,19 @@ export async function POST(req) {
 
   const employee_code = generateEmployeeCode(existing || [])
 
+  // FIX: validate branch_id belongs to tenant before employee creation
+  if (body.branch_id) {
+    const { data: branchCheck } = await admin
+      .from('branches')
+      .select('id')
+      .eq('id', body.branch_id)
+      .eq('tenant_id', profile.tenant_id)
+      .maybeSingle()
+    if (!branchCheck) {
+      return NextResponse.json({ ok: false, error: 'Sucursal no valida' }, { status: 400 })
+    }
+  }
+
   // feat/gerente-libre: normalizar flags mutuamente excluyentes
   const is_mixed = !!body.is_mixed
   const free_schedule = !!body.free_schedule && !!body.can_manage && !is_mixed

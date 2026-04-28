@@ -40,7 +40,7 @@ export async function GET(req, { params }) {
 
   const { data: employee, error: empErr } = await admin
     .from('employees')
-    .select('id, tenant_id, status, monthly_salary, schedule')
+    .select('id, tenant_id, status, monthly_salary, schedule, branch_id')
     .eq('id', employeeId)
     .eq('tenant_id', profile.tenant_id)
     .neq('status', 'deleted')
@@ -51,6 +51,16 @@ export async function GET(req, { params }) {
     return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 })
   }
   if (!employee) return NextResponse.json({ ok: false, error: 'Empleado no encontrado' }, { status: 404 })
+
+  // FIX: require owner/manager role and branch isolation for managers
+  if (!['owner', 'manager', 'super_admin'].includes(profile.role)) {
+    return NextResponse.json({ ok: false, error: 'Sin permisos' }, { status: 403 })
+  }
+  if (profile.role === 'manager' && profile.branch_id) {
+    if (employee.branch_id && employee.branch_id !== profile.branch_id) {
+      return NextResponse.json({ ok: false, error: 'Sin permisos' }, { status: 403 })
+    }
+  }
 
   const today = new Date()
   const cutoffDate = new Date(today)

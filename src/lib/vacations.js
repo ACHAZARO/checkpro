@@ -17,13 +17,12 @@ export const LFT_2023_DEFAULT = [
   { fromYear: 2,  toYear: 2,   days: 14 },
   { fromYear: 3,  toYear: 3,   days: 16 },
   { fromYear: 4,  toYear: 4,   days: 18 },
-  { fromYear: 5,  toYear: 5,   days: 20 },
-  { fromYear: 6,  toYear: 10,  days: 22 },
-  { fromYear: 11, toYear: 15,  days: 24 },
-  { fromYear: 16, toYear: 20,  days: 26 },
-  { fromYear: 21, toYear: 25,  days: 28 },
-  { fromYear: 26, toYear: 30,  days: 30 },
-  { fromYear: 31, toYear: 999, days: 32 },
+  // FIX: align LFT 2023 vacation days table - anos 5-9 = 20 dias
+  { fromYear: 5,  toYear: 9,   days: 20 },
+  { fromYear: 10, toYear: 14,  days: 22 },
+  { fromYear: 15, toYear: 19,  days: 24 },
+  { fromYear: 20, toYear: 24,  days: 26 },
+  { fromYear: 25, toYear: 999, days: 28 },
 ]
 
 // ---------------------------------------------------------------------

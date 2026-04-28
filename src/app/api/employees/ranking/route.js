@@ -31,6 +31,11 @@ export async function GET(req) {
   if (ctx.error) return NextResponse.json({ ok: false, error: ctx.error }, { status: ctx.status })
   const { profile, admin } = ctx
 
+  // FIX: require owner/manager role to access ranking data
+  if (!['owner', 'manager', 'super_admin'].includes(profile.role)) {
+    return NextResponse.json({ ok: false, error: 'Sin permisos' }, { status: 403 })
+  }
+
   const url = new URL(req.url)
   const monthParam = url.searchParams.get('month')
   const now = new Date()

@@ -55,6 +55,10 @@ export async function GET(req) {
 
   const url = new URL(req.url)
   const dateParam = url.searchParams.get('date')
+  // FIX: validate date param format before using in queries
+  if (dateParam && !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+    return NextResponse.json({ ok: false, error: 'date param invalido, usar YYYY-MM-DD' }, { status: 400 })
+  }
   const dryRun = url.searchParams.get('dry') === '1'
 
   // Por defecto: hoy en CST (cron corre a las 11pm México, fin del día laboral)

@@ -185,6 +185,11 @@ export async function POST(req) {
         description: `Marcaje fuera de rango GPS${dist != null ? ` (${Math.round(dist)}m)` : ' (sin GPS)'}.${mapsLink}`,
         status: 'open',
       })
+      // FIX: block punch when outside geofence, incident already recorded above
+      return NextResponse.json(
+        { ok: false, error: 'Fuera del area de trabajo. Se registro un aviso para el administrador.' },
+        { status: 422 }
+      )
     }
 
     const branch = branchId ? (cfg.branches || []).find(b => b.id === branchId) : null
@@ -275,6 +280,22 @@ export async function POST(req) {
       }
 
       const deviceMismatchOnEntry = sessionDeviceId && deviceId && sessionDeviceId !== deviceId
+
+      const { data: existingOpen } = await supabase
+        .from('shifts')
+        .select('id')
+        .eq('employee_id', emp.id)
+        .eq('tenant_id', tenantId)
+        .eq('date_str', dateStr)
+        .eq('status', 'open')
+        .maybeSingle()
+
+      if (existingOpen) {
+        return NextResponse.json(
+          { ok: false, error: 'Ya tienes una entrada activa para hoy.' },
+          { status: 409 }
+        )
+      }
 
       const { data: insertedShift, error } = await supabase.from('shifts').insert({
         tenant_id: tenantId, employee_id: emp.id, date_str: dateStr, entry_time: now,

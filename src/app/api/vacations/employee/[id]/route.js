@@ -49,6 +49,12 @@ export async function GET(req, { params }) {
   if (empErr || !employee) {
     return NextResponse.json({ ok: false, error: 'Empleado no encontrado' }, { status: 404 })
   }
+  // FIX: managers can only access vacation data for employees in their own branch
+  if (profile.role === 'manager' && profile.branch_id) {
+    if (employee.branch_id && employee.branch_id !== profile.branch_id) {
+      return NextResponse.json({ ok: false, error: 'Sin permisos para este empleado' }, { status: 403 })
+    }
+  }
 
   const { data: periods, error: perErr } = await admin
     .from('vacation_periods')
