@@ -811,7 +811,7 @@ export default function EmployeesPage() {
       {/* Modal exportar auditoría — todos los empleados con pestaña por empleado */}
       {exportAllOpen && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col"
+          <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden"
                style={{ maxHeight: '90dvh' }}>
             <div className="px-5 pt-4 pb-2 shrink-0">
               <h3 className="text-lg font-bold text-white inline-flex items-center gap-2">
@@ -819,7 +819,7 @@ export default function EmployeesPage() {
               </h3>
               <p className="text-xs text-gray-400 mt-0.5">Archivo con una pestaña por empleado activo + resumen general.</p>
             </div>
-            <div className="px-5 pb-4 overflow-y-auto flex-1" style={{ touchAction: 'pan-y' }}>
+            <div className="px-5 pb-4 min-h-0 overflow-y-auto flex-1" style={{ touchAction: 'pan-y' }}>
               <div className="grid grid-cols-2 gap-2 mb-3">
                 <div>
                   <label className="label">Desde</label>

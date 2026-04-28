@@ -971,13 +971,13 @@ export default function EmployeeDetailPage() {
       {/* Modal exportar asistencia individual */}
       {exportOpen && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col"
+          <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden"
                style={{ maxHeight: '90dvh' }}>
             <div className="px-5 pt-4 pb-2 shrink-0">
               <h3 className="text-lg font-bold text-white">Exportar asistencia</h3>
               <p className="text-xs text-gray-500 mt-0.5">{employee.name}</p>
             </div>
-            <div className="px-5 pb-4 overflow-y-auto flex-1" style={{ touchAction: 'pan-y' }}>
+            <div className="px-5 pb-4 min-h-0 overflow-y-auto flex-1" style={{ touchAction: 'pan-y' }}>
               <div className="grid grid-cols-2 gap-2 mb-3">
                 <div>
                   <label className="label">Desde</label>

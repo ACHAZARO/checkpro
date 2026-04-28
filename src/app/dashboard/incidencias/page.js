@@ -485,7 +485,7 @@ export default function IncidenciasPage() {
       {/* Modal de resolución */}
       {detail && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
-          <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col"
+          <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden"
                style={{ maxHeight: '90dvh' }}>
             <div className="px-5 pt-4 pb-2 flex items-start justify-between shrink-0">
               <div>
@@ -499,7 +499,7 @@ export default function IncidenciasPage() {
               </button>
             </div>
 
-            <div className="px-5 pb-4 overflow-y-auto overscroll-contain flex-1" style={{ touchAction: 'pan-y' }}>
+            <div className="px-5 pb-4 min-h-0 overflow-y-auto overscroll-contain flex-1" style={{ touchAction: 'pan-y' }}>
               {detail.description && (
                 <div className="text-gray-300 text-sm mb-3 bg-dark-700 p-3 rounded-lg">
                   {/* Enlace a Google Maps si viene en la descripción */}
@@ -590,7 +590,7 @@ export default function IncidenciasPage() {
       {/* Modal nueva incidencia */}
       {showNew && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
-          <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col"
+          <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden"
                style={{ maxHeight: '90dvh' }}>
             <div className="px-5 pt-4 pb-2 flex items-start justify-between shrink-0">
               <h2 className="text-lg font-bold text-white">Nueva incidencia</h2>
@@ -598,7 +598,7 @@ export default function IncidenciasPage() {
                 <X size={18} />
               </button>
             </div>
-            <div className="px-5 pb-4 overflow-y-auto overscroll-contain flex-1 space-y-3" style={{ touchAction: 'pan-y' }}>
+            <div className="px-5 pb-4 min-h-0 overflow-y-auto overscroll-contain flex-1 space-y-3" style={{ touchAction: 'pan-y' }}>
               <div>
                 <label className="label">Empleado</label>
                 <select className="input text-sm"
