@@ -66,7 +66,8 @@ export async function POST() {
     let tenantId = existingTenant?.id || null
 
     if (!tenantId) {
-      const slug = slugify(metaName) + '-' + Math.random().toString(36).slice(2, 6)
+      // FIX: use crypto.randomBytes instead of Math.random for unpredictable slugs
+      const slug = slugify(metaName) + '-' + require('crypto').randomBytes(4).toString('hex')
       const { data: tenant, error: tenantError } = await admin
         .from('tenants')
         .insert({ name: metaName, slug, owner_email: emailLower })

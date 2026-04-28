@@ -13,7 +13,8 @@ import { createServiceClient, findAuthUserByEmail } from '@/lib/supabase-server'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const SUPER_ADMIN_EMAIL = 'alepolch@gmail.com'
+// FIX: use env var for super_admin email
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL || 'alepolch@gmail.com'
 const SYSTEM_TENANT_SLUG = 'checkpro-system'
 
 export async function POST(req) {

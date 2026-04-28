@@ -64,12 +64,12 @@ async function insertIncidenciaOnce(admin, payload) {
 }
 
 export async function GET(req) {
-  const auth = req.headers.get('authorization') || ''
-  const secret = process.env.CRON_SECRET
-  if (!secret) {
-    return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 })
-  }
-  if (auth !== `Bearer ${secret}`) {
+  // FIX: constant-time comparison to prevent timing attacks
+  const secret = process.env.CRON_SECRET || ''
+  const provided = (req.headers.get('authorization') || '').replace('Bearer ', '')
+  const secretBuf = Buffer.from(secret)
+  const providedBuf = Buffer.from(provided)
+  if (secretBuf.length !== providedBuf.length || !require('crypto').timingSafeEqual(secretBuf, providedBuf)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 

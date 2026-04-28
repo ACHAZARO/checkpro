@@ -440,6 +440,7 @@ function TenantIdentityTab({ tenant, onSaved }) {
         )}
       </div>
 
+      {/* FIX: disable button during save to prevent double-submit */}
       <button onClick={save} disabled={saving}
         className="w-full md:w-auto flex items-center gap-1.5 px-5 py-2.5 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40">
         {saving ? '...' : '✓ Guardar empresa'}
@@ -785,18 +786,21 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
 
   async function save() {
     setSaving(true)
-    const body = { config: cfg }
-    if (canEditName && name.trim() && name !== branch.name) body.name = name.trim()
-    const r = await fetch(`/api/branches/${branch.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    })
-    const d = await r.json()
-    setSaving(false)
-    if (!r.ok) { toast.error(d.error || 'No se pudo guardar'); return }
-    toast.success('Sucursal guardada')
-    await onSaved?.()
+    try {
+      const body = { config: cfg }
+      if (canEditName && name.trim() && name !== branch.name) body.name = name.trim()
+      const r = await fetch(`/api/branches/${branch.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+      const d = await r.json()
+      if (!r.ok) { toast.error(d.error || 'No se pudo guardar'); return }
+      toast.success('Sucursal guardada')
+      await onSaved?.()
+    } finally {
+      setSaving(false)
+    }
   }
 
   const checkUrl = tenantToken
@@ -812,6 +816,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white">
           ← Volver a sucursales
         </button>
+        {/* FIX: disable button during save to prevent double-submit */}
         <button onClick={save} disabled={saving}
           className="px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40">
           {saving ? '...' : '✓ Guardar'}
@@ -1023,6 +1028,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
         </>
       )}
 
+      {/* FIX: disable button during save to prevent double-submit */}
       <button onClick={save} disabled={saving}
         className="w-full flex items-center justify-center gap-1.5 px-5 py-3 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40">
         {saving ? '...' : '✓ Guardar sucursal'}
@@ -1127,4 +1133,3 @@ function TeamTab({ branches, onChanged }) {
     </div>
   )
 }
-

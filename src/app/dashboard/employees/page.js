@@ -300,6 +300,7 @@ export default function EmployeesPage() {
         // FIX: antes se swallowed el error silently y el toast decia "actualizado"
         // aunque la update fallara por RLS o constraint.
         const { error: upErr } = await supabase.from('employees').update({ ...payload, status: form.status || 'active' }).eq('id', form.id)
+        // FIX: check supabase error before showing success toast
         if (upErr) {
           console.error('[employees] update error:', upErr)
           toast.error(`No se pudo actualizar: ${upErr.message}`)

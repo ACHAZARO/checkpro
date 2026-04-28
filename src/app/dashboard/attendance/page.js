@@ -112,7 +112,8 @@ export default function AttendancePage() {
       toast.success(`Exportado: ${src.length} registros`)
     } catch (err) {
       console.error('[export-xlsx]', err)
-      toast.error('Error al generar el archivo: ' + err.message)
+      // FIX: show error toast if export fails
+      toast.error('No se pudo exportar el archivo')
     }
     setExporting(false)
   }

@@ -199,6 +199,7 @@ export default function IncidenciasPage() {
 
   async function resolveIncidencia() {
     if (!detail) return
+    if (resolvingId === detail.id) return
     if (profile?.tenant_id && detail.tenant_id !== profile.tenant_id) { toast.error('Incidencia fuera de tu empresa'); return } // FIX: defensa cliente contra resolucion cross-tenant.
     const opts = RESOLUTION_OPTIONS[detail.kind]
     if (opts && !selectedOption) {
@@ -209,6 +210,12 @@ export default function IncidenciasPage() {
       toast.error('Agrega una nota breve de resolución')
       return
     }
+    // FIX: validate manualTime format before submit
+    if (manualTime && !/^\d{2}:\d{2}$/.test(manualTime)) {
+      toast.error('Formato de hora invalido, usa HH:MM')
+      return
+    }
+    // FIX: disable resolution buttons during fetch to prevent double-submit
     setResolvingId(detail.id)
     const supabase = createClient()
 
