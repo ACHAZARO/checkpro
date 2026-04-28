@@ -63,7 +63,7 @@ export function ConfirmSheet(props) {
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="cs-title"
-        className="bg-dark-800 border border-dark-border rounded-2xl p-5 w-full max-w-sm"
+        className="bg-dark-800 border border-dark-border rounded-2xl p-5 w-full max-w-sm max-h-[90dvh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
         <h3 id="cs-title" className="text-white font-bold text-base mb-2">

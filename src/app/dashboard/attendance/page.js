@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { fmtTime, fmtDate, isoDate, weekRange, dayKey, countGraveIncidents } from '@/lib/utils'
 import toast from 'react-hot-toast'
-import { FileSpreadsheet, Loader2, ClipboardList, Package, Building2 } from 'lucide-react'
+import { FileSpreadsheet, Loader2, ClipboardList, Package, Building2, CheckCircle2, Search, AlertTriangle, Pencil } from 'lucide-react'
 
 function ShiftBadge({ status, classification }) {
   if (status === 'open') return <span className="badge-blue">Abierta</span>
@@ -109,7 +109,7 @@ export default function AttendancePage() {
         periodTo: filterTo,
         companyName: tenantName,
       })
-      toast.success(`✅ Exportado: ${src.length} registros`)
+      toast.success(`Exportado: ${src.length} registros`)
     } catch (err) {
       console.error('[export-xlsx]', err)
       toast.error('Error al generar el archivo: ' + err.message)
@@ -228,7 +228,7 @@ export default function AttendancePage() {
           </div>
         )}
         <button onClick={load} className="w-full py-2 bg-dark-700 border border-dark-border rounded-xl text-sm font-semibold text-white active:bg-dark-600">
-          🔍 Buscar
+          <Search size={16} className="inline mr-1" />Buscar
         </button>
       </div>
 
@@ -274,18 +274,18 @@ export default function AttendancePage() {
                       ))}
                       {graveCount > 0 && (
                         <div className={`text-[10px] font-mono mt-1 ${graveCount >= 3 ? 'text-red-400 font-bold' : 'text-orange-400'}`}>
-                          ⚠ {graveCount} falta{graveCount > 1 ? 's' : ''} grave{graveCount > 1 ? 's' : ''} acumulada{graveCount > 1 ? 's' : ''}
+                          <AlertTriangle size={12} className="inline mr-0.5" />{graveCount} falta{graveCount > 1 ? 's' : ''} grave{graveCount > 1 ? 's' : ''} acumulada{graveCount > 1 ? 's' : ''}
                           {graveCount >= 3 && ' — ALERTA GENERADA'}
                         </div>
                       )}
                       {Array.isArray(s.corrections) && s.corrections.length > 0 && (
-                        <div className="text-xs text-yellow-500 mt-0.5">✏️ {s.corrections.length} corrección(es)</div>
+                        <div className="text-xs text-yellow-500 mt-0.5 flex items-center gap-0.5"><Pencil size={12} /> {s.corrections.length} corrección(es)</div>
                       )}
                     </div>
                     {s.status !== 'absent' && (
                       <div className="flex gap-1.5 shrink-0">
                         <button onClick={() => { setCorrSheet(s); setCorrForm({ entryTime: s.entry_time?.slice(0,16), exitTime: s.exit_time?.slice(0,16)||'', note: '' }) }}
-                          className="p-2 bg-dark-700 border border-dark-border rounded-lg text-xs text-gray-400 active:bg-dark-600">✏️</button>
+                          className="p-2 bg-dark-700 border border-dark-border rounded-lg text-xs text-gray-400 active:bg-dark-600"><Pencil size={16} /></button>
                         {s.status === 'open' && (
                           <button onClick={() => { setFlagSheet(s); setFlagForm({ type:'olvido_salida', note:'' }) }}
                             className="p-2 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400 active:bg-red-500/20">🚩</button>
@@ -309,7 +309,7 @@ export default function AttendancePage() {
               <h3 className="text-lg font-bold text-white mb-1">Corrección de Jornada</h3>
               <p className="text-xs text-gray-400 font-mono mb-4">{getEmpName(corrSheet.employee_id)} · {corrSheet.date_str}</p>
               <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 text-yellow-400 text-xs font-semibold mb-4">
-                ⚠ Esta acción quedará registrada en auditoría.
+                <AlertTriangle size={14} className="inline mr-1" />Esta acción quedará registrada en auditoría.
               </div>
               <div className="grid grid-cols-2 gap-2 mb-3">
                 <div><label className="label">Hora entrada</label><input className="input text-sm" type="datetime-local" value={corrForm.entryTime||''} onChange={e=>setCorrForm(f=>({...f,entryTime:e.target.value}))}/></div>

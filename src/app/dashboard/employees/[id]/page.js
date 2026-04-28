@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
-import { Download, Building2, Calendar, Clock, Cake, Palmtree, DollarSign, AlertTriangle } from 'lucide-react'
+import { Download, Building2, Calendar, Clock, Cake, Palmtree, DollarSign, AlertTriangle, Umbrella, Play, CornerUpLeft } from 'lucide-react'
 // R7: componentes compartidos extraidos a src/components/
 import { BottomSheet } from '@/components/BottomSheet'
 import { ConfirmSheet } from '@/components/ConfirmSheet'
@@ -99,7 +99,7 @@ const STATUS_CLASS = {
   expired: 'badge-red',
   cancelled: 'badge-gray',
 }
-const TIPO_ICON = { tomadas: '🏖️', pospuestas: '📅', compensadas: '💰' }
+const TIPO_ICON = { tomadas: <Umbrella size={14} />, pospuestas: <Calendar size={14} />, compensadas: <DollarSign size={14} /> }
 const TIPO_LABEL = { tomadas: 'Tomadas', pospuestas: 'Pospuestas', compensadas: 'Compensadas' }
 
 // R7: BottomSheet / ConfirmSheet / useEscapeKey viven ahora en
@@ -624,8 +624,8 @@ export default function EmployeeDetailPage() {
           </div>
           {expiredPeriods.length > 0 && (
             <div className="mt-2 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg">
-              <p className="text-red-400 text-[11px] font-bold">
-                ⚠ {expiredPeriods.length} periodo{expiredPeriods.length !== 1 ? 's' : ''} prescrito{expiredPeriods.length !== 1 ? 's' : ''}
+              <p className="text-red-400 text-[11px] font-bold flex items-center gap-1">
+                <AlertTriangle size={12} /> {expiredPeriods.length} periodo{expiredPeriods.length !== 1 ? 's' : ''} prescrito{expiredPeriods.length !== 1 ? 's' : ''}
               </p>
               <p className="text-red-400/70 text-[10px] mt-0.5">Revisa el histórico abajo — puedes reactivar con el botón rojo.</p>
             </div>
@@ -734,8 +734,8 @@ export default function EmployeeDetailPage() {
                     {p.start_date && <> · {fmtShortDate(p.start_date)}{p.end_date ? ` → ${fmtShortDate(p.end_date)}` : ''}</>}
                   </div>
                   {p.tipo === 'compensadas' && p.compensated_amount != null && (
-                    <div className="text-[11px] text-blue-400/80 font-mono mt-0.5">
-                      💰 {fmtMoney(p.compensated_amount)} · {p.payment_type || '—'}
+                    <div className="text-[11px] text-blue-400/80 font-mono mt-0.5 flex items-center gap-1">
+                      <DollarSign size={11} /> {fmtMoney(p.compensated_amount)} · {p.payment_type || '—'}
                     </div>
                   )}
                   {p.notes && <div className="text-[11px] text-gray-500 mt-1 italic">“{p.notes}”</div>}
@@ -750,7 +750,7 @@ export default function EmployeeDetailPage() {
       </div>
 
       {/* ── Modal: Tomar ──────────────────────────────────────────────────── */}
-      <BottomSheet open={sheet === 'tomar'} title="🏖️ Tomar vacaciones ahora" onClose={closeSheet}>
+      <BottomSheet open={sheet === 'tomar'} title={<span className="flex items-center gap-2"><Umbrella size={18} /> Tomar vacaciones ahora</span>} onClose={closeSheet}>
         <div className="space-y-3">
           <div>
             <label className="label" htmlFor="vac-anniv">Aniversario</label>
@@ -828,7 +828,7 @@ export default function EmployeeDetailPage() {
       </BottomSheet>
 
       {/* ── Modal: Posponer ───────────────────────────────────────────────── */}
-      <BottomSheet open={sheet === 'posponer'} title="📅 Posponer periodo" onClose={closeSheet}>
+      <BottomSheet open={sheet === 'posponer'} title={<span className="flex items-center gap-2"><Calendar size={18} /> Posponer periodo</span>} onClose={closeSheet}>
         <div className="space-y-3">
           <div className="px-3 py-2 bg-orange-500/10 border border-orange-500/20 rounded-lg text-orange-400 text-[11px]">
             Se pospondrá el periodo del aniversario {form.anniversary_year || anniv?.yearsWorked || 1}. La LFT permite posponer hasta la fecha de prescripción (18 meses tras el aniversario).
@@ -848,7 +848,7 @@ export default function EmployeeDetailPage() {
       </BottomSheet>
 
       {/* ── Modal: Compensar ──────────────────────────────────────────────── */}
-      <BottomSheet open={sheet === 'compensar'} title="💰 Compensar vacaciones" onClose={closeSheet}>
+      <BottomSheet open={sheet === 'compensar'} title={<span className="flex items-center gap-2"><DollarSign size={18} /> Compensar vacaciones</span>} onClose={closeSheet}>
         <div className="space-y-3">
           <div>
             <label className="label" htmlFor="vac-comp-anniv">Aniversario</label>
@@ -907,7 +907,7 @@ export default function EmployeeDetailPage() {
       </BottomSheet>
 
       {/* ── Modal: Reanudar (pospuestas → tomar) ──────────────────────────── */}
-      <BottomSheet open={sheet === 'resume'} title="▶️ Reanudar periodo pospuesto" onClose={closeSheet}>
+      <BottomSheet open={sheet === 'resume'} title={<span className="flex items-center gap-2"><Play size={18} /> Reanudar periodo pospuesto</span>} onClose={closeSheet}>
         <div className="space-y-3">
           <div className="text-[11px] font-mono text-gray-500">
             Año {sheetCtx.period?.anniversary_year} · {sheetCtx.period?.entitled_days} días
@@ -940,7 +940,7 @@ export default function EmployeeDetailPage() {
       </BottomSheet>
 
       {/* ── Modal: Reincorporación temprana ───────────────────────────────── */}
-      <BottomSheet open={sheet === 'early'} title="↩️ Reincorporación temprana" onClose={closeSheet}>
+      <BottomSheet open={sheet === 'early'} title={<span className="flex items-center gap-2"><CornerUpLeft size={18} /> Reincorporación temprana</span>} onClose={closeSheet}>
         <div className="space-y-3">
           <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-yellow-400 text-[11px]">
             Cerrarás este periodo en la fecha indicada. El empleado regresa a trabajar.

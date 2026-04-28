@@ -288,7 +288,7 @@ export default function PlanningPage() {
                 <tr>
                   <th className="text-left p-2 text-gray-500 font-mono border-b border-dark-border sticky left-0 bg-dark-800 z-10">Empleado</th>
                   {dates.map((d, i) => (
-                    <th key={d} className="text-center p-2 text-gray-500 font-mono border-b border-dark-border min-w-[120px]">
+                    <th key={d} className="text-center p-2 text-gray-500 font-mono border-b border-dark-border min-w-[90px]">
                       <div className="text-brand-400">{DAY_L[DAYS[i]]}</div>
                       <div className="text-[10px] text-gray-400 font-normal">{d.slice(5)}</div>
                     </th>

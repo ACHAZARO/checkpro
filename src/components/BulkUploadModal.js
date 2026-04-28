@@ -11,6 +11,14 @@
 import { useState, useMemo, useRef } from 'react'
 import toast from 'react-hot-toast'
 import {
+  AlertTriangle,
+  Building2,
+  CheckCircle2,
+  Download,
+  FileText,
+  FolderOpen,
+} from 'lucide-react'
+import {
   TEMPLATE_COLUMNS,
   TEMPLATE_LABELS,
   TEMPLATE_HELP,
@@ -188,8 +196,8 @@ export default function BulkUploadModal({ branches, onClose, onImported }) {
                     ))}
                   </select>
                 ) : (
-                  <div className="input bg-dark-700 text-orange-400 text-xs">
-                    ⚠️ Configura sucursales primero
+                  <div className="input bg-dark-700 text-orange-400 text-xs flex items-center gap-1">
+                    <AlertTriangle size={16} /> Configura sucursales primero
                   </div>
                 )}
                 <p className="text-[10px] text-gray-600 font-mono mt-1">
@@ -204,7 +212,7 @@ export default function BulkUploadModal({ branches, onClose, onImported }) {
                 </p>
                 <button onClick={downloadTemplate}
                   className="w-full px-4 py-2.5 bg-brand-400/15 border border-brand-400/30 rounded-xl text-brand-400 text-sm font-bold active:bg-brand-400/25">
-                  ⬇ Descargar plantilla .xlsx
+                  <Download size={16} className="inline-block mr-1" /> Descargar plantilla .xlsx
                 </button>
               </div>
 
@@ -224,7 +232,10 @@ export default function BulkUploadModal({ branches, onClose, onImported }) {
                   onClick={() => fileInputRef.current?.click()}
                   disabled={!branchId || working}
                   className="w-full px-4 py-2.5 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40 disabled:cursor-not-allowed">
-                  {working ? 'Validando...' : (fileName ? `📄 ${fileName}` : '📁 Seleccionar archivo')}
+                  {working ? 'Validando...' : (fileName
+                    ? <span className="flex items-center justify-center gap-1"><FileText size={16} />{fileName}</span>
+                    : <span className="flex items-center justify-center gap-1"><FolderOpen size={16} />Seleccionar archivo</span>
+                  )}
                 </button>
                 {!branchId && (
                   <p className="text-[10px] text-orange-400 font-mono mt-2">Selecciona una sucursal antes de subir.</p>
@@ -243,14 +254,14 @@ export default function BulkUploadModal({ branches, onClose, onImported }) {
               </div>
 
               {selectedBranch && (
-                <p className="text-xs text-gray-500 font-mono">
-                  Destino: <span className="text-brand-400">🏢 {selectedBranch.name}</span>
+                <p className="text-xs text-gray-500 font-mono flex items-center gap-1">
+                  Destino: <span className="text-brand-400 flex items-center gap-1"><Building2 size={16} />{selectedBranch.name}</span>
                 </p>
               )}
 
               <div className="border border-dark-border rounded-xl overflow-hidden">
-                <div className="max-h-[50vh] overflow-y-auto">
-                  <table className="w-full text-xs">
+                <div className="max-h-[50vh] overflow-y-auto overflow-x-auto">
+                  <table className="w-full min-w-[520px] text-xs">
                     <thead className="bg-dark-700 sticky top-0">
                       <tr>
                         <th className="text-left p-2 font-mono text-gray-500">#</th>
@@ -308,7 +319,7 @@ export default function BulkUploadModal({ branches, onClose, onImported }) {
           {/* ── PASO 3 ────────────────────────────────────────────────────── */}
           {step === 3 && (
             <div className="text-center py-10">
-              <div className="text-5xl mb-3">✅</div>
+              <div className="mb-3 flex justify-center"><CheckCircle2 size={48} className="text-green-400" /></div>
               <p className="text-white font-bold text-lg mb-1">Importación completada</p>
               <p className="text-gray-500 text-sm mb-6">
                 Los empleados ya aparecen en tu lista.

@@ -146,7 +146,7 @@ export default function ArchivoPage() {
   const weeks = Object.values(byWeek).sort((a, b) => b.week - a.week)
 
   return (
-    <div className="min-h-screen p-6 text-slate-100">
+    <div className="bg-dark-900 text-white p-4 sm:p-6 min-h-screen">
       <div className="max-w-6xl mx-auto">
         <div className="mb-6">
           <h1 className="text-2xl font-bold mb-1">Archivo histórico</h1>

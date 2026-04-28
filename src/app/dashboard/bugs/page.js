@@ -16,11 +16,12 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 import { ConfirmSheet } from '@/components/ConfirmSheet'
+import { CircleHelp, Bug, User } from 'lucide-react'
 
 const KIND_META = {
-  pregunta:   { label: 'Pregunta',   emoji: '❓', cls: 'bg-blue-500/10 text-blue-300 border-blue-500/20' },
-  sugerencia: { label: 'Sugerencia', emoji: '💡', cls: 'bg-yellow-500/10 text-yellow-300 border-yellow-500/20' },
-  bug:        { label: 'Bug',        emoji: '🐞', cls: 'bg-red-500/10 text-red-300 border-red-500/20' },
+  pregunta:   { label: 'Pregunta',   Icon: CircleHelp, cls: 'bg-blue-500/10 text-blue-300 border-blue-500/20' },
+  sugerencia: { label: 'Sugerencia', Icon: null,       cls: 'bg-yellow-500/10 text-yellow-300 border-yellow-500/20' },
+  bug:        { label: 'Bug',        Icon: Bug,        cls: 'bg-red-500/10 text-red-300 border-red-500/20' },
 }
 
 const STATUS_META = {
@@ -190,8 +191,8 @@ export default function BugsPage() {
                     >
                       <div className="flex items-start justify-between gap-3 mb-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${k.cls}`}>
-                            {k.emoji} {k.label}
+                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border inline-flex items-center gap-1 ${k.cls}`}>
+                            {k.Icon && <k.Icon size={12} />}{k.label}
                           </span>
                           <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${s.cls}`}>
                             {s.label}
@@ -208,7 +209,7 @@ export default function BugsPage() {
                       <p className="text-gray-400 text-xs mt-1 line-clamp-2">{m.description}</p>
                       {m.reporter_name && (
                         <p className="text-[10px] font-mono text-gray-400 mt-2">
-                          👤 {m.reporter_name} {m.reporter_email && `· ${m.reporter_email}`}
+                          <User size={12} className="inline mr-0.5" />{m.reporter_name} {m.reporter_email && `· ${m.reporter_email}`}
                         </p>
                       )}
                     </button>

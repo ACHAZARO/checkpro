@@ -4,6 +4,18 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { haversineMeters, fmtTime, fmtDate, classifyEntry, isoDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import Link from 'next/link'
+import {
+  Building2,
+  MapPin,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Settings,
+  Wifi,
+  Monitor,
+  Smartphone,
+} from 'lucide-react'
 
 const ABANDON_MINUTES = 20        // minutes outside zone before auto-close
 const GPS_INTERVAL_MS = 60_000    // check GPS every 60s while shift is open
@@ -34,7 +46,7 @@ function LiveClock({ locationName, branchName }) {
       <div className="font-mono text-xs text-gray-500 mt-2 tracking-widest uppercase">{fmtDate(t)}</div>
       {(branchName || locationName) && (
         <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 bg-dark-700 border border-dark-border rounded-full text-xs text-gray-500 font-mono">
-          🏢 {branchName || locationName}
+          <Building2 size={14} /> {branchName || locationName}
         </div>
       )}
     </div>
@@ -52,8 +64,14 @@ function GpsStatus({ gps, onVerify, simMode, setSimMode }) {
           ok ? 'bg-brand-400/10 border-brand-400/20 text-brand-400' :
           out || gps.status === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
           'bg-dark-700 border-dark-border text-gray-500'}`}>
-        <span className="text-base">
-          {ok || gps.simulated ? '✓' : out || gps.status === 'error' ? '✗' : gps.status === 'loading' ? '⏳' : '📍'}
+        <span className="flex items-center">
+          {ok || gps.simulated
+            ? <CheckCircle2 size={20} />
+            : out || gps.status === 'error'
+              ? <XCircle size={20} />
+              : gps.status === 'loading'
+                ? <Loader2 size={20} className="animate-spin" />
+                : <MapPin size={20} />}
         </span>
         <span className="flex-1 text-xs">
           {gps.simulated ? 'Simulado — dentro del área (modo prueba)' :
@@ -134,8 +152,8 @@ function AbandonBanner({ monitor, onAbandon }) {
     <div className="mx-4 mb-3 px-4 py-3 bg-orange-500/10 border border-orange-500/30 rounded-xl">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-orange-400 text-sm font-bold">
-            ⚠ Fuera de la sucursal · {minsLeft}min restante{minsLeft !== 1 ? 's' : ''}
+          <p className="text-orange-400 text-sm font-bold flex items-center gap-1.5">
+            <AlertTriangle size={16} /> Fuera de la sucursal · {minsLeft}min restante{minsLeft !== 1 ? 's' : ''}
           </p>
           <p className="text-orange-400/70 text-xs mt-0.5">
             {outsideReason === 'ip' ? 'Saliste de la red WiFi de la sucursal' :
@@ -158,10 +176,10 @@ function AbandonBanner({ monitor, onAbandon }) {
 // ── EmergencyExitModal ────────────────────────────────────────────────────────
 function EmergencyExitModal({ onConfirm, onCancel, busy }) {
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-5">
-      <div className="bg-dark-800 border border-red-500/30 rounded-2xl p-6 w-full max-w-sm">
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-start sm:items-center justify-center p-5 pt-4 pb-4">
+      <div className="bg-dark-800 border border-red-500/30 rounded-2xl p-6 w-full max-w-sm max-h-[90dvh] overflow-y-auto">
         <div className="text-center mb-4">
-          <div className="text-4xl mb-2">🚨</div>
+          <div className="flex justify-center mb-2"><AlertTriangle size={40} className="text-red-400" /></div>
           <h3 className="text-white font-bold text-lg mb-1">Salida de emergencia</h3>
           <p className="text-gray-400 text-sm">
             Esto registrará tu salida <span className="text-red-400 font-semibold">aunque estés fuera de la sucursal</span>.
@@ -171,7 +189,7 @@ function EmergencyExitModal({ onConfirm, onCancel, busy }) {
         <div className="space-y-2">
           <button onClick={onConfirm} disabled={busy}
             className="w-full py-3 bg-red-500/20 border border-red-500/40 rounded-xl text-red-400 font-bold text-sm active:bg-red-500/30 transition-all disabled:opacity-50">
-            {busy ? '⏳ Registrando...' : 'Confirmar salida de emergencia'}
+            {busy ? <span className="inline-flex items-center gap-1.5"><Loader2 size={16} className="animate-spin" /> Registrando...</span> : 'Confirmar salida de emergencia'}
           </button>
           <button onClick={onCancel} disabled={busy}
             className="w-full py-3 bg-dark-700 border border-dark-border rounded-xl text-gray-400 font-bold text-sm active:bg-dark-600 transition-all">
@@ -224,14 +242,14 @@ function VacationModal({ period, employeeName, onAccept, onCancel }) {
   const fmtEnd = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : endIso
   return (
     <div
-      className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-5"
+      className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-start sm:items-center justify-center p-5 pt-4 pb-4"
       onClick={onCancel}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="vac-modal-title"
-        className="bg-dark-800 border border-purple-500/30 rounded-2xl p-6 w-full max-w-sm"
+        className="bg-dark-800 border border-purple-500/30 rounded-2xl p-6 w-full max-w-sm max-h-[90dvh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
         <div className="text-center mb-4">
@@ -593,7 +611,7 @@ export default function CheckPage() {
                 '[check] vacation active + openShift inconsistente',
                 { employee: data.employee?.id, periodId: vacJson.period?.id }
               )
-              toast('⚠ Turno abierto durante vacaciones — notifica al gerente', {
+              toast('Turno abierto durante vacaciones — notifica al gerente', {
                 icon: '⚠️',
                 duration: 6000,
               })
@@ -761,7 +779,7 @@ export default function CheckPage() {
   // ── Not configured ────────────────────────────────────────────────────────
   if (!tenantId || !tenantToken) return (
     <main className="min-h-dvh bg-dark-900 flex flex-col items-center justify-center px-5 text-center">
-      <div className="text-4xl mb-4">⚙️</div>
+      <div className="text-4xl mb-4 flex justify-center"><Settings size={40} /></div>
       <h2 className="text-xl font-bold text-white mb-2">Checador no configurado</h2>
       <p className="text-gray-500 text-sm mb-6">Escanea el código QR de tu sucursal para comenzar.</p>
       <Link href="/dashboard/settings" className="btn-primary max-w-xs">Ir a configuración →</Link>
@@ -835,13 +853,15 @@ export default function CheckPage() {
               {currentIp && (
                 <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-mono mb-4 ml-2
                   ${monitor.outsideSince ? 'bg-orange-500/10 border border-orange-500/20 text-orange-400' : 'bg-dark-700 border border-dark-border text-gray-600'}`}>
-                  {monitor.outsideSince ? '⚠ Fuera de red' : '🌐 En red de sucursal'}
+                  {monitor.outsideSince
+                    ? <><AlertTriangle size={12} className="inline mr-1" />Fuera de red</>
+                    : <><Wifi size={12} className="inline mr-1" />En red de sucursal</>}
                 </div>
               )}
 
               {/* Rescan to exit instructions */}
               <div className="mt-2 p-4 bg-dark-700 border border-dark-border rounded-xl mb-4">
-                <p className="text-2xl mb-2">{cfg?.kioskMode ? '🖥️' : '📱'}</p>
+                <div className="flex justify-center mb-2">{cfg?.kioskMode ? <Monitor size={28} /> : <Smartphone size={28} />}</div>
                 <p className="text-white font-bold text-sm mb-1">Para registrar tu salida:</p>
                 <p className="text-gray-400 text-xs">
                   {cfg?.kioskMode
@@ -874,7 +894,7 @@ export default function CheckPage() {
               <button
                 onClick={() => setShowEmergency(true)}
                 className="w-full py-2.5 border border-red-500/20 rounded-xl text-red-500/70 text-xs font-semibold hover:bg-red-500/10 transition-all">
-                🚨 Salida de emergencia (crea incidencia)
+                <span className="inline-flex items-center gap-1.5"><AlertTriangle size={16} className="text-red-400" /> Salida de emergencia (crea incidencia)</span>
               </button>
 
               {msg && (
@@ -891,7 +911,7 @@ export default function CheckPage() {
           {/* ── DONE screen: after clock-out ── */}
           {step === 'done' && !openShift && (
             <div className="card text-center py-8">
-              <div className="text-5xl mb-3">✅</div>
+              <div className="flex justify-center mb-3"><CheckCircle2 size={48} className="text-brand-400" /></div>
               <p className="text-white font-bold text-lg">¡Hasta pronto!</p>
               {msg && <p className="text-brand-400 text-sm mt-2">{msg.text}</p>}
             </div>
@@ -915,7 +935,7 @@ export default function CheckPage() {
                 onChange={e => setEmpCode(e.target.value.toUpperCase())}
                 onKeyDown={e => e.key === 'Enter' && submitId()} />
               <button onClick={submitId} disabled={busy || !empCode} className="btn-primary">
-                {busy ? '⏳ Buscando...' : 'Continuar →'}
+                {busy ? <span className="inline-flex items-center gap-1.5"><Loader2 size={16} className="animate-spin" /> Buscando...</span> : 'Continuar →'}
               </button>
               {msg && (
                 <div className={`mt-3 px-4 py-3 rounded-xl text-sm font-semibold
@@ -985,16 +1005,19 @@ export default function CheckPage() {
 
               {!gps.valid && (
                 <div className="mt-4 px-4 py-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl text-yellow-400 text-xs font-semibold">
-                  ⚠ Verifica tu ubicación GPS antes de checar.
+                  <span className="inline-flex items-center gap-1.5"><AlertTriangle size={16} /> Verifica tu ubicación GPS antes de checar.</span>
                 </div>
               )}
-              {busy && <div className="mt-3 text-center text-blue-400 text-sm font-mono">⏳ Procesando...</div>}
+              {busy && <div className="mt-3 text-center text-blue-400 text-sm font-mono flex items-center justify-center gap-1.5"><Loader2 size={16} className="animate-spin" /> Procesando...</div>}
               {msg && (
                 <div className={`mt-3 px-4 py-3 rounded-xl text-sm font-semibold
                   ${msg.type === 'ok' ? 'bg-brand-400/10 border border-brand-400/20 text-brand-400' :
                     msg.type === 'warn' ? 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-400' :
                     'bg-red-500/10 border border-red-500/20 text-red-400'}`}>
-                  {msg.type === 'ok' ? '✓' : msg.type === 'warn' ? '⚠' : '✗'} {msg.text}
+                  <span className="inline-flex items-center gap-1.5">
+                    {msg.type === 'ok' ? <CheckCircle2 size={16} /> : msg.type === 'warn' ? <AlertTriangle size={16} /> : <XCircle size={16} />}
+                    {msg.text}
+                  </span>
                 </div>
               )}
             </div>

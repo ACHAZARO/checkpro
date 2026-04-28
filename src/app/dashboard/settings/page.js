@@ -11,6 +11,10 @@ import { DAYS, DAY_L, DAY_FL, LFT_VACATION_TABLE } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import HelpCenter from '@/components/HelpCenter'
 import { useTheme } from '@/lib/ThemeContext'
+import {
+  Trash2, Building2, MapPin, Users, Calendar, Umbrella,
+  AlertTriangle, Sun, Radio
+} from 'lucide-react'
 
 const DEFAULT_LEYENDA = 'Al firmar el presente comprobante de nómina, el trabajador acepta que los montos, horas trabajadas e incidencias registradas son correctos y conformes a su contrato laboral. Cualquier aclaración deberá presentarse por escrito en un plazo máximo de 5 días hábiles. Documento confidencial de uso interno.'
 const FALLBACK_URL = 'https://checkpro-self.vercel.app'
@@ -123,7 +127,7 @@ export default function SettingsPage() {
           ? <TenantIdentityTab tenant={tenant} onSaved={async () => { await load() }} />
           : (
             <div className="card text-center py-8">
-              <div className="text-3xl mb-2">⚠️</div>
+              <div className="flex justify-center mb-2"><AlertTriangle size={32} className="text-red-400" /></div>
               <p className="text-sm text-red-400 font-bold mb-1">No se pudo cargar la empresa</p>
               <p className="text-xs text-gray-500 font-mono mb-4">
                 La empresa vinculada a tu cuenta no esta disponible. Puedes crear una nueva o reintentar.
@@ -171,7 +175,7 @@ export default function SettingsPage() {
                     : 'border-transparent bg-dark-700 opacity-60'
                 }`}
               >
-                <span className="text-2xl">☀️</span>
+                <Sun size={24} />
                 <span className="text-sm font-bold" style={{ color: 'var(--cp-text)' }}>Claro</span>
                 <span className="text-xs font-mono" style={{ color: 'var(--cp-text-muted)' }}>Predeterminado</span>
               </button>
@@ -543,7 +547,7 @@ function DangerZone({ tenantName: fallbackName }) {
             onClick={e => e.stopPropagation()}
           >
             <div>
-              <h3 className="text-lg font-extrabold text-red-400">⚠️ Eliminar cuenta</h3>
+              <h3 className="text-lg font-extrabold text-red-400 flex items-center gap-2"><AlertTriangle size={18} /> Eliminar cuenta</h3>
               <p className="text-xs text-gray-500 font-mono mt-0.5">ESTA ACCIÓN ES PERMANENTE E IRREVERSIBLE</p>
             </div>
 
@@ -553,12 +557,12 @@ function DangerZone({ tenantName: fallbackName }) {
               <>
                 <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-xs space-y-1.5">
                   <p className="text-red-400 font-bold mb-1">Se borrará permanentemente:</p>
-                  <p className="text-gray-300">🏢 La empresa <span className="text-white font-bold">{preview.tenant_name || '(sin nombre)'}</span></p>
-                  <p className="text-gray-300">📍 <span className="text-white font-bold">{preview.counts.branches}</span> sucursal(es)</p>
-                  <p className="text-gray-300">👥 <span className="text-white font-bold">{preview.counts.employees}</span> empleado(s)</p>
-                  <p className="text-gray-300">📅 <span className="text-white font-bold">{preview.counts.shifts}</span> turno(s)</p>
+                  <p className="text-gray-300 flex items-center gap-1"><Building2 size={16} /> La empresa <span className="text-white font-bold">{preview.tenant_name || '(sin nombre)'}</span></p>
+                  <p className="text-gray-300 flex items-center gap-1"><MapPin size={16} /> <span className="text-white font-bold">{preview.counts.branches}</span> sucursal(es)</p>
+                  <p className="text-gray-300 flex items-center gap-1"><Users size={16} /> <span className="text-white font-bold">{preview.counts.employees}</span> empleado(s)</p>
+                  <p className="text-gray-300 flex items-center gap-1"><Calendar size={16} /> <span className="text-white font-bold">{preview.counts.shifts}</span> turno(s)</p>
                   <p className="text-gray-300">🧾 <span className="text-white font-bold">{preview.counts.cuts}</span> corte(s) de nómina</p>
-                  <p className="text-gray-300">🏖️ <span className="text-white font-bold">{preview.counts.vacations}</span> periodo(s) de vacaciones</p>
+                  <p className="text-gray-300 flex items-center gap-1"><Umbrella size={16} /> <span className="text-white font-bold">{preview.counts.vacations}</span> periodo(s) de vacaciones</p>
                   <p className="text-gray-300">📋 <span className="text-white font-bold">{preview.counts.audits}</span> registro(s) de bitácora</p>
                   <p className="text-gray-300">🔑 <span className="text-white font-bold">{preview.counts.profiles}</span> cuenta(s) de admin/gerente</p>
                   <p className="text-orange-400 pt-1.5 border-t border-red-500/20 mt-1.5">
@@ -669,7 +673,7 @@ function BranchesTab({ branches, isOwner, myBranchId, onOpen, onChanged }) {
     <div className="space-y-3">
       {visible.length === 0 && (
         <div className="card text-center py-8 text-gray-400 text-sm font-mono">
-          <div className="text-3xl mb-2">🏢</div>
+          <div className="flex justify-center mb-2"><Building2 size={32} className="text-gray-400" /></div>
           {isOwner ? 'Aún no hay sucursales. Crea la primera abajo.' : 'No tienes sucursal asignada.'}
         </div>
       )}
@@ -690,7 +694,7 @@ function BranchesTab({ branches, isOwner, myBranchId, onOpen, onChanged }) {
             </button>
             {isOwner && visible.length > 1 && (
               <button onClick={() => deleteBranch(b.id, b.name)}
-                className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg" title="Eliminar">🗑</button>
+                className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg" title="Eliminar"><Trash2 size={14} aria-label="Eliminar" /></button>
             )}
           </div>
         </div>
@@ -744,7 +748,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
         FL('lat', +latitude.toFixed(6))
         FL('lng', +longitude.toFixed(6))
         setLocating(false)
-        toast.success(`📍 Ubicación capturada (precisión ±${Math.round(accuracy)}m)`)
+        toast.success(`Ubicación capturada (precisión ±${Math.round(accuracy)}m)`)
       },
       err => {
         setLocating(false)
@@ -819,7 +823,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
           <input className="input text-2xl font-extrabold bg-transparent border-0 border-b border-dark-border rounded-none px-0 focus:border-brand-400"
             value={name} onChange={e => setName(e.target.value)} />
         ) : (
-          <h1 className="page-title">{branch.name}</h1>
+          <h1 className="page-title break-words">{branch.name}</h1>
         )}
         <p className="text-gray-500 text-xs font-mono mt-0.5">CONFIGURACIÓN DE ESTA SUCURSAL</p>
       </div>
@@ -876,7 +880,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
 
         <button onClick={captureLocation} disabled={locating}
           className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40">
-          {locating ? '📡 Obteniendo...' : '📍 Usar mi ubicación actual'}
+          {locating ? <><Radio size={14} className="inline mr-1" />Obteniendo...</> : <><MapPin size={14} className="inline mr-1" />Usar mi ubicación actual</>}
         </button>
         <p className="text-[10px] text-gray-400 font-mono -mt-2">
           Párate en el punto exacto de la sucursal y toca el botón. Tu navegador pedirá permiso.
@@ -955,7 +959,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
         {(cfg.holidays || []).map(h => (
           <div key={h.id} className="flex items-center justify-between py-2 border-b border-dark-border last:border-0">
             <div><div className="font-semibold text-sm text-white">{h.name}</div><div className="text-xs text-gray-500 font-mono">{h.date} · ×3</div></div>
-            <button onClick={() => removeHoliday(h.id)} className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg">🗑</button>
+            <button onClick={() => removeHoliday(h.id)} className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg"><Trash2 size={14} aria-label="Eliminar" /></button>
           </div>
         ))}
         <div className="grid grid-cols-2 gap-2 mt-3">
@@ -972,7 +976,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
         {(cfg.restDays || []).map(r => (
           <div key={r.id} className="flex items-center justify-between py-2 border-b border-dark-border last:border-0">
             <div><div className="font-semibold text-sm text-white">{r.name}</div><div className="text-xs text-gray-500 font-mono">{r.date}</div></div>
-            <button onClick={() => removeRestDay(r.id)} className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg">🗑</button>
+            <button onClick={() => removeRestDay(r.id)} className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg"><Trash2 size={14} aria-label="Eliminar" /></button>
           </div>
         ))}
         <div className="grid grid-cols-2 gap-2 mt-3">
@@ -992,7 +996,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
               : <p className="text-[10px] text-gray-400">Sin IP registrada — solo GPS</p>}
           </div>
           <button onClick={detectIp} className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600">
-            {cfg.ip ? '↻ Actualizar' : '📡 Detectar'}
+            {cfg.ip ? '↻ Actualizar' : <><Radio size={14} className="inline mr-1" />Detectar</>}
           </button>
         </div>
         <p className="text-[9px] text-gray-400 font-mono mt-2">Toca "Detectar" mientras estés conectado al WiFi de esta sucursal.</p>
@@ -1114,7 +1118,7 @@ function TeamTab({ branches, onChanged }) {
                 </div>
               </div>
               {!i.accepted_at && (
-                <button onClick={() => cancel(i.id)} className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg">🗑</button>
+                <button onClick={() => cancel(i.id)} className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg"><Trash2 size={14} aria-label="Eliminar" /></button>
               )}
             </div>
           )

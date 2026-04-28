@@ -13,7 +13,7 @@ import { ConfirmSheet } from '@/components/ConfirmSheet'
 // Carga masiva (feat/bulk-employees-upload): modal de 3 pasos con plantilla + preview
 import BulkUploadModal from '@/components/BulkUploadModal'
 import { generateAllEmployeesBySheetXLSX } from '@/lib/export-xlsx'
-import { Upload, Plus, Download, Users, Building2, Calendar, Pencil, Trash2, AlertTriangle } from 'lucide-react'
+import { Upload, Plus, Download, Users, Building2, Calendar, Pencil, Trash2, AlertTriangle, Shuffle, Unlock } from 'lucide-react'
 
 const DEF_BASE = { start: '09:00', end: '18:00' }
 
@@ -451,8 +451,8 @@ export default function EmployeesPage() {
                       <span className="font-bold text-sm text-white break-words">{emp.name}</span>
                       <span className="text-xs font-mono text-gray-400">{emp.employee_code}</span>
                       {emp.can_manage && <span className="badge-orange text-[9px]">Gerente</span>}
-                      {emp.is_mixed && <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-purple-500/15 border border-purple-400/30 text-purple-300 whitespace-nowrap">🔀 Mixto</span>}
-                      {emp.free_schedule && <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-orange-500/15 border border-orange-400/30 text-orange-300 whitespace-nowrap">🔓 Libre</span>}
+                      {emp.is_mixed && <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-purple-500/15 border border-purple-400/30 text-purple-300 whitespace-nowrap flex items-center gap-1"><Shuffle size={10} /> Mixto</span>}
+                      {emp.free_schedule && <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-orange-500/15 border border-orange-400/30 text-orange-300 whitespace-nowrap flex items-center gap-1"><Unlock size={10} /> Libre</span>}
                       {emp.status === 'inactive' && <span className="badge-gray text-[9px]">Inactivo</span>}
                     </div>
                     <div className="text-xs text-gray-400 mt-0.5">
@@ -743,21 +743,21 @@ export default function EmployeesPage() {
                     const s = form.schedule?.[day] || { work: false, start: base.start, end: base.end, custom: false }
                     return (
                       <div key={day} className="mb-2">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <button onClick={() => toggleDay(day)}
                             className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${s.work ? 'bg-brand-400' : 'bg-dark-600'}`}>
                             <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${s.work ? 'left-5' : 'left-0.5'}`} />
                           </button>
-                          <span className={`font-mono text-xs w-7 font-bold ${s.work ? 'text-white' : 'text-gray-600'}`}>{DAY_L[day]}</span>
+                          <span className={`font-mono text-xs min-w-[2.5rem] font-bold ${s.work ? 'text-white' : 'text-gray-600'}`}>{DAY_L[day]}</span>
 
                           {s.work ? (
                             <>
                               {s.custom ? (
                                 <>
-                                  <input type="time" className="input py-1 px-2 text-xs flex-1 font-mono"
+                                  <input type="time" className="input py-1 px-2 text-xs flex-1 font-mono min-w-[90px]"
                                     value={s.start} onChange={e => setDayTime(day, 'start', e.target.value)} />
                                   <span className="text-gray-600 text-[10px]">–</span>
-                                  <input type="time" className="input py-1 px-2 text-xs flex-1 font-mono"
+                                  <input type="time" className="input py-1 px-2 text-xs flex-1 font-mono min-w-[90px]"
                                     value={s.end} onChange={e => setDayTime(day, 'end', e.target.value)} />
                                 </>
                               ) : (
