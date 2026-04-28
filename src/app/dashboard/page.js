@@ -409,7 +409,7 @@ export default function DashboardPage() {
                   ? 'text-yellow-300'
                   : 'text-gray-400'
                 const text = d === 0
-                  ? `🎉 Hoy cumple ${e.name}`
+                  ? `Hoy cumple ${e.name}`
                   : d === 1
                   ? `Mañana cumple ${e.name}`
                   : `${e.name} en ${d} días`

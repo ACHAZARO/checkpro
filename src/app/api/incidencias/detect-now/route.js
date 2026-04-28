@@ -4,9 +4,8 @@
 // Scoped a un solo tenant (el del usuario autenticado).
 // Combina la lógica de detect-absences + detect-shifts para el día actual.
 import { NextResponse } from 'next/server'
-import { createServiceClient, createClient } from '@/lib/supabase'
+import { createServiceClient } from '@/lib/supabase'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
-import { cookies } from 'next/headers'
 
 const TZ = process.env.APP_TIMEZONE || 'America/Mexico_City'
 const DAY_MAP = { mon: 'lun', tue: 'mar', wed: 'mie', thu: 'jue', fri: 'vie', sat: 'sab', sun: 'dom' }
@@ -38,25 +37,25 @@ function expectedExitUtc(shift, employee, plansMap, targetDate, targetDayKey) {
 }
 
 export async function POST(req) {
-  // Auth: validar sesión del dashboard
-  const supabaseUser = createClient()
-  const { data: { session } } = await supabaseUser.auth.getSession()
-  if (!session) {
-    return NextResponse.json({ error: 'No autenticado' }, { status: 401 })
-  }
-  const { data: profile } = await supabaseUser
+  // Auth: verificar JWT del usuario vía Bearer token (browser client no funciona server-side)
+  const admin = createServiceClient()
+  const authHeader = req.headers.get('authorization') || ''
+  const jwt = authHeader.replace('Bearer ', '').trim()
+  if (!jwt) return NextResponse.json({ error: 'No autenticado' }, { status: 401 })
+
+  const { data: { user }, error: authErr } = await admin.auth.getUser(jwt)
+  if (authErr || !user) return NextResponse.json({ error: 'Token inválido' }, { status: 401 })
+
+  const { data: profile } = await admin
     .from('profiles')
     .select('tenant_id, role')
-    .eq('id', session.user.id)
+    .eq('id', user.id)
     .single()
-  if (!profile?.tenant_id) {
-    return NextResponse.json({ error: 'Sin tenant' }, { status: 403 })
-  }
+  if (!profile?.tenant_id) return NextResponse.json({ error: 'Sin tenant' }, { status: 403 })
   if (!['admin', 'manager', 'superadmin'].includes(profile.role)) {
     return NextResponse.json({ error: 'Sin permisos' }, { status: 403 })
   }
 
-  const admin = createServiceClient()
   const tenantId = profile.tenant_id
   const now = new Date()
   const targetDate = isoDateInTz(now, TZ)

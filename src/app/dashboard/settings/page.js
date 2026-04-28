@@ -886,7 +886,7 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
           Párate en el punto exacto de la sucursal y toca el botón. Tu navegador pedirá permiso.
         </p>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <div>
             <label className="label">Latitud</label>
             <input className="input" type="number" step="any" value={cfg.location?.lat || ''} onChange={e => FL('lat', parseFloat(e.target.value) || 0)} />

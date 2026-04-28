@@ -164,7 +164,12 @@ export default function IncidenciasPage() {
   async function detectNow() {
     setDetecting(true)
     try {
-      const res = await fetch('/api/incidencias/detect-now', { method: 'POST' })
+      const supabase = createClient()
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/incidencias/detect-now', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${session?.access_token || ''}` },
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Error desconocido')
       if (data.total === 0) {

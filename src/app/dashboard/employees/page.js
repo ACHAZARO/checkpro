@@ -293,7 +293,7 @@ export default function EmployeesPage() {
         if (body.backfill_warning) {
           toast(
             body.backfill_warning,
-            { icon: '⚠️', duration: 10000, style: { background: '#422', color: '#fc0', maxWidth: 500 } }
+            { duration: 10000, style: { background: '#422', color: '#fc0', maxWidth: 500 } }
           )
         }
       } else {
