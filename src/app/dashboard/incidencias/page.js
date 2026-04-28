@@ -118,6 +118,16 @@ export default function IncidenciasPage() {
   // Creación manual
   const [showNew, setShowNew] = useState(false)
   const [employees, setEmployees] = useState([])
+
+  // Body scroll lock — igual que BottomSheet.js, evita que el fondo se mueva en móvil
+  useEffect(() => {
+    if (detail || showNew) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+    return () => { document.body.style.overflow = '' }
+  }, [detail, showNew])
   const [newForm, setNewForm] = useState({ employee_id: '', date_str: '', kind: 'falta', description: '' })
 
   const load = useCallback(async () => {
@@ -399,7 +409,7 @@ export default function IncidenciasPage() {
           <button
             onClick={detectNow}
             disabled={detecting}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-dark-700 border border-dark-border text-gray-200 font-semibold rounded-lg text-xs active:brightness-90 disabled:opacity-50 hover:border-brand-400/50 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-brand-400/10 border border-brand-400/40 text-brand-400 font-semibold rounded-lg text-xs active:brightness-90 disabled:opacity-50 hover:bg-brand-400/20 transition-colors"
           >
             <RefreshCw size={13} className={detecting ? 'animate-spin' : ''} />
             {detecting ? 'Detectando...' : 'Detectar ahora'}
@@ -489,7 +499,7 @@ export default function IncidenciasPage() {
               </button>
             </div>
 
-            <div className="px-5 pb-4 overflow-y-auto flex-1" style={{ touchAction: 'pan-y' }}>
+            <div className="px-5 pb-4 overflow-y-auto overscroll-contain flex-1" style={{ touchAction: 'pan-y' }}>
               {detail.description && (
                 <div className="text-gray-300 text-sm mb-3 bg-dark-700 p-3 rounded-lg">
                   {/* Enlace a Google Maps si viene en la descripción */}
@@ -588,7 +598,7 @@ export default function IncidenciasPage() {
                 <X size={18} />
               </button>
             </div>
-            <div className="px-5 pb-4 overflow-y-auto flex-1 space-y-3" style={{ touchAction: 'pan-y' }}>
+            <div className="px-5 pb-4 overflow-y-auto overscroll-contain flex-1 space-y-3" style={{ touchAction: 'pan-y' }}>
               <div>
                 <label className="label">Empleado</label>
                 <select className="input text-sm"

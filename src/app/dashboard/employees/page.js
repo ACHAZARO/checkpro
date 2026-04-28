@@ -13,7 +13,7 @@ import { ConfirmSheet } from '@/components/ConfirmSheet'
 // Carga masiva (feat/bulk-employees-upload): modal de 3 pasos con plantilla + preview
 import BulkUploadModal from '@/components/BulkUploadModal'
 import { generateAllEmployeesBySheetXLSX } from '@/lib/export-xlsx'
-import { Upload, Plus, Download, Users, Building2, Calendar, Pencil, Trash2, AlertTriangle, Shuffle, Unlock } from 'lucide-react'
+import { Upload, Plus, Download, Users, Building2, Calendar, Pencil, Trash2, AlertTriangle, Shuffle, Unlock, Eye } from 'lucide-react'
 
 const DEF_BASE = { start: '09:00', end: '18:00' }
 
@@ -487,7 +487,7 @@ export default function EmployeesPage() {
                   <div className="flex flex-col gap-1.5 shrink-0">
                     <Link href={`/dashboard/employees/${emp.id}`}
                       className="p-2 bg-brand-400/10 border border-brand-400/30 rounded-lg text-brand-400 active:bg-brand-400/20 text-xs text-center"
-                      title="Ver detalle">👁</Link>
+                      title="Ver detalle"><Eye size={12} /></Link>
                     <button onClick={() => openEdit(emp)}
                       className="p-2 bg-dark-700 border border-dark-border rounded-lg text-gray-400 active:bg-dark-600 text-xs"><Pencil size={12} /></button>
                     <button onClick={() => deactivate(emp)}
