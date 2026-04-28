@@ -39,6 +39,11 @@ function fmtMoney(n) {
   return v.toLocaleString('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 })
 }
 
+function fmtHours(n) {
+  const v = Number(n) || 0
+  return v.toFixed(1) + 'h'
+}
+
 function todayISO() {
   const d = new Date()
   const y = d.getFullYear()
@@ -121,6 +126,8 @@ export default function EmployeeDetailPage() {
   const [confirmState, setConfirmState] = useState(null) // BUG P: reemplaza confirm()
   // Export de asistencia individual
   const [exportOpen, setExportOpen] = useState(false)
+  const [attendanceSummary, setAttendanceSummary] = useState(null)
+  const [attendanceLoading, setAttendanceLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [expFrom, setExpFrom] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 30)
@@ -156,6 +163,16 @@ export default function EmployeeDetailPage() {
   }, [employeeId])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!employeeId) return
+    setAttendanceLoading(true)
+    fetch('/api/employees/' + employeeId + '/attendance-summary?days=365', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(j => { if (j.ok) setAttendanceSummary(j) })
+      .catch(() => {})
+      .finally(() => setAttendanceLoading(false))
+  }, [employeeId])
 
   async function doExport(mode = 'range') {
     const isFull = mode === 'full'
@@ -527,7 +544,7 @@ export default function EmployeeDetailPage() {
   const compMonto = compDays * dr * 2 // doble pago según spec
 
   return (
-    <div className="p-5 md:p-6 max-w-3xl mx-auto">
+    <div className="p-5 md:p-6 max-w-3xl mx-auto" aria-busy={attendanceLoading}>
       {/* Back + título */}
       <div className="mb-4 flex items-center justify-between">
         <Link href="/dashboard/employees" className="text-brand-400 text-xs font-mono active:brightness-90">← Empleados</Link>
@@ -654,6 +671,92 @@ export default function EmployeeDetailPage() {
           </button>
         </div>
       </div>
+
+      {attendanceSummary && (
+        <div className="mb-4">
+          {(attendanceSummary.counts?.falta_injustificada || 0) >= 3 && (
+            <div className="mb-3 px-3 py-3 bg-red-600/15 border border-red-600/30 rounded-xl">
+              <p className="text-red-400 text-sm font-bold mb-1 flex items-center gap-1.5">
+                <AlertTriangle size={14} /> Art. 47 LFT -- Causal de despido
+              </p>
+              <p className="text-red-400/80 text-xs font-mono">
+                {attendanceSummary.counts?.falta_injustificada || 0} faltas injustificadas en 12 meses; posible rescision sin responsabilidad.
+              </p>
+            </div>
+          )}
+          <div className="card">
+            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Comportamiento disciplinario (12 meses)</p>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="card-sm">
+                <p className="text-xl font-extrabold text-red-400 leading-none">{attendanceSummary.counts?.falta_injustificada || 0}</p>
+                <p className="text-[9px] text-gray-400 font-mono mt-0.5 leading-tight">Faltas injust.</p>
+              </div>
+              <div className="card-sm">
+                <p className="text-xl font-extrabold text-yellow-400 leading-none">
+                  {(attendanceSummary.counts?.falta_justificada_pagada || 0) + (attendanceSummary.counts?.falta_justificada_no_pagada || 0)}
+                </p>
+                <p className="text-[9px] text-gray-400 font-mono mt-0.5 leading-tight">Faltas just.</p>
+              </div>
+              <div className="card-sm">
+                <p className="text-xl font-extrabold text-orange-400 leading-none">{attendanceSummary.counts?.retardo || 0}</p>
+                <p className="text-[9px] text-gray-400 font-mono mt-0.5 leading-tight">Retardos</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {attendanceSummary && (
+        <div className="card mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-sm font-bold text-white">Historial de asistencia</h2>
+              <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">ultimos 12 meses</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <div className="card-sm">
+              <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider mb-1">Esta semana</p>
+              <p className="text-lg font-extrabold text-white">{attendanceSummary.currentWeek?.diasTrabajados || 0} dias</p>
+              <p className="text-[11px] text-gray-400 font-mono mt-0.5">
+                {fmtHours(attendanceSummary.currentWeek?.totalH)} / {fmtMoney(attendanceSummary.currentWeek?.grossPay)}
+              </p>
+            </div>
+            <div className="card-sm">
+              <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider mb-1">Dias trabajados (12m)</p>
+              <p className="text-lg font-extrabold text-white">{attendanceSummary.counts?.dias_trabajados || 0}</p>
+              <p className="text-[11px] text-gray-400 font-mono mt-0.5">
+                {attendanceSummary.counts?.puntual || 0} puntuales / {attendanceSummary.counts?.tolerancia || 0} tolerancia
+              </p>
+            </div>
+          </div>
+          {attendanceSummary.recentShifts?.length > 0 && (
+            <div className="space-y-2">
+              {attendanceSummary.recentShifts.slice(0, 5).map(s => {
+                const t = s.classification?.type || s.classification_type || s.status || 'sin_clasificar'
+                const badgeClass = t === 'puntual'
+                  ? 'badge-green'
+                  : t === 'tolerancia' || t === 'retardo'
+                  ? 'badge-orange'
+                  : String(t).startsWith('falta')
+                  ? 'badge-red'
+                  : t === 'open'
+                  ? 'badge-blue'
+                  : 'badge-gray'
+                return (
+                  <div key={s.id || s.date_str} className="flex items-center justify-between py-2 border-b border-dark-border last:border-0">
+                    <div>
+                      <div className="text-sm text-white font-mono">{s.date_str || '-'}</div>
+                      <div className="text-xs text-gray-400 font-mono">{s.entry_time ? String(s.entry_time).slice(0, 5) : '-'}</div>
+                    </div>
+                    <span className={badgeClass}>{String(t).replaceAll('_', ' ')}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Histórico ─────────────────────────────────────────────────────── */}
       <div className="card">

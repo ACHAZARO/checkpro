@@ -137,6 +137,7 @@ export default function DashboardPage() {
   const [vacActive, setVacActive] = useState({ loading: true, items: [], error: null })
   const [vacExpired, setVacExpired] = useState({ loading: true, items: [], error: null })
   const [reactivating, setReactivating] = useState(null)
+  const [ranking, setRanking] = useState({ loading: true, items: [], error: null })
 
   const now = new Date()
 
@@ -246,9 +247,23 @@ export default function DashboardPage() {
     }
   }, [])
 
+  const fetchRanking = useCallback(async () => {
+    setRanking(s => ({ ...s, loading: true, error: null }))
+    try {
+      const now = new Date()
+      const month = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0')
+      const r = await fetch('/api/employees/ranking?month=' + month, { cache: 'no-store' })
+      const j = await r.json()
+      if (!r.ok || !j.ok) throw new Error(j.error || 'HTTP ' + r.status)
+      setRanking({ loading: false, items: j.ranking || [], error: null })
+    } catch (e) {
+      setRanking({ loading: false, items: [], error: e.message || 'error' })
+    }
+  }, [])
+
   useEffect(() => {
-    Promise.all([fetchUpcoming(), fetchActive(), fetchExpired()])
-  }, [fetchUpcoming, fetchActive, fetchExpired])
+    Promise.all([fetchUpcoming(), fetchActive(), fetchExpired(), fetchRanking()])
+  }, [fetchUpcoming, fetchActive, fetchExpired, fetchRanking])
 
   async function reactivatePeriod(id) {
     setReactivating(id)
@@ -306,7 +321,7 @@ export default function DashboardPage() {
 
       {incidents.length > 0 && (
         <DismissibleBanner alertKey={`${tenantId}:incidents:${incidents.length}`} className="mb-3">
-          <Link href="/dashboard/incidencias" className="flex items-center gap-3 pl-4 pr-10 py-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm font-semibold">
+          <Link href="/dashboard/incidencias?status=open" className="flex items-center gap-3 pl-4 pr-10 py-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm font-semibold">
             <AlertTriangle size={16} /> {incidents.length} incidencia{incidents.length !== 1 ? 's' : ''} sin resolver — toca para revisar →
           </Link>
         </DismissibleBanner>
@@ -324,7 +339,9 @@ export default function DashboardPage() {
               const n = countGraveIncidents(graveShifts, e.id)
               return (
                 <div key={e.id} className="text-red-400/80 text-xs font-mono">
-                  {e.name} — {n} faltas injustificadas (posible causal de despido)
+                  <Link href={`/dashboard/employees/${e.id}`} className="underline font-bold">
+                    {e.name}
+                  </Link> — {n} faltas injustificadas (posible causal de despido)
                 </div>
               )
             })}
@@ -539,6 +556,45 @@ export default function DashboardPage() {
 
       </div>
       {/* ---------- /VACATIONS WIDGETS ---------- */}
+
+      {ranking.loading ? (
+        <div className="mb-5">
+          <WidgetSkeleton title="Ranking del mes" />
+        </div>
+      ) : ranking.error ? (
+        <div className="mb-5">
+          <WidgetError title="Ranking del mes" onRetry={fetchRanking} />
+        </div>
+      ) : ranking.items.length > 0 && (
+        <div className="card mb-5">
+          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Award size={12} /> Ranking del mes</p>
+          <div className="space-y-2">
+            {ranking.items.map((item, index) => {
+              const medalClass = index === 0
+                ? 'text-yellow-400'
+                : index === 1
+                ? 'text-gray-300'
+                : index === 2
+                ? 'text-orange-400'
+                : 'text-gray-500'
+              return (
+                <div key={item.employee_id || item.name} className="flex items-center justify-between gap-3 px-3 py-2 border rounded-lg bg-dark-700 border-dark-border">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`text-lg font-extrabold font-mono w-6 text-center shrink-0 ${medalClass}`}>{index + 1}</div>
+                    <div className="min-w-0">
+                      <div className="text-sm text-white font-semibold truncate">{item.name}</div>
+                      <div className="text-[11px] text-gray-400 font-mono mt-0.5">
+                        {item.puntual || 0}p / {item.tolerancia || 0}t / {item.retardo || 0}r / {item.dias_trabajados || 0}d
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-sm font-extrabold text-brand-400 font-mono">{item.score || 0}</div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Active shifts */}
       {activeNow.length > 0 && (

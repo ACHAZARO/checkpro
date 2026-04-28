@@ -51,6 +51,7 @@ export default function EmployeesPage() {
   const [vacTable, setVacTable] = useState(null) // custom vacation table from config
   // FIX 8: periodos vivos por empleado, usados por hasVacationPending().
   const [vacPeriods, setVacPeriods] = useState([])
+  const [openIncSet, setOpenIncSet] = useState(new Set())
   const [loading, setLoading] = useState(true)
   const [tenantId, setTenantId] = useState(null)
   // feat/mixed-schedule: leer config.mixedSchedule del tenant para permitir/denegar mixto.
@@ -160,7 +161,7 @@ export default function EmployeesPage() {
     setTenantId(prof.tenant_id)
     // FIX 8: cargar también vacation_periods vivos para poder evaluar
     // hasVacationPending contra la tabla real (no contra el array legacy).
-    const [{ data: empData }, { data: tenantData }, { data: branchData }, { data: vpData }] = await Promise.all([
+    const [{ data: empData }, { data: tenantData }, { data: branchData }, { data: vpData }, { data: openInc }] = await Promise.all([
       supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).neq('status', 'deleted').order('employee_code'),
       supabase.from('tenants').select('config').eq('id', prof.tenant_id).single(),
       // FIX: leer sucursales de la tabla canonica (no del JSONB legacy)
@@ -170,8 +171,14 @@ export default function EmployeesPage() {
         .select('employee_id,anniversary_year,status,end_date')
         .eq('tenant_id', prof.tenant_id)
         .in('status', ['pending', 'postponed', 'active', 'completed', 'approved']),
+      supabase
+        .from('incidencias')
+        .select('employee_id')
+        .eq('tenant_id', prof.tenant_id)
+        .eq('status', 'open'),
     ])
     setEmps(empData || [])
+    setOpenIncSet(new Set((openInc || []).map(r => r.employee_id)))
     // FIX: preferir tabla branches; si vacia fallback al array legacy por si algun tenant viejo no migro
     setBranches((branchData && branchData.length > 0) ? branchData : (tenantData?.config?.branches || []))
     setVacTable(tenantData?.config?.vacationTable || tenantData?.config?.vacation_table || null)
@@ -443,9 +450,14 @@ export default function EmployeesPage() {
             return (
               <div key={emp.id} className="card">
                 <div className="flex items-start gap-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold font-mono shrink-0
-                    ${emp.can_manage ? 'bg-orange-500/10 text-orange-400 border border-orange-400/20' : 'bg-brand-400/10 text-brand-400 border border-brand-400/20'}`}>
-                    {emp.name.split(' ').slice(0, 2).map(w => w[0]).join('')}
+                  <div className="relative shrink-0">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold font-mono
+                      ${emp.can_manage ? 'bg-orange-500/10 text-orange-400 border border-orange-400/20' : 'bg-brand-400/10 text-brand-400 border border-brand-400/20'}`}>
+                      {emp.name.split(' ').slice(0, 2).map(w => w[0]).join('')}
+                    </div>
+                    {openIncSet.has(emp.id) && (
+                      <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-[var(--cp-bg)]" />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">

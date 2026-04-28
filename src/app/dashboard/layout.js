@@ -7,14 +7,13 @@ import { createClient } from '@/lib/supabase'
 import { useTheme } from '@/lib/ThemeContext'
 import toast from 'react-hot-toast'
 import {
-  Home, Users, CalendarCheck, ClipboardList, AlertTriangle,
+  Home, Users, ClipboardList, AlertTriangle,
   DollarSign, Settings as SettingsIcon, MapPin, Wrench, LogOut,
 } from 'lucide-react'
 
 const NAV = [
   { href: '/dashboard',              label: 'Hoy',          shortLabel: 'Hoy',     Icon: Home },
   { href: '/dashboard/employees',    label: 'Personal',     shortLabel: 'Equipo',  Icon: Users },
-  { href: '/dashboard/attendance',   label: 'Registros',    shortLabel: 'Asist.',  Icon: CalendarCheck },
   { href: '/dashboard/planning',     label: 'Planificador', shortLabel: 'Plan',    Icon: ClipboardList, mixedOnly: true },
   { href: '/dashboard/incidencias',  label: 'Incidencias',  shortLabel: 'Alertas', Icon: AlertTriangle },
   { href: '/dashboard/payroll',      label: 'Nómina',       shortLabel: 'Nómina',  Icon: DollarSign },

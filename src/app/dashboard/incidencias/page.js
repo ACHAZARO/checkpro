@@ -1,7 +1,7 @@
 'use client'
 // src/app/dashboard/incidencias/page.js
 import { useState, useEffect, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { scheduledExitDate } from '@/lib/utils'
 import { fromZonedTime } from 'date-fns-tz'
@@ -118,6 +118,8 @@ export default function IncidenciasPage() {
   // Creación manual
   const [showNew, setShowNew] = useState(false)
   const [employees, setEmployees] = useState([])
+  const [empFilter, setEmpFilter] = useState('')
+  const searchParams = useSearchParams()
 
   // Body scroll lock — igual que BottomSheet.js, evita que el fondo se mueva en móvil
   useEffect(() => {
@@ -164,6 +166,13 @@ export default function IncidenciasPage() {
   }, [router, filter])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    const empId = searchParams.get('employee_id')
+    const status = searchParams.get('status')
+    if (status === 'open') setFilter('open')
+    if (empId) setEmpFilter(empId)
+  }, [searchParams])
 
   function openDetail(inc) {
     setDetail(inc)
@@ -394,6 +403,13 @@ export default function IncidenciasPage() {
 
   const openCount = incidencias.filter(i => i.status === 'open').length
   const opts = detail ? RESOLUTION_OPTIONS[detail.kind] : null
+  const filteredIncidencias = empFilter
+    ? incidencias.filter(inc => inc.employee_id === empFilter)
+    : incidencias
+  const filteredEmployeeName =
+    filteredIncidencias[0]?.employee_name ||
+    employees.find(e => e.id === empFilter)?.name ||
+    'Empleado'
 
   return (
     <div className="p-5 md:p-6 max-w-5xl mx-auto">
@@ -445,7 +461,20 @@ export default function IncidenciasPage() {
         ))}
       </div>
 
-      {incidencias.length === 0 ? (
+      {empFilter && (
+        <div className="mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-dark-700 border border-dark-border text-xs text-gray-200">
+          <span>Filtrando: {filteredEmployeeName}</span>
+          <button
+            onClick={() => setEmpFilter('')}
+            className="text-gray-400 hover:text-white"
+            aria-label="Limpiar filtro de empleado"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
+      {filteredIncidencias.length === 0 ? (
         <div className="card text-center py-10">
           <div className="flex justify-center mb-3 text-gray-400">
             {filter === 'open' ? <CheckCircle2 size={40} /> : <Inbox size={40} />}
@@ -459,7 +488,7 @@ export default function IncidenciasPage() {
         </div>
       ) : (
         <div className="space-y-2">
-          {incidencias.map(inc => (
+          {filteredIncidencias.map(inc => (
             <div key={inc.id} className="card p-3 flex items-start gap-3 flex-wrap">
               <div className="flex-1 min-w-[200px]">
                 <div className="flex items-center gap-2 flex-wrap mb-1">
