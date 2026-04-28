@@ -520,7 +520,7 @@ export default function EmployeesPage() {
 
       {/* ── Bottom Sheet ────────────────────────────────────────────────────── */}
       {sheet && (
-        <div className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end">
+        <div className="fixed inset-0 bg-black/75 z-[60] flex flex-col justify-end">
           <div className="bg-dark-800 rounded-t-2xl overflow-y-auto overscroll-contain no-scrollbar"
             style={{ height: '90vh', touchAction: 'pan-y' }}>
             <div className="w-8 h-1 bg-dark-500 rounded-full mx-auto mt-3 mb-4" />
@@ -810,7 +810,7 @@ export default function EmployeesPage() {
 
       {/* Modal exportar auditoría — todos los empleados con pestaña por empleado */}
       {exportAllOpen && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden"
                style={{ maxHeight: '90dvh' }}>
             <div className="px-5 pt-4 pb-2 shrink-0">

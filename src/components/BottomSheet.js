@@ -84,7 +84,7 @@ export function BottomSheet({ open, onClose, title, children, footer }) {
 
   return (
     <div
-      className="fixed inset-0 bg-black/75 z-50 flex flex-col justify-end"
+      className="fixed inset-0 bg-black/75 z-[60] flex flex-col justify-end"
       onClick={onClose}
     >
       <div

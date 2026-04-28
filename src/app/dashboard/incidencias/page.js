@@ -484,7 +484,7 @@ export default function IncidenciasPage() {
 
       {/* Modal de resolución */}
       {detail && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center z-[60] p-0 sm:p-4">
           <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden"
                style={{ maxHeight: '90dvh' }}>
             <div className="px-5 pt-4 pb-2 flex items-start justify-between shrink-0">
@@ -589,7 +589,7 @@ export default function IncidenciasPage() {
 
       {/* Modal nueva incidencia */}
       {showNew && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center z-[60] p-0 sm:p-4">
           <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden"
                style={{ maxHeight: '90dvh' }}>
             <div className="px-5 pt-4 pb-2 flex items-start justify-between shrink-0">

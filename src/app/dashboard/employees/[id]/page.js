@@ -970,7 +970,7 @@ export default function EmployeeDetailPage() {
 
       {/* Modal exportar asistencia individual */}
       {exportOpen && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-dark-800 border border-dark-border w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden"
                style={{ maxHeight: '90dvh' }}>
             <div className="px-5 pt-4 pb-2 shrink-0">
