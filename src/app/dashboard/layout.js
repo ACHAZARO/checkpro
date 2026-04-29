@@ -30,13 +30,15 @@ export default function DashboardLayout({ children }) {
   const lastDetectRef = useRef(0)
   const { theme } = useTheme()
 
-  // Reemplaza al cron de Vercel: dispara deteccion automatica de incidencias en cada sesion.
+  // Reemplaza al cron de Vercel: dispara deteccion automatica de incidencias en tiempo real.
   // - Idempotente (insertIncidenciaOnce dedup por tenant+empleado+fecha+kind)
-  // - Throttle 15 min para soportar uso multiples veces al dia (ej. revisar turno tarde) sin spam.
+  // - Throttle 60s para evitar doble disparo en clicks rapidos consecutivos.
+  // - Se llama en cada cambio de ruta dentro del dashboard, asi cada vez que clickeas
+  //   una pestana (Hoy, Nomina, Incidencias, etc.) los datos quedan al dia.
   async function maybeDetectIncidencias(prof, accessToken) {
     if (!prof || !accessToken) return
     if (!['owner','admin','manager','super_admin'].includes(prof.role)) return
-    const THROTTLE_MS = 15 * 60 * 1000
+    const THROTTLE_MS = 60 * 1000
     const now = Date.now()
     if (now - lastDetectRef.current < THROTTLE_MS) return
     lastDetectRef.current = now
@@ -84,12 +86,21 @@ export default function DashboardLayout({ children }) {
       setTenant(ten)
       setBranches(branchData || [])
       setLoading(false)
-      maybeDetectIncidencias(prof, session.access_token)
     }
     load()
   }, [router])
 
-  // Re-disparar al volver al tab (ej. abre dashboard en la manana, vuelve en la tarde).
+  // Disparo en tiempo real: cada navegacion dentro de /dashboard llama detect-now.
+  // Cubre tambien el primer mount (cuando profile pasa de null a cargado).
+  useEffect(() => {
+    if (!profile) return
+    const supabase = createClient()
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.access_token) maybeDetectIncidencias(profile, session.access_token)
+    })
+  }, [pathname, profile])
+
+  // Respaldo: re-disparar al volver al tab (caso tab abierto sin navegar por horas).
   useEffect(() => {
     if (!profile) return
     function onVisibility() {
