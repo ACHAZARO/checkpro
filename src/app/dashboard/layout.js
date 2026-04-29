@@ -137,46 +137,69 @@ export default function DashboardLayout({ children }) {
 
   return (
     <div className="flex h-dvh overflow-hidden" style={{ backgroundColor: 'var(--cp-bg)' }}>
-      {/* Desktop sidebar */}
-      <aside data-sidebar className="hidden md:flex flex-col w-60 shrink-0 relative" style={{ background: 'linear-gradient(180deg, #0c0f15 0%, #101318 40%, #0e1117 100%)', borderRight: '1px solid #1f2636' }}>
+      {/* Desktop sidebar — respeta theme para no chocar con UI claro */}
+      <aside data-sidebar
+        className={`hidden md:flex flex-col w-60 shrink-0 relative border-r ${
+          theme === 'dark' ? 'border-dark-border' : 'border-gray-200'
+        }`}
+        style={{
+          background: theme === 'dark'
+            ? 'linear-gradient(180deg, #0c0f15 0%, #101318 40%, #0e1117 100%)'
+            : 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+        }}>
         <div className="absolute top-0 left-0 right-0 h-px" style={{ background: 'linear-gradient(90deg, transparent, rgba(61,255,160,0.25), transparent)' }} />
-        <div className="p-5 pb-4 border-b border-dark-border">
+        <div className={`p-5 pb-4 border-b ${theme === 'dark' ? 'border-dark-border' : 'border-gray-200'}`}>
           <div className="flex items-center gap-2">
             <img src="/logo-icon.svg" alt="CheckPro" className="w-7 h-7 shrink-0" style={{ filter: 'drop-shadow(0 4px 8px rgba(61,255,160,0.35))' }} />
             <div className="flex-1 min-w-0">
-              <div className="text-white font-bold text-[13px] leading-tight truncate" title={tenant?.name || tenant?.config?.branchName || '—'}>{tenant?.name || tenant?.config?.branchName || '—'}</div>
-              <div className="text-gray-400 text-[10px] font-mono tracking-wider uppercase mt-0.5 truncate" title={profile?.name}>{profile?.name}</div>
+              <div className={`font-bold text-[13px] leading-tight truncate ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`} title={tenant?.name || tenant?.config?.branchName || '—'}>{tenant?.name || tenant?.config?.branchName || '—'}</div>
+              <div className={`text-[10px] font-mono tracking-wider uppercase mt-0.5 truncate ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`} title={profile?.name}>{profile?.name}</div>
             </div>
           </div>
         </div>
         <nav className="flex-1 py-3 px-2 space-y-0.5">
           {NAV.filter(n => !n.mixedOnly || showMixedNav).map(n => {
             const active = pathname === n.href
+            const inactiveCls = theme === 'dark'
+              ? 'text-gray-300 hover:text-white hover:bg-dark-700'
+              : 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
             return (
               <Link key={n.href} href={n.href}
                 className={`relative flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-all
-                  ${active ? 'text-black' : 'text-gray-300 hover:text-white hover:bg-dark-700'}`}
+                  ${active ? 'text-black' : inactiveCls}`}
                 style={active ? { background: 'linear-gradient(135deg, rgba(82,255,176,0.95), rgba(61,255,160,0.9))', boxShadow: '0 4px 16px -4px rgba(61,255,160,0.3), inset 0 1px 0 rgba(255,255,255,0.2)' } : undefined}>
                 <n.Icon size={16} /> {n.label}
               </Link>
             )
           })}
         </nav>
-        <div className="p-4 border-t border-dark-border space-y-2">
+        <div className={`p-4 border-t space-y-2 ${theme === 'dark' ? 'border-dark-border' : 'border-gray-200'}`}>
           <Link href="/check" target="_blank"
-            className="flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:text-brand-400 transition-colors rounded-lg hover:bg-dark-700">
+            className={`flex items-center gap-2 px-3 py-2 text-xs transition-colors rounded-lg ${
+              theme === 'dark'
+                ? 'text-gray-400 hover:text-brand-400 hover:bg-dark-700'
+                : 'text-gray-600 hover:text-brand-500 hover:bg-gray-100'
+            }`}>
             <MapPin size={13} /> Abrir checador
           </Link>
           {['owner','manager','super_admin'].includes(profile?.role) && (
             <Link href="/dashboard/bugs"
-              className={`flex items-center gap-2 px-3 py-2 text-xs transition-colors rounded-lg hover:bg-dark-700 ${
-                pathname === '/dashboard/bugs' ? 'text-brand-400' : 'text-gray-400 hover:text-brand-400'
+              className={`flex items-center gap-2 px-3 py-2 text-xs transition-colors rounded-lg ${
+                pathname === '/dashboard/bugs'
+                  ? (theme === 'dark' ? 'text-brand-400' : 'text-brand-500')
+                  : (theme === 'dark'
+                      ? 'text-gray-400 hover:text-brand-400 hover:bg-dark-700'
+                      : 'text-gray-600 hover:text-brand-500 hover:bg-gray-100')
               }`}>
               <Wrench size={13} /> Bugs y mejoras
             </Link>
           )}
           <button onClick={signOut}
-            className="flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:text-red-400 transition-colors w-full rounded-lg hover:bg-dark-700">
+            className={`flex items-center gap-2 px-3 py-2 text-xs transition-colors w-full rounded-lg ${
+              theme === 'dark'
+                ? 'text-gray-400 hover:text-red-400 hover:bg-dark-700'
+                : 'text-gray-600 hover:text-red-500 hover:bg-gray-100'
+            }`}>
             <LogOut size={13} /> Cerrar sesión
           </button>
         </div>
