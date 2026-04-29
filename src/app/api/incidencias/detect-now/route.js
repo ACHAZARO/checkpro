@@ -5,6 +5,7 @@
 // Combina la lógica de detect-absences + detect-shifts para el día actual.
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
+import { rateLimit } from '@/lib/rate-limit'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 
 const TZ = process.env.APP_TIMEZONE || 'America/Mexico_City'
@@ -74,6 +75,13 @@ export async function POST(req) {
   if (!profile?.tenant_id) return NextResponse.json({ error: 'Sin tenant' }, { status: 403 })
   if (!['owner', 'admin', 'manager', 'super_admin'].includes(profile.role)) { // FIX: alinear roles reales y evitar bloquear owners.
     return NextResponse.json({ error: 'Sin permisos' }, { status: 403 })
+  }
+
+  // Rate limit: max 5 detecciones/min por usuario. Cliente ya throttle a 60s,
+  // este es respaldo contra tabs duplicados o loops accidentales.
+  const rl = rateLimit(`detect-now:${user.id}`, 5, 60_000)
+  if (!rl.ok) {
+    return NextResponse.json({ error: 'Demasiadas solicitudes', retryAfter: rl.retryAfter }, { status: 429 })
   }
 
   const tenantId = profile.tenant_id
