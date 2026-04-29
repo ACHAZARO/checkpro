@@ -160,6 +160,13 @@ export function calcOvertimeHours(minutesOver) {
   return Math.ceil((minutesOver - 30) / 60)
 }
 
+// Horas programadas para un día concreto. Mixto → plan.duration_hours; fijo → schedule[dk].
+export function scheduledDayHours(employee, dateStr, tz = DEFAULT_TZ, plan = null) {
+  if (employee?.is_mixed) return Math.max(0, Number(plan?.duration_hours || 0))
+  const dk = dayKey(`${dateStr}T12:00:00Z`, tz)
+  return hoursInSchedule(employee?.schedule || {}, dk)
+}
+
 // CAMBIO — scheduledExitDate usa TZ. Para mixtos usamos el shift_plan del día si existe.
 export function scheduledExitDate(dateStr, employee, tz = DEFAULT_TZ, plan = null) {
   if (employee?.is_mixed) {
@@ -348,7 +355,14 @@ function resolvePayEmployee(employee, coveringEmployee, coveragePayMode) {
 //   - OT corrections pagadas a 2x; empWeekSummary escala a 3x para OT >9h/semana
 export function calcShiftPay(shift, employee, coveringEmployee, coveragePayMode) {
   // FIX: faltas auto descuentan en nomina
-  if (shift.classification?.type === 'falta_injustificada' || shift.classification?.type === 'falta') return 0
+  const ctype = shift.classification?.type
+  if (ctype === 'falta_injustificada' || ctype === 'falta' || ctype === 'falta_justificada_no_pagada') return 0
+  // Falta justificada con goce de sueldo: pagar horas programadas a tarifa base, sin OT ni multiplicadores.
+  if (ctype === 'falta_justificada_pagada') {
+    const hours = Math.max(0, Number(shift?.duration_hours || 0))
+    const rate = Math.max(0, Number(monthlyToHourly(employee)) || 0)
+    return hours * rate
+  }
   const worked = Math.max(0, Number(shift?.duration_hours || 0)) // FIX: evitar nomina negativa/NaN por duration_hours invalido.
   if (!worked) return 0
   const payEmp = resolvePayEmployee(employee, coveringEmployee, coveragePayMode)
@@ -371,6 +385,10 @@ export function calcShiftPay(shift, employee, coveringEmployee, coveragePayMode)
 export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMode) {
   const mine = (weekShifts || []).filter(s => s.employee_id === employee.id)
   const closed = mine.filter(s => ['closed','incident'].includes(s.status))
+  // FIX nomina: faltas justificadas con goce de sueldo se pagan aunque queden con status='absent'.
+  const paidAbsences = mine.filter(s =>
+    s.status === 'absent' && s.classification?.type === 'falta_justificada_pagada'
+  )
   const totalH = closed.reduce((a,s) => a + Math.max(0, Number(s.duration_hours || 0)), 0) // FIX: evitar total de horas negativo o NaN.
   const otHours = closed.reduce((a,s) => {
     const manual = Math.max(0, Number(s.corrections?.overtime?.hours || 0)) // FIX: OT manual invalida no debe contaminar acumuladores.
@@ -417,6 +435,9 @@ export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMo
   closed.forEach(s => {
     const cov = s.covering_employee_id ? empMap.get(s.covering_employee_id) : null
     grossPay += calcShiftPay(s, employee, cov, coveragePayMode)
+  })
+  paidAbsences.forEach(s => {
+    grossPay += calcShiftPay(s, employee, null, coveragePayMode)
   })
   const hr = Math.max(0, Number(monthlyToHourly(employee)) || 0) // FIX: descuentos no deben ser NaN.
   // LFT art. 68: OT >9h/semana se paga a 3x. calcShiftPay ya pagó 2x; agregamos el 1x extra.

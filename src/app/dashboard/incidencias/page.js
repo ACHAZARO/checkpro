@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import { scheduledExitDate } from '@/lib/utils'
+import { scheduledExitDate, scheduledDayHours } from '@/lib/utils'
 import { fromZonedTime } from 'date-fns-tz'
 import toast from 'react-hot-toast'
 import {
@@ -272,7 +272,28 @@ export default function IncidenciasPage() {
 
   async function resolveFalta(supabase, absenceType, label, note) {
     const isGrave = absenceType === 'falta_injustificada'
+    const isPaid = absenceType === 'falta_justificada_pagada'
     const fullNote = `${label}${note ? ' · ' + note : ''}`
+
+    // FIX nomina: si la falta se paga, popular duration_hours con las horas programadas del dia.
+    // Asi calcShiftPay/empWeekSummary cobran el dia correctamente.
+    let paidHours = 0
+    if (isPaid) {
+      const { data: emp } = await supabase
+        .from('employees').select('schedule, is_mixed, daily_hours')
+        .eq('id', detail.employee_id).eq('tenant_id', profile?.tenant_id).maybeSingle()
+      let plan = null
+      if (emp?.is_mixed) {
+        const { data: planRow } = await supabase
+          .from('shift_plans').select('entry_time_str, duration_hours')
+          .eq('tenant_id', profile?.tenant_id).eq('employee_id', detail.employee_id)
+          .eq('date_str', detail.date_str).maybeSingle()
+        plan = planRow || null
+        // Fallback razonable para mixto sin plan: daily_hours del empleado.
+        if (!plan && emp?.daily_hours > 0) plan = { duration_hours: Number(emp.daily_hours) }
+      }
+      paidHours = scheduledDayHours(emp || {}, detail.date_str, 'America/Mexico_City', plan)
+    }
 
     const { data: existing } = await supabase
       .from('shifts').select('id')
@@ -284,6 +305,7 @@ export default function IncidenciasPage() {
     if (existing?.id) {
       const { error } = await supabase.from('shifts').update({
         status: 'absent',
+        duration_hours: paidHours,
         classification: { type: absenceType, label },
         incidents: isGrave ? [{ type: 'grave', note: fullNote, ts: new Date().toISOString() }] : [],
       }).eq('id', existing.id).eq('tenant_id', profile?.tenant_id) // FIX: no actualizar shifts fuera del tenant cargado.
@@ -292,7 +314,7 @@ export default function IncidenciasPage() {
       const { error } = await supabase.from('shifts').insert({
         tenant_id: detail.tenant_id, employee_id: detail.employee_id,
         date_str: detail.date_str, entry_time: null, exit_time: null,
-        duration_hours: 0, status: 'absent',
+        duration_hours: paidHours, status: 'absent',
         classification: { type: absenceType, label },
         incidents: isGrave ? [{ type: 'grave', note: fullNote, ts: new Date().toISOString() }] : [],
         corrections: [],

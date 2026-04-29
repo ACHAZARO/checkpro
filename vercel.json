@@ -1,12 +1,3 @@
 {
-  "crons": [
-    {
-      "path": "/api/cron/detect-absences",
-      "schedule": "0 4 * * *"
-    },
-    {
-      "path": "/api/cron/detect-shifts",
-      "schedule": "0 5 * * *"
-    }
-  ]
+  "crons": []
 }

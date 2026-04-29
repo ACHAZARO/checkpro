@@ -1,6 +1,6 @@
 'use client'
 // src/app/dashboard/layout.js
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
@@ -27,7 +27,28 @@ export default function DashboardLayout({ children }) {
   const [tenant, setTenant] = useState(null)
   const [branches, setBranches] = useState([])
   const [loading, setLoading] = useState(true)
+  const lastDetectRef = useRef(0)
   const { theme } = useTheme()
+
+  // Reemplaza al cron de Vercel: dispara deteccion automatica de incidencias en cada sesion.
+  // - Idempotente (insertIncidenciaOnce dedup por tenant+empleado+fecha+kind)
+  // - Throttle 15 min para soportar uso multiples veces al dia (ej. revisar turno tarde) sin spam.
+  async function maybeDetectIncidencias(prof, accessToken) {
+    if (!prof || !accessToken) return
+    if (!['owner','admin','manager','super_admin'].includes(prof.role)) return
+    const THROTTLE_MS = 15 * 60 * 1000
+    const now = Date.now()
+    if (now - lastDetectRef.current < THROTTLE_MS) return
+    lastDetectRef.current = now
+    try {
+      await fetch('/api/incidencias/detect-now', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+    } catch {
+      // fire-and-forget: deteccion no debe romper el dashboard
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -63,9 +84,24 @@ export default function DashboardLayout({ children }) {
       setTenant(ten)
       setBranches(branchData || [])
       setLoading(false)
+      maybeDetectIncidencias(prof, session.access_token)
     }
     load()
   }, [router])
+
+  // Re-disparar al volver al tab (ej. abre dashboard en la manana, vuelve en la tarde).
+  useEffect(() => {
+    if (!profile) return
+    function onVisibility() {
+      if (document.visibilityState !== 'visible') return
+      const supabase = createClient()
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.access_token) maybeDetectIncidencias(profile, session.access_token)
+      })
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [profile])
 
   async function signOut() {
     const supabase = createClient()
