@@ -6,6 +6,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { MANUAL_SECTIONS } from '@/lib/manual-sections'
+import { useTheme } from '@/lib/ThemeContext'
 
 // ── helpers de busqueda ────────────────────────────────────────────────────
 function normalize(s) {
@@ -47,6 +48,8 @@ function highlight(text, tokens) {
 
 export default function HelpCenter() {
   const pathname = usePathname()
+  const { theme } = useTheme()
+  const isDark = theme === 'dark'
   const [q, setQ] = useState('')
   const [audience, setAudience] = useState('todas') // 'todas' | 'admin' | 'empleado'
   const [expanded, setExpanded] = useState(() => new Set())
@@ -155,7 +158,7 @@ export default function HelpCenter() {
                 className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
                   audience === id
                     ? 'bg-brand-400/10 border-brand-400/40 text-brand-400'
-                    : 'bg-transparent border-dark-border text-gray-500 hover:text-white'
+                    : `bg-transparent ${isDark ? 'border-dark-border text-gray-500 hover:text-white' : 'border-gray-300 text-gray-600 hover:text-gray-900'}`
                 }`}
               >
                 {label}
@@ -175,30 +178,30 @@ export default function HelpCenter() {
             return (
               <div
                 key={key}
-                className="border border-dark-border rounded-xl bg-dark-900/40 overflow-hidden"
+                className={`border rounded-xl overflow-hidden ${isDark ? 'border-dark-border bg-dark-900/40' : 'border-gray-200 bg-white'}`}
               >
                 <button
                   onClick={() => toggle(key)}
-                  className="w-full text-left px-4 py-3 flex items-center justify-between gap-3 hover:bg-dark-700/40 transition-colors"
+                  className={`w-full text-left px-4 py-3 flex items-center justify-between gap-3 transition-colors ${isDark ? 'hover:bg-dark-700/40' : 'hover:bg-gray-50'}`}
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full shrink-0 ${
                       s.audience === 'admin'
                         ? 'bg-brand-400/10 text-brand-400'
-                        : 'bg-purple-500/10 text-purple-300'
+                        : (isDark ? 'bg-purple-500/10 text-purple-300' : 'bg-purple-500/15 text-purple-700')
                     }`}>
                       {s.audience === 'admin' ? 'ADMIN' : 'EMPLEADO'}
                     </span>
-                    <span className="text-sm font-semibold text-white truncate">
+                    <span className={`text-sm font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
                       {highlight(s.title, tokens)}
                     </span>
                   </div>
-                  <span className="text-xs text-gray-500 shrink-0">
+                  <span className={`text-xs shrink-0 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
                     {open ? '▾' : '▸'}
                   </span>
                 </button>
                 {open && (
-                  <div className="px-4 pb-4 pt-0 text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">
+                  <div className={`px-4 pb-4 pt-0 text-sm whitespace-pre-wrap leading-relaxed ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
                     {highlight(s.body, tokens)}
                   </div>
                 )}
@@ -207,11 +210,11 @@ export default function HelpCenter() {
           })}
 
           {showNothingFound && (
-            <div className="px-4 py-6 text-center rounded-xl border border-dashed border-dark-border bg-dark-900/40">
-              <p className="text-sm text-gray-400 mb-1">
-                No encontramos nada para <span className="text-white font-semibold">&ldquo;{q}&rdquo;</span>.
+            <div className={`px-4 py-6 text-center rounded-xl border border-dashed ${isDark ? 'border-dark-border bg-dark-900/40' : 'border-gray-300 bg-gray-50'}`}>
+              <p className={`text-sm mb-1 ${isDark ? 'text-gray-400' : 'text-gray-700'}`}>
+                No encontramos nada para <span className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>&ldquo;{q}&rdquo;</span>.
               </p>
-              <p className="text-xs text-gray-500 mb-3">
+              <p className={`text-xs mb-3 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
                 Mandanos tu pregunta y la resolvemos.
               </p>
               <button
@@ -228,7 +231,7 @@ export default function HelpCenter() {
       {/* ── Formulario de reporte ──────────────────────────────────────── */}
       <div ref={formRef} className="card space-y-3">
         <div>
-          <h2 className="text-lg font-bold text-white">¿No encontraste tu respuesta?</h2>
+          <h2 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>¿No encontraste tu respuesta?</h2>
           <p className="text-xs text-gray-500 mt-0.5">
             Cuentanos tu duda, reporta un bug o mandanos una sugerencia. Revisamos los mensajes cada semana y te avisamos si aplicamos un arreglo.
           </p>
@@ -237,10 +240,10 @@ export default function HelpCenter() {
         {submitted ? (
           <div className="px-4 py-4 rounded-xl bg-brand-400/10 border border-brand-400/30 text-center">
             <p className="text-brand-400 font-bold text-sm">¡Gracias! Ya tenemos tu mensaje.</p>
-            <p className="text-gray-400 text-xs mt-1">Lo revisamos en el proximo corte semanal.</p>
+            <p className={`text-xs mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Lo revisamos en el proximo corte semanal.</p>
             <button
               onClick={() => setSubmitted(false)}
-              className="mt-3 text-xs text-gray-500 underline hover:text-white"
+              className={`mt-3 text-xs underline ${isDark ? 'text-gray-500 hover:text-white' : 'text-gray-600 hover:text-gray-900'}`}
             >
               Enviar otro mensaje
             </button>
@@ -262,11 +265,13 @@ export default function HelpCenter() {
                     className={`px-3 py-2.5 rounded-xl border text-left transition-colors ${
                       kind === id
                         ? 'bg-brand-400/10 border-brand-400/40'
-                        : 'bg-dark-700 border-dark-border hover:border-gray-500'
+                        : (isDark
+                            ? 'bg-dark-700 border-dark-border hover:border-gray-500'
+                            : 'bg-gray-50 border-gray-300 hover:border-gray-400')
                     }`}
                   >
-                    <div className={`text-xs font-bold ${kind === id ? 'text-brand-400' : 'text-white'}`}>{label}</div>
-                    <div className="text-[10px] text-gray-500 mt-0.5">{sub}</div>
+                    <div className={`text-xs font-bold ${kind === id ? 'text-brand-400' : (isDark ? 'text-white' : 'text-gray-900')}`}>{label}</div>
+                    <div className={`text-[10px] mt-0.5 ${isDark ? 'text-gray-500' : 'text-gray-600'}`}>{sub}</div>
                   </button>
                 ))}
               </div>

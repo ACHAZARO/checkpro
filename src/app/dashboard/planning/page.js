@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import { useTheme } from '@/lib/ThemeContext'
 import { DAYS, DAY_L, addHoursToTimeStr } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
@@ -49,6 +50,8 @@ function prettyRange(startIso, endIso) {
 
 export default function PlanningPage() {
   const router = useRouter()
+  const { theme } = useTheme()
+  const isDark = theme === 'dark'
   const [loading, setLoading] = useState(true)
   const [tenant, setTenant] = useState(null)
   const [mixedEmps, setMixedEmps] = useState([])
@@ -300,21 +303,32 @@ export default function PlanningPage() {
             <table className="min-w-full text-xs">
               <thead>
                 <tr>
-                  <th className="text-left p-2 text-gray-500 font-mono border-b border-dark-border sticky left-0 bg-dark-800 z-10">Empleado</th>
+                  <th className={`text-left p-2 font-mono border-b sticky left-0 z-10 ${
+                    isDark
+                      ? 'text-gray-500 border-dark-border bg-dark-800'
+                      : 'text-gray-600 border-gray-200 bg-white'
+                  }`}>Empleado</th>
                   {dates.map((d, i) => (
-                    <th key={d} className="text-center p-2 text-gray-500 font-mono border-b border-dark-border min-w-[90px]">
+                    <th key={d} className={`text-center p-2 font-mono border-b min-w-[90px] ${
+                      isDark ? 'text-gray-500 border-dark-border' : 'text-gray-600 border-gray-200'
+                    }`}>
                       <div className="text-brand-400">{DAY_L[DAYS[i]]}</div>
-                      <div className="text-[10px] text-gray-400 font-normal">{d.slice(5)}</div>
+                      <div className={`text-[10px] font-normal ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{d.slice(5)}</div>
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {mixedEmps.map(emp => (
-                  <tr key={emp.id} className="border-b border-dark-border/50 hover:bg-dark-700/40">
-                    <td className="p-2 align-top sticky left-0 bg-dark-800 z-10">
-                      <div className="font-semibold text-white text-xs whitespace-nowrap max-w-[160px] truncate" title={emp.name}>{emp.name}</div>
-                      <div className="text-[10px] text-gray-400 font-mono">{emp.daily_hours || '?'} h/día · {emp.employee_code}</div>
+                  <tr key={emp.id} className={`border-b ${
+                    isDark ? 'border-dark-border/50 hover:bg-dark-700/40' : 'border-gray-100 hover:bg-gray-50'
+                  }`}>
+                    <td className={`p-2 align-top sticky left-0 z-10 ${
+                      isDark ? 'bg-dark-800' : 'bg-white'
+                    }`}
+                      style={!isDark ? { boxShadow: '4px 0 6px -4px rgba(0,0,0,0.06)' } : undefined}>
+                      <div className={`font-semibold text-xs whitespace-nowrap max-w-[160px] truncate ${isDark ? 'text-white' : 'text-gray-900'}`} title={emp.name}>{emp.name}</div>
+                      <div className={`text-[10px] font-mono ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{emp.daily_hours || '?'} h/día · {emp.employee_code}</div>
                     </td>
                     {dates.map(d => {
                       const cell = plans[`${emp.id}|${d}`]
@@ -323,7 +337,11 @@ export default function PlanningPage() {
                         <td key={d} className="p-1.5 align-top">
                           <input
                             type="time"
-                            className="w-full bg-dark-700 border border-dark-border rounded-md px-1.5 py-1 text-xs text-white text-center font-mono"
+                            className={`w-full border rounded-md px-1.5 py-1 text-xs text-center font-mono ${
+                              isDark
+                                ? 'bg-dark-700 border-dark-border text-white'
+                                : 'bg-white border-gray-300 text-gray-900'
+                            }`}
                             value={entry}
                             onChange={e => setCell(emp.id, d, e.target.value)}
                           />
@@ -332,7 +350,7 @@ export default function PlanningPage() {
                               sale {cell.exit_time_str}
                             </div>
                           ) : (
-                            <div className="text-[9px] text-gray-700 mt-1 text-center font-mono">—</div>
+                            <div className={`text-[9px] mt-1 text-center font-mono ${isDark ? 'text-gray-700' : 'text-gray-300'}`}>—</div>
                           )}
                         </td>
                       )

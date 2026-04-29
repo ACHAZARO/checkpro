@@ -61,7 +61,10 @@ function ShiftBadge({ status, classification }) {
   if (status === 'open') return <span className="badge-blue">Activo</span>
   if (status === 'incident') return <span className="badge-red">Incidencia</span>
   const t = classification?.type
-  if (t === 'falta') return <span className="badge-red">Falta</span>
+  if (t === 'falta_injustificada' || t === 'falta') return <span className="badge-red">Falta injustificada</span>
+  if (t === 'falta_justificada_pagada') return <span className="badge-orange">Justif. con sueldo</span>
+  if (t === 'falta_justificada_no_pagada') return <span className="badge-orange">Justif. sin sueldo</span>
+  if (status === 'absent') return <span className="badge-red">Falta</span>
   if (t === 'retardo') return <span className="badge-orange">Retardo</span>
   if (t === 'tolerancia') return <span className="badge-orange">Tolerancia</span>
   if (t === 'no_laboral') return <span className="badge-gray">No laboral</span>
@@ -315,7 +318,11 @@ export default function DashboardPage() {
     const list = managerFreeScheduleAlerts(emp, weekShifts)
     return list.map(a => ({ ...a, employee: emp }))
   })
-  const checkedIn = employees.filter(e => todayShifts.some(s => s.employee_id === e.id))
+  // FIX: solo contar entradas REALES (con entry_time). Antes contaba cualquier shift,
+  // entonces faltas justificadas/injustificadas (status='absent') aparecian como "con entrada".
+  const realEntries = todayShifts.filter(s => s.entry_time != null)
+  const absentToday = todayShifts.filter(s => s.status === 'absent')
+  const checkedIn = employees.filter(e => realEntries.some(s => s.employee_id === e.id))
 
   // Employees with 3+ grave incidents
   const graveAlerts = employees.filter(e => countGraveIncidents(graveShifts, e.id) >= 3)
@@ -328,11 +335,12 @@ export default function DashboardPage() {
     .map(e => ({ ...e, _bdDays: daysUntilBirthday(e.birth_date) }))
     .filter(e => e._bdDays !== null && e._bdDays >= 0 && e._bdDays <= 7)
     .sort((a, b) => a._bdDays - b._bdDays)
+  // FIX: "sin checar" incluye empleados con shift absent (faltaron) — en realidad NO checaron.
   const notYet = employees.filter(e => { // FIX: gerentes horario libre
     const isManager = e.can_manage === true || e.role === 'manager'
     const hasNoStartToday = !todayScheduleStart(e)
     if (isManager && (e.schedule_free === true || e.free_schedule === true || hasNoStartToday)) return false
-    return !todayShifts.some(s => s.employee_id === e.id)
+    return !realEntries.some(s => s.employee_id === e.id)
   })
   const retardos = todayShifts.filter(s => s.classification?.type === 'retardo')
   const activeNow = todayShifts.filter(s => s.status === 'open')
@@ -431,7 +439,7 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-2 gap-3 mb-5">
         <StatCard label="Con entrada" value={checkedIn.length} color="text-brand-400" sub={`de ${employees.length}`} onClick={() => openKpiSheet('Con entrada', checkedIn, e => {
-          const shift = todayShifts.find(s => s.employee_id === e.id)
+          const shift = realEntries.find(s => s.employee_id === e.id)
           return `${e.name} · ${fmtTime(shift?.entry_time)}`
         })} />
         <StatCard label="Sin checar" value={notYet.length} color="text-orange-400" onClick={() => openKpiSheet('Sin checar', notYet, e => `${e.name} · ${e.department || 'Sin departamento'}`)} />
@@ -692,21 +700,36 @@ export default function DashboardPage() {
       {todayShifts.length > 0 && (
         <div className="card">
           <div className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Todos los registros de hoy</div>
-          {todayShifts.map(s => (
-            <div key={s.id} className="flex items-center justify-between py-2.5 border-b border-dark-border last:border-0">
-              <div>
-                <div className="font-semibold text-sm text-white">{getEmpName(s.employee_id)}</div>
-                <div className="text-xs text-gray-400 font-mono">
-                  {fmtTime(s.entry_time)} – {s.exit_time ? fmtTime(s.exit_time) : '—'}
-                  {s.duration_hours ? ` · ${s.duration_hours}h` : ''}
+          {todayShifts.map(s => {
+            const ctype = s.classification?.type
+            const isAbsent = s.status === 'absent' || ctype === 'falta_injustificada' || ctype === 'falta_justificada_pagada' || ctype === 'falta_justificada_no_pagada' || ctype === 'falta'
+            return (
+              <div key={s.id} className="flex items-center justify-between py-2.5 border-b border-dark-border last:border-0">
+                <div>
+                  <div className="font-semibold text-sm text-white">{getEmpName(s.employee_id)}</div>
+                  <div className="text-xs text-gray-400 font-mono">
+                    {isAbsent ? (
+                      <span className={ctype === 'falta_justificada_pagada' || ctype === 'falta_justificada_no_pagada' ? 'text-yellow-400' : 'text-red-400'}>
+                        {ctype === 'falta_justificada_pagada' ? 'Falta justificada — con sueldo' :
+                         ctype === 'falta_justificada_no_pagada' ? 'Falta justificada — sin sueldo' :
+                         'Falta injustificada'}
+                        {s.duration_hours ? ` · ${s.duration_hours}h pagadas` : ''}
+                      </span>
+                    ) : (
+                      <>
+                        {fmtTime(s.entry_time)} – {s.exit_time ? fmtTime(s.exit_time) : '—'}
+                        {s.duration_hours ? ` · ${s.duration_hours}h` : ''}
+                      </>
+                    )}
+                  </div>
+                  {s.covering_employee_id && (
+                    <div className="text-xs text-blue-400 font-mono">Cubriendo: {getEmpName(s.covering_employee_id)}</div>
+                  )}
                 </div>
-                {s.covering_employee_id && (
-                  <div className="text-xs text-blue-400 font-mono">Cubriendo: {getEmpName(s.covering_employee_id)}</div>
-                )}
+                <ShiftBadge status={s.status} classification={s.classification} />
               </div>
-              <ShiftBadge status={s.status} classification={s.classification} />
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

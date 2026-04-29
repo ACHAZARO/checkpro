@@ -167,7 +167,7 @@ export default function EmployeeDetailPage() {
   useEffect(() => {
     if (!employeeId) return
     setAttendanceLoading(true)
-    fetch('/api/employees/' + employeeId + '/attendance-summary?days=365', { cache: 'no-store' })
+    fetch('/api/employees/' + employeeId + '/attendance-summary?days=30', { cache: 'no-store' })
       .then(r => r.json())
       .then(j => { if (j.ok) setAttendanceSummary(j) })
       .catch(() => {})
@@ -674,18 +674,19 @@ export default function EmployeeDetailPage() {
 
       {attendanceSummary && (
         <div className="mb-4">
-          {(attendanceSummary.counts?.falta_injustificada || 0) >= 3 && (
+          {/* LFT Art. 47 fr. X: mas de tres faltas en 30 dias = causal de rescision sin responsabilidad. */}
+          {(attendanceSummary.counts?.falta_injustificada || 0) > 3 && (
             <div className="mb-3 px-3 py-3 bg-red-600/15 border border-red-600/30 rounded-xl">
               <p className="text-red-400 text-sm font-bold mb-1 flex items-center gap-1.5">
                 <AlertTriangle size={14} /> Art. 47 LFT -- Causal de despido
               </p>
               <p className="text-red-400/80 text-xs font-mono">
-                {attendanceSummary.counts?.falta_injustificada || 0} faltas injustificadas en 12 meses; posible rescision sin responsabilidad.
+                {attendanceSummary.counts?.falta_injustificada || 0} faltas injustificadas en 30 días; posible rescision sin responsabilidad.
               </p>
             </div>
           )}
           <div className="card">
-            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Comportamiento disciplinario (12 meses)</p>
+            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Comportamiento disciplinario (30 días)</p>
             <div className="grid grid-cols-3 gap-2">
               <div className="card-sm">
                 <p className="text-xl font-extrabold text-red-400 leading-none">{attendanceSummary.counts?.falta_injustificada || 0}</p>
@@ -711,7 +712,7 @@ export default function EmployeeDetailPage() {
           <div className="flex items-center justify-between mb-3">
             <div>
               <h2 className="text-sm font-bold text-white">Historial de asistencia</h2>
-              <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">ultimos 12 meses</p>
+              <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">ultimos 30 días</p>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 mb-3">
