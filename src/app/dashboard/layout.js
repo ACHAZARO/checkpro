@@ -25,6 +25,7 @@ export default function DashboardLayout({ children }) {
   const pathname = usePathname()
   const [profile, setProfile] = useState(null)
   const [tenant, setTenant] = useState(null)
+  const [branches, setBranches] = useState([])
   const [loading, setLoading] = useState(true)
   const { theme } = useTheme()
 
@@ -49,7 +50,10 @@ export default function DashboardLayout({ children }) {
         return
       }
 
-      const { data: ten, error: tErr } = await supabase.from('tenants').select('*').eq('id', prof.tenant_id).single()
+      const [{ data: ten, error: tErr }, { data: branchData }] = await Promise.all([
+        supabase.from('tenants').select('*').eq('id', prof.tenant_id).single(),
+        supabase.from('branches').select('id,config').eq('tenant_id', prof.tenant_id),
+      ])
       if (tErr || !ten) {
         // Tenant borrado o RLS bloquea → tambien mandar a onboarding para crear uno nuevo
         console.error('[dashboard] tenant not visible:', tErr, 'tenant_id:', prof.tenant_id)
@@ -57,6 +61,7 @@ export default function DashboardLayout({ children }) {
         return
       }
       setTenant(ten)
+      setBranches(branchData || [])
       setLoading(false)
     }
     load()
@@ -75,6 +80,14 @@ export default function DashboardLayout({ children }) {
     </div>
   )
 
+  // FIX: mixedSchedule por sucursal
+  const branchScope = profile?.role === 'manager' && profile?.branch_id
+    ? branches.filter(b => b.id === profile.branch_id)
+    : branches
+  const showMixedNav = branchScope.length > 0
+    ? branchScope.some(b => (b.config?.mixedSchedule || tenant?.config?.mixedSchedule)?.enabled === true)
+    : tenant?.config?.mixedSchedule?.enabled === true
+
   return (
     <div className="flex h-dvh overflow-hidden" style={{ backgroundColor: 'var(--cp-bg)' }}>
       {/* Desktop sidebar */}
@@ -90,7 +103,7 @@ export default function DashboardLayout({ children }) {
           </div>
         </div>
         <nav className="flex-1 py-3 px-2 space-y-0.5">
-          {NAV.filter(n => !n.mixedOnly || tenant?.config?.mixedSchedule?.enabled).map(n => {
+          {NAV.filter(n => !n.mixedOnly || showMixedNav).map(n => {
             const active = pathname === n.href
             return (
               <Link key={n.href} href={n.href}
@@ -155,7 +168,7 @@ export default function DashboardLayout({ children }) {
             willChange: 'transform',
             backfaceVisibility: 'hidden',
           }}>
-          {NAV.filter(n => !n.mixedOnly || tenant?.config?.mixedSchedule?.enabled).map(n => {
+          {NAV.filter(n => !n.mixedOnly || showMixedNav).map(n => {
             const active = pathname === n.href
             return (
               <Link key={n.href} href={n.href}

@@ -49,21 +49,39 @@ export default function AttendancePage() {
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) return
-    const { data: prof } = await supabase.from('profiles').select('tenant_id').eq('id', session.user.id).single()
+    const { data: prof } = await supabase.from('profiles').select('tenant_id,role,branch_id').eq('id', session.user.id).single()
     if (!prof?.tenant_id) return
     setTenantId(prof.tenant_id)
 
-    const [{ data: empData }, { data: shiftData }, { data: tenantData }, { data: allShiftData }] = await Promise.all([
-      supabase.from('employees').select('id,name,department,monthly_salary,schedule,employee_code,branch_id').eq('tenant_id', prof.tenant_id).neq('status','deleted'),
-      supabase.from('shifts').select('*').eq('tenant_id', prof.tenant_id).gte('date_str', filterFrom).lte('date_str', filterTo).order('date_str', { ascending: false }).order('entry_time', { ascending: false }),
+    // FIX: branch isolation server-side
+    const isManagerBranch = prof.role === 'manager' && !!prof.branch_id
+    let empQuery = supabase.from('employees').select('id,name,department,monthly_salary,schedule,employee_code,branch_id').eq('tenant_id', prof.tenant_id).neq('status','deleted')
+    let branchQuery = supabase.from('branches').select('id,name').eq('tenant_id', prof.tenant_id).eq('active', true).order('created_at')
+    if (isManagerBranch) {
+      empQuery = empQuery.eq('branch_id', prof.branch_id)
+      branchQuery = branchQuery.eq('id', prof.branch_id)
+    }
+    const [{ data: empData }, { data: tenantData }, { data: branchData }] = await Promise.all([
+      empQuery,
       supabase.from('tenants').select('config,name').eq('id', prof.tenant_id).single(),
-      supabase.from('shifts').select('employee_id,classification,status').eq('tenant_id', prof.tenant_id)
-        .gte('date_str', isoDate(new Date(Date.now() - 365 * 24 * 3600 * 1000)))
+      branchQuery,
+    ])
+    const empIds = (empData || []).map(e => e.id)
+    let shiftQuery = supabase.from('shifts').select('*').eq('tenant_id', prof.tenant_id).gte('date_str', filterFrom).lte('date_str', filterTo).order('date_str', { ascending: false }).order('entry_time', { ascending: false })
+    let allShiftQuery = supabase.from('shifts').select('employee_id,classification,status').eq('tenant_id', prof.tenant_id)
+      .gte('date_str', isoDate(new Date(Date.now() - 365 * 24 * 3600 * 1000)))
+    if (isManagerBranch) {
+      shiftQuery = empIds.length ? shiftQuery.in('employee_id', empIds) : null
+      allShiftQuery = empIds.length ? allShiftQuery.in('employee_id', empIds) : null
+    }
+    const [{ data: shiftData }, { data: allShiftData }] = await Promise.all([
+      shiftQuery ? shiftQuery : Promise.resolve({ data: [] }),
+      allShiftQuery ? allShiftQuery : Promise.resolve({ data: [] }),
     ])
     setEmps(empData || [])
     setShifts(shiftData || [])
     setAllShifts(allShiftData || [])
-    setBranches(tenantData?.config?.branches || [])
+    setBranches((branchData && branchData.length > 0) ? branchData : (tenantData?.config?.branches || []))
     setTenantName(tenantData?.name || '')
     setLoading(false)
   }, [filterFrom, filterTo])

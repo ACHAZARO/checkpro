@@ -54,7 +54,7 @@ export default function EmployeesPage() {
   const [openIncSet, setOpenIncSet] = useState(new Set())
   const [loading, setLoading] = useState(true)
   const [tenantId, setTenantId] = useState(null)
-  // feat/mixed-schedule: leer config.mixedSchedule del tenant para permitir/denegar mixto.
+  // FIX: mixedSchedule por sucursal
   const [mixedCfg, setMixedCfg] = useState({ enabled: false, maxRotating: null, unlimitedRotating: true })
   const [sheet, setSheet] = useState(null)
   const [form, setForm] = useState({})
@@ -83,11 +83,14 @@ export default function EmployeesPage() {
       const supabase = createClient()
       const activeEmps = emps.filter(e => e.status === 'active')
       if (activeEmps.length === 0) { toast.error('No hay empleados activos'); setExportingAll(false); return }
+      // FIX: branch isolation server-side
+      const activeEmpIds = activeEmps.map(e => e.id)
       const [{ data: shifts, error: shErr }, { data: tenant }] = await Promise.all([
         supabase.from('shifts').select('*')
           .eq('tenant_id', tenantId)
           .gte('date_str', expAllFrom)
           .lte('date_str', expAllTo)
+          .in('employee_id', activeEmpIds)
           .order('date_str', { ascending: true }),
         supabase.from('tenants').select('name').eq('id', tenantId).single(),
       ])
@@ -111,6 +114,11 @@ export default function EmployeesPage() {
   }
 
   const F = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const mixedCfgForBranch = (branchId) => {
+    // FIX: mixedSchedule por sucursal
+    const branchCfg = branches.find(b => b.id === branchId)?.config?.mixedSchedule
+    return branchCfg || mixedCfg
+  }
 
   function applyBase(newBase) {
     setBase(newBase)
@@ -156,26 +164,39 @@ export default function EmployeesPage() {
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) return
-    const { data: prof } = await supabase.from('profiles').select('tenant_id').eq('id', session.user.id).single()
+    const { data: prof } = await supabase.from('profiles').select('tenant_id,role,branch_id').eq('id', session.user.id).single()
     if (!prof?.tenant_id) return
     setTenantId(prof.tenant_id)
+    // FIX: branch isolation server-side
+    const isManagerBranch = prof.role === 'manager' && !!prof.branch_id
+    let empQuery = supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).neq('status', 'deleted').order('employee_code')
+    if (isManagerBranch) empQuery = empQuery.eq('branch_id', prof.branch_id)
     // FIX 8: cargar también vacation_periods vivos para poder evaluar
     // hasVacationPending contra la tabla real (no contra el array legacy).
-    const [{ data: empData }, { data: tenantData }, { data: branchData }, { data: vpData }, { data: openInc }] = await Promise.all([
-      supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).neq('status', 'deleted').order('employee_code'),
+    const [{ data: empData }, { data: tenantData }, { data: branchData }] = await Promise.all([
+      empQuery,
       supabase.from('tenants').select('config').eq('id', prof.tenant_id).single(),
       // FIX: leer sucursales de la tabla canonica (no del JSONB legacy)
-      supabase.from('branches').select('id,name,active').eq('tenant_id', prof.tenant_id).eq('active', true).order('created_at'),
-      supabase
-        .from('vacation_periods')
-        .select('employee_id,anniversary_year,status,end_date')
-        .eq('tenant_id', prof.tenant_id)
-        .in('status', ['pending', 'postponed', 'active', 'completed', 'approved']),
-      supabase
-        .from('incidencias')
-        .select('employee_id')
-        .eq('tenant_id', prof.tenant_id)
-        .eq('status', 'open'),
+      supabase.from('branches').select('id,name,config,active').eq('tenant_id', prof.tenant_id).eq('active', true).order('created_at'),
+    ])
+    const empIds = (empData || []).map(e => e.id)
+    let vpQuery = supabase
+      .from('vacation_periods')
+      .select('employee_id,anniversary_year,status,end_date')
+      .eq('tenant_id', prof.tenant_id)
+      .in('status', ['pending', 'postponed', 'active', 'completed', 'approved'])
+    let openIncQuery = supabase
+      .from('incidencias')
+      .select('employee_id')
+      .eq('tenant_id', prof.tenant_id)
+      .eq('status', 'open')
+    if (isManagerBranch) {
+      vpQuery = empIds.length ? vpQuery.in('employee_id', empIds) : null
+      openIncQuery = empIds.length ? openIncQuery.in('employee_id', empIds) : null
+    }
+    const [{ data: vpData }, { data: openInc }] = await Promise.all([
+      vpQuery ? vpQuery : Promise.resolve({ data: [] }),
+      openIncQuery ? openIncQuery : Promise.resolve({ data: [] }),
     ])
     setEmps(empData || [])
     setOpenIncSet(new Set((openInc || []).map(r => r.employee_id)))
@@ -183,8 +204,9 @@ export default function EmployeesPage() {
     setBranches((branchData && branchData.length > 0) ? branchData : (tenantData?.config?.branches || []))
     setVacTable(tenantData?.config?.vacationTable || tenantData?.config?.vacation_table || null)
     setVacPeriods(vpData || [])
-    // feat/mixed-schedule: leer config de horario mixto
-    const ms = tenantData?.config?.mixedSchedule || {}
+    // FIX: mixedSchedule por sucursal
+    const firstBranchCfg = (branchData || []).find(b => b.id === prof.branch_id)?.config?.mixedSchedule || branchData?.[0]?.config?.mixedSchedule
+    const ms = firstBranchCfg || tenantData?.config?.mixedSchedule || {}
     setMixedCfg({
       enabled: !!ms.enabled,
       maxRotating: ms.maxRotating ?? null,
@@ -225,14 +247,15 @@ export default function EmployeesPage() {
 
     // feat/mixed-schedule: validaciones específicas para mixto
     if (form.is_mixed) {
-      if (!mixedCfg.enabled) { toast.error('Horario mixto no está activado en Configuración'); return }
+      const branchMixedCfg = mixedCfgForBranch(form.branch_id)
+      if (!branchMixedCfg.enabled) { toast.error('Horario mixto no está activado en Configuración'); return }
       const dh = parseFloat(form.daily_hours)
       if (!dh || dh <= 0 || dh > 24) { toast.error('Duración diaria inválida (1-24 hrs)'); return }
       // Verificar límite maxRotating
-      if (!mixedCfg.unlimitedRotating && mixedCfg.maxRotating != null) {
-        const alreadyMixed = emps.filter(e => e.is_mixed && e.status !== 'deleted' && (sheet !== 'edit' || e.id !== form.id)).length
-        if (alreadyMixed >= mixedCfg.maxRotating) {
-          toast.error(`Se alcanzó el máximo de ${mixedCfg.maxRotating} empleados rotativos. Aumenta el tope en Configuración.`)
+      if (!branchMixedCfg.unlimitedRotating && branchMixedCfg.maxRotating != null) {
+        const alreadyMixed = emps.filter(e => e.is_mixed && e.status !== 'deleted' && (e.branch_id || e.schedule?.branch?.id) === form.branch_id && (sheet !== 'edit' || e.id !== form.id)).length
+        if (alreadyMixed >= branchMixedCfg.maxRotating) {
+          toast.error(`Se alcanzó el máximo de ${branchMixedCfg.maxRotating} empleados rotativos. Aumenta el tope en Configuración.`)
           return
         }
       }
@@ -643,7 +666,7 @@ export default function EmployeesPage() {
                 </div>
 
                 {/* feat/mixed-schedule: toggle horario mixto (solo si está habilitado en config) */}
-                {mixedCfg.enabled && !form.free_schedule && (
+                {mixedCfgForBranch(form.branch_id).enabled && !form.free_schedule && (
                   <div className="flex items-center justify-between py-2 border-t border-dark-border pt-3">
                     <div>
                       <p className="text-sm font-semibold text-white">Horario mixto <span className="text-[10px] font-mono text-gray-500 ml-1">ROTATIVO</span></p>

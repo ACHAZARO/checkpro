@@ -141,13 +141,18 @@ export default function IncidenciasPage() {
     if (!prof?.tenant_id) { router.push('/onboarding'); return }
     setProfile(prof)
 
-    const { data: emps } = await supabase
+    // FIX: branch isolation server-side
+    const isManagerBranch = prof.role === 'manager' && !!prof.branch_id
+    let empQuery = supabase
       .from('employees')
       .select('id, name, employee_code, branch_id')
       .eq('tenant_id', prof.tenant_id)
       .eq('status', 'active')
       .order('name')
+    if (isManagerBranch) empQuery = empQuery.eq('branch_id', prof.branch_id)
+    const { data: emps } = await empQuery
     setEmployees(emps || [])
+    const empIds = (emps || []).map(e => e.id)
 
     let q = supabase
       .from('incidencias')
@@ -156,7 +161,8 @@ export default function IncidenciasPage() {
       .order('date_str', { ascending: false })
       .order('created_at', { ascending: false })
     if (filter !== 'all') q = q.eq('status', filter === 'resolved' ? 'resolved' : 'open')
-    const { data: incs, error } = await q
+    if (isManagerBranch) q = empIds.length ? q.in('employee_id', empIds) : null
+    const { data: incs, error } = q ? await q : { data: [], error: null }
     if (error) {
       setIncidencias([])
     } else {

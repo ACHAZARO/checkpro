@@ -51,31 +51,35 @@ export async function POST(req) {
 
   const { data: branch } = await admin
     .from('branches')
-    .select('id, name, tenant_id')
+    .select('id, name, tenant_id, config')
     .eq('id', branch_id)
     .maybeSingle()
   if (!branch || branch.tenant_id !== profile.tenant_id) {
     return NextResponse.json({ error: 'Sucursal inválida' }, { status: 400 })
   }
+  // FIX: branch isolation server-side
+  if (profile.role === 'manager' && profile.branch_id && branch.id !== profile.branch_id) {
+    return NextResponse.json({ error: 'Sucursal invalida' }, { status: 403 })
+  }
 
   // Snapshot de códigos/PINs existentes para detectar duplicados + calcular próximo EMP###
   const { data: existing } = await admin
     .from('employees')
-    .select('employee_code, pin, is_mixed, status')
+    .select('employee_code, pin, is_mixed, status, branch_id')
     .eq('tenant_id', profile.tenant_id)
     .neq('status', 'deleted')
 
   const codesInDb = new Set((existing || []).map(e => String(e.employee_code || '').toUpperCase()).filter(Boolean))
   const pinsInDb = new Set((existing || []).map(e => String(e.pin || '')).filter(Boolean))
-  const mixedCount = (existing || []).filter(e => e.is_mixed && e.status === 'active').length
+  const mixedCount = (existing || []).filter(e => e.is_mixed && e.status === 'active' && e.branch_id === branch_id).length
 
-  // feat/mixed-schedule: enforcement server-side del límite de mixtos.
+  // FIX: mixedSchedule por sucursal
   const { data: tenantRow } = await admin
     .from('tenants')
     .select('config')
     .eq('id', profile.tenant_id)
     .maybeSingle()
-  const mixedCfg = tenantRow?.config?.mixedSchedule || { enabled: false }
+  const mixedCfg = branch?.config?.mixedSchedule || tenantRow?.config?.mixedSchedule || { enabled: false }
 
   // Contador para nextCode — empieza en el máximo numérico existente
   const maxNum = (existing || []).reduce((m, e) => {

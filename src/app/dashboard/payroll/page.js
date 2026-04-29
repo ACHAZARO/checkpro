@@ -250,12 +250,14 @@ export default function PayrollPage() {
     const { data: tenant } = await supabase.from('tenants').select('config,name').eq('id', prof.tenant_id).single()
     setTenantData(tenant || null)
     // FIX: cargar sucursales reales (no de config JSONB).
-    const { data: branchData } = await supabase
+    let branchQuery = supabase
       .from('branches')
       .select('id,name,config,active')
       .eq('tenant_id', prof.tenant_id)
       .eq('active', true)
       .order('created_at')
+    if (prof.role === 'manager' && prof.branch_id) branchQuery = branchQuery.eq('id', prof.branch_id)
+    const { data: branchData } = await branchQuery
     const branchList = branchData || []
     setAllBranches(branchList)
     const isOwnerRole = prof.role === 'owner' || prof.role === 'super_admin'
@@ -266,14 +268,27 @@ export default function PayrollPage() {
       if (cur && branchList.some(b => b.id === cur)) return cur
       return prof.branch_id || branchList[0]?.id || null
     })
-    const [{ data: empData }, { data: shiftData }, { data: cutData }, { data: vacData }] = await Promise.all([
-      supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).eq('status', 'active').eq('has_shift', true),
-      supabase.from('shifts').select('*').eq('tenant_id', prof.tenant_id).order('date_str', { ascending: false }),
-      supabase.from('week_cuts').select('*').eq('tenant_id', prof.tenant_id).order('created_at', { ascending: false }),
-      supabase.from('vacation_periods')
-        .select('id,employee_id,tipo,status,start_date,end_date,prima_pct,entitled_days,compensated_days,compensated_amount,completed_at')
-        .eq('tenant_id', prof.tenant_id),
+    // FIX: branch isolation server-side
+    const isManagerBranch = prof.role === 'manager' && !!prof.branch_id
+    let empQuery = supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).eq('status', 'active').eq('has_shift', true)
+    let shiftQuery = supabase.from('shifts').select('*').eq('tenant_id', prof.tenant_id).order('date_str', { ascending: false })
+    let cutQuery = supabase.from('week_cuts').select('*').eq('tenant_id', prof.tenant_id).order('created_at', { ascending: false })
+    if (isManagerBranch) {
+      empQuery = empQuery.eq('branch_id', prof.branch_id)
+      shiftQuery = shiftQuery.eq('branch_id', prof.branch_id)
+      cutQuery = cutQuery.eq('branch_id', prof.branch_id)
+    }
+    const [{ data: empData }, { data: shiftData }, { data: cutData }] = await Promise.all([
+      empQuery,
+      shiftQuery,
+      cutQuery,
     ])
+    const empIds = (empData || []).map(e => e.id)
+    let vacQuery = supabase.from('vacation_periods')
+      .select('id,employee_id,tipo,status,start_date,end_date,prima_pct,entitled_days,compensated_days,compensated_amount,completed_at')
+      .eq('tenant_id', prof.tenant_id)
+    if (isManagerBranch) vacQuery = empIds.length ? vacQuery.in('employee_id', empIds) : null
+    const { data: vacData } = vacQuery ? await vacQuery : { data: [] }
     setAllEmps(empData || [])
     setShifts(shiftData || [])
     setCuts(cutData || [])
@@ -433,6 +448,7 @@ export default function PayrollPage() {
     const uncutShifts = weekShifts.filter(s => !s.week_cut_id)
     const { data: cut, error } = await supabase.from('week_cuts').insert({
       tenant_id: tenantId, start_date: startStr, end_date: endStr,
+      branch_id: myBranchId,
       closed_by_name: 'Gerente', notes: cutNote, paid: true,
       shift_ids: uncutShifts.map(s => s.id)
     }).select().single()

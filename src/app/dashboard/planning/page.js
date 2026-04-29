@@ -72,8 +72,18 @@ export default function PlanningPage() {
       return
     }
     setProfile(prof)
-    const { data: ten } = await supabase.from('tenants').select('*').eq('id', prof.tenant_id).single()
-    if (!ten?.config?.mixedSchedule?.enabled) {
+    const [{ data: ten }, { data: branchData }] = await Promise.all([
+      supabase.from('tenants').select('*').eq('id', prof.tenant_id).single(),
+      supabase.from('branches').select('id,config').eq('tenant_id', prof.tenant_id),
+    ])
+    // FIX: mixedSchedule por sucursal
+    const visibleBranches = prof.role === 'manager' && prof.branch_id
+      ? (branchData || []).filter(b => b.id === prof.branch_id)
+      : (branchData || [])
+    const mixedEnabled = visibleBranches.length > 0
+      ? visibleBranches.some(b => (b.config?.mixedSchedule || ten?.config?.mixedSchedule)?.enabled === true)
+      : ten?.config?.mixedSchedule?.enabled === true
+    if (!mixedEnabled) {
       toast.error('Activa "Horario mixto" en Configuración primero')
       router.push('/dashboard/settings')
       return
@@ -82,20 +92,24 @@ export default function PlanningPage() {
 
     // Cargar metadata de "planificación guardada" (weekly_plans) para esta semana
     const wkEnd = addDaysIso(weekStart, 6)
-    const { data: wp } = await supabase
+    // FIX: branch isolation server-side
+    let wpQuery = supabase
       .from('weekly_plans')
       .select('id, start_date, end_date, title, saved_by_name, saved_at, notes')
       .eq('tenant_id', prof.tenant_id)
       .eq('start_date', weekStart)
-      .maybeSingle()
+    if (prof.role === 'manager' && prof.branch_id) wpQuery = wpQuery.eq('branch_id', prof.branch_id)
+    const { data: wp } = await wpQuery.maybeSingle()
     setSavedMeta(wp || null)
-    const { data: emps } = await supabase
+    let empQuery = supabase
       .from('employees')
-      .select('id, name, department, employee_code, daily_hours, is_mixed, status')
+      .select('id, name, department, employee_code, daily_hours, is_mixed, status, branch_id')
       .eq('tenant_id', prof.tenant_id)
       .eq('status', 'active')
       .eq('is_mixed', true)
       .order('name')
+    if (prof.role === 'manager' && prof.branch_id) empQuery = empQuery.eq('branch_id', prof.branch_id)
+    const { data: emps } = await empQuery
     setMixedEmps(emps || [])
 
     const dates = weekDates(weekStart)

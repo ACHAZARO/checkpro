@@ -25,13 +25,25 @@ export async function GET(req) {
   if (!start || !end) return NextResponse.json({ error: 'missing_range' }, { status: 400 })
 
   const sb = createServiceClient()
-  const { data, error } = await sb
+  // FIX: branch isolation server-side
+  let q = sb
     .from('shift_plans')
     .select('*')
     .eq('tenant_id', prof.tenant_id)
     .gte('date_str', start)
     .lte('date_str', end)
     .order('date_str')
+  if (prof.role === 'manager' && prof.branch_id) {
+    const { data: emps } = await sb
+      .from('employees')
+      .select('id')
+      .eq('tenant_id', prof.tenant_id)
+      .eq('branch_id', prof.branch_id)
+    const empIds = (emps || []).map(e => e.id)
+    if (empIds.length === 0) return NextResponse.json({ plans: [] })
+    q = q.in('employee_id', empIds)
+  }
+  const { data, error } = await q
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ plans: data || [] })
 }
@@ -56,12 +68,16 @@ export async function POST(req) {
   const empIds = [...new Set(plans.map(p => p.employee_id).filter(Boolean))]
   const { data: emps } = await sb
     .from('employees')
-    .select('id, is_mixed, daily_hours, tenant_id')
+    .select('id, is_mixed, daily_hours, tenant_id, branch_id')
     .in('id', empIds)
   const empMap = new Map((emps || []).map(e => [e.id, e]))
   for (const e of (emps || [])) {
     if (e.tenant_id !== tenant_id) {
       return NextResponse.json({ error: 'cross_tenant' }, { status: 403 })
+    }
+    // FIX: branch isolation server-side
+    if (prof.role === 'manager' && prof.branch_id && e.branch_id !== prof.branch_id) {
+      return NextResponse.json({ error: 'cross_branch' }, { status: 403 })
     }
   }
 
@@ -76,6 +92,7 @@ export async function POST(req) {
       const duration = Number(p.duration_hours || emp.daily_hours || 8)
       toUpsert.push({
         tenant_id,
+        branch_id: emp.branch_id || null,
         employee_id: p.employee_id,
         date_str: p.date_str,
         entry_time_str: p.entry_time_str,

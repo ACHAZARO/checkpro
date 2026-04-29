@@ -152,31 +152,43 @@ export default function DashboardPage() {
       const supabase = createClient()
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) { setLoading(false); return }
-      const { data: profile } = await supabase.from('profiles').select('tenant_id').eq('id', session.user.id).single()
+      const { data: profile } = await supabase.from('profiles').select('tenant_id,role,branch_id').eq('id', session.user.id).single()
       if (!profile?.tenant_id) { setLoading(false); return }
       setTenantId(profile.tenant_id)
 
       const today = isoDate(now)
 
+      // FIX: branch isolation server-side
+      const isManagerBranch = profile.role === 'manager' && !!profile.branch_id
+
       // Employees with shift
-      const { data: employees } = await supabase
+      let empQuery = supabase
         .from('employees').select('*').eq('tenant_id', profile.tenant_id).eq('status', 'active').eq('has_shift', true)
+      if (isManagerBranch) empQuery = empQuery.eq('branch_id', profile.branch_id)
+      const { data: employees } = await empQuery
+      const myEmpIds = (employees || []).map(e => e.id)
 
       // Today's shifts
-      const { data: todayShifts } = await supabase
+      let todayShiftsQuery = supabase
         .from('shifts').select('*').eq('tenant_id', profile.tenant_id).eq('date_str', today)
+      if (isManagerBranch) todayShiftsQuery = myEmpIds.length ? todayShiftsQuery.in('employee_id', myEmpIds) : null
+      const { data: todayShifts } = todayShiftsQuery ? await todayShiftsQuery : { data: [] }
 
       // Open incidents
-      const { data: incidents } = await supabase
+      let incidentsQuery = supabase
         .from('shifts').select('id,employee_id').eq('tenant_id', profile.tenant_id).eq('status', 'incident')
+      if (isManagerBranch) incidentsQuery = myEmpIds.length ? incidentsQuery.in('employee_id', myEmpIds) : null
+      const { data: incidents } = incidentsQuery ? await incidentsQuery : { data: [] }
 
       // Grave incidents (last 12 months) for alert
       const cutoff12m = isoDate(new Date(Date.now() - 365 * 24 * 3600 * 1000))
-      const { data: graveShifts } = await supabase.from('shifts')
+      let graveShiftsQuery = supabase.from('shifts')
         .select('employee_id,classification')
         .eq('tenant_id', profile.tenant_id)
         .eq('status', 'absent')
         .gte('date_str', cutoff12m)
+      if (isManagerBranch) graveShiftsQuery = myEmpIds.length ? graveShiftsQuery.in('employee_id', myEmpIds) : null
+      const { data: graveShifts } = graveShiftsQuery ? await graveShiftsQuery : { data: [] }
 
       // Tenant config for vacation table
       const { data: tenantData } = await supabase.from('tenants').select('config').eq('id', profile.tenant_id).single()
@@ -187,20 +199,24 @@ export default function DashboardPage() {
       const rangeWeek = weekRange(new Date(), closingDayKey)
       const weekStartStr = isoDate(rangeWeek.start)
       const weekEndStr = isoDate(rangeWeek.end)
-      const { data: weekShiftsData } = await supabase
+      let weekShiftsQuery = supabase
         .from('shifts')
         .select('id, employee_id, date_str, duration_hours, status, classification')
         .eq('tenant_id', profile.tenant_id)
         .gte('date_str', weekStartStr)
         .lte('date_str', weekEndStr)
+      if (isManagerBranch) weekShiftsQuery = myEmpIds.length ? weekShiftsQuery.in('employee_id', myEmpIds) : null
+      const { data: weekShiftsData } = weekShiftsQuery ? await weekShiftsQuery : { data: [] }
 
       // FIX R6: cargar vacation_periods vivos (pending/postponed/active/completed)
       // para pasarlos a hasVacationPending(emp, periods).
-      const { data: vpData } = await supabase
+      let vpQuery = supabase
         .from('vacation_periods')
         .select('employee_id,anniversary_year,status')
         .eq('tenant_id', profile.tenant_id)
         .in('status', ['pending', 'postponed', 'active', 'completed'])
+      if (isManagerBranch) vpQuery = myEmpIds.length ? vpQuery.in('employee_id', myEmpIds) : null
+      const { data: vpData } = vpQuery ? await vpQuery : { data: [] }
       setVacPeriods(vpData || [])
 
       setData({
