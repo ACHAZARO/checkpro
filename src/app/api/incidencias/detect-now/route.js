@@ -280,6 +280,84 @@ export async function POST(req) {
     }
   }
 
-  summary.total = summary.absences + summary.shift_incidents
+  // ── 3. retardos threshold: empleado con N retardos en 30 dias ──
+  // Config por sucursal: branches.config.retardosParaFalta. Fallback al tenant.
+  // Si el valor es null/undefined/0 → no se generan alertas.
+  // Idempotencia: solo una incidencia 4_retardos_falta por empleado en ventana de 30d.
+  summary.retardo_threshold = 0
+  {
+    const cutoff30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+    const cutoffStr = isoDateInTz(cutoff30, TZ)
+    const tenantThreshold = Number(cfg.retardosParaFalta) || null
+
+    const { data: branches } = await admin
+      .from('branches')
+      .select('id, config')
+      .eq('tenant_id', tenantId)
+    const branchThresholds = new Map(
+      (branches || []).map(b => [b.id, Number(b?.config?.retardosParaFalta) || null])
+    )
+
+    // Solo seguimos si al menos UNA branch (o tenant) tiene threshold configurado.
+    const anyThreshold = tenantThreshold || [...branchThresholds.values()].some(Boolean)
+    if (anyThreshold) {
+      const { data: retardoShifts } = await admin
+        .from('shifts')
+        .select('employee_id, date_str, classification')
+        .eq('tenant_id', tenantId)
+        .gte('date_str', cutoffStr)
+        .lte('date_str', targetDate)
+
+      // Cuenta retardos por empleado (solo classification.type === 'retardo')
+      const retardoCount = new Map()
+      for (const s of (retardoShifts || [])) {
+        if (s.classification?.type !== 'retardo') continue
+        retardoCount.set(s.employee_id, (retardoCount.get(s.employee_id) || 0) + 1)
+      }
+      if (retardoCount.size > 0) {
+        const empIds = [...retardoCount.keys()]
+        const { data: emps } = await admin
+          .from('employees')
+          .select('id, name, branch_id, free_schedule, status')
+          .in('id', empIds)
+          .eq('tenant_id', tenantId)
+
+        // Idempotencia: ya existe 4_retardos_falta para este empleado en los ultimos 30 dias?
+        const { data: existingThresholdIncs } = await admin
+          .from('incidencias')
+          .select('employee_id, date_str')
+          .eq('tenant_id', tenantId)
+          .eq('kind', '4_retardos_falta')
+          .gte('date_str', cutoffStr)
+          .in('employee_id', empIds)
+        const alreadyAlerted = new Set((existingThresholdIncs || []).map(i => i.employee_id))
+
+        for (const emp of (emps || [])) {
+          if (emp.status !== 'active' || emp.free_schedule) continue
+          if (alreadyAlerted.has(emp.id)) continue
+
+          const threshold = (emp.branch_id && branchThresholds.get(emp.branch_id)) || tenantThreshold
+          if (!threshold) continue
+
+          const count = retardoCount.get(emp.id) || 0
+          if (count < threshold) continue
+
+          const inserted = await insertIncidenciaOnce(admin, {
+            tenant_id: tenantId,
+            branch_id: emp.branch_id || null,
+            employee_id: emp.id,
+            employee_name: emp.name,
+            date_str: targetDate,
+            kind: '4_retardos_falta',
+            description: `${count} retardos en los últimos 30 días (límite ${threshold}). Revisar manualmente: convertir a falta injustificada o dejar pasar.`,
+            status: 'open',
+          })
+          if (inserted) summary.retardo_threshold++
+        }
+      }
+    }
+  }
+
+  summary.total = summary.absences + summary.shift_incidents + (summary.retardo_threshold || 0)
   return NextResponse.json(summary)
 }

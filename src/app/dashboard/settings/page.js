@@ -993,6 +993,16 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
           {/* FIX: umbral falta configurable */}
         </div>
         <div>
+          <label className="label">Retardos para alerta de falta (en 30 días)</label>
+          <input className="input" type="number" min="1" max="30" step="1" placeholder="Sin alerta"
+            value={cfg.retardosParaFalta ?? ''}
+            onChange={e => {
+              const v = e.target.value === '' ? null : Math.max(1, parseInt(e.target.value) || 1)
+              F('retardosParaFalta', v)
+            }} />
+          <p className="text-[10px] text-gray-400 font-mono mt-1">Cuando un empleado acumule este número de retardos en 30 días, se genera una alerta en Incidencias para revisar manual. Deja en blanco para no generar alertas (cero retardos hacen falta).</p>
+        </div>
+        <div>
           <label className="label">Alerta jornada abierta (horas)</label>
           <input className="input" type="number" min="1" max="24" value={cfg.alertHours ?? 8} onChange={e => F('alertHours', parseInt(e.target.value) || 8)} />
         </div>

@@ -94,6 +94,10 @@ const RESOLUTION_OPTIONS = {
     { value: 'revisado', label: 'Revisado — sin consecuencias', desc: 'Explicación válida para el cambio de dispositivo.', color: 'blue' },
     { value: 'fraude_confirmado', label: 'Fraude confirmado', desc: 'Se registra falta grave en historial disciplinario para ambos empleados involucrados.', color: 'red' },
   ],
+  '4_retardos_falta': [
+    { value: 'convertir_falta', label: 'Convertir a falta injustificada', desc: 'Marca el día de hoy como falta injustificada en el historial disciplinario.', color: 'red' },
+    { value: 'dejar_pasar', label: 'Dejar pasar — solo aviso', desc: 'Se cierra la alerta sin generar falta. El acumulador de retardos sigue contando.', color: 'blue' },
+  ],
 }
 
 const OPTION_BORDER = {
@@ -245,6 +249,8 @@ export default function IncidenciasPage() {
     try {
       if (detail.kind === 'falta') {
         await resolveFalta(supabase, selectedOption, resolveLabel, resolutionText)
+      } else if (detail.kind === '4_retardos_falta' && selectedOption === 'convertir_falta') {
+        await resolveRetardosThresholdToFalta(supabase, fullNote)
       } else if (detail.kind === 'abandono' && selectedOption === 'salio_en_hora') {
         await resolveAbandonoScheduled(supabase, fullNote)
       } else if (detail.kind === 'abandono' && selectedOption === 'registrar_manual') {
@@ -333,6 +339,55 @@ export default function IncidenciasPage() {
       tenant_id: detail.tenant_id, action: 'ABSENCE',
       employee_id: detail.employee_id, employee_name: detail.employee_name,
       detail: `${label} · ${detail.date_str}${note ? ' · ' + note : ''}`, success: true,
+    })
+  }
+
+  // Cuando admin decide convertir el aviso "4 retardos = 1 falta" en una falta real:
+  // crea/actualiza el shift de hoy como falta_injustificada y resuelve la incidencia.
+  async function resolveRetardosThresholdToFalta(supabase, fullNote) {
+    const today = detail.date_str // detect-now usa hoy como date_str de la alerta
+    const { data: existing } = await supabase
+      .from('shifts').select('id, status, classification')
+      .eq('tenant_id', detail.tenant_id)
+      .eq('employee_id', detail.employee_id)
+      .eq('date_str', today)
+      .maybeSingle()
+
+    const classification = { type: 'falta_injustificada', label: 'Falta injustificada (acumulado de retardos)' }
+    const incidents = [{ type: 'grave', note: fullNote, ts: new Date().toISOString() }]
+
+    if (existing?.id) {
+      // Si ya hay un shift hoy (ej: el empleado checó tarde), lo respetamos: solo loggeamos.
+      // Esto evita machacar una entrada real con una falta artificial.
+      if (existing.status !== 'absent') {
+        // Resolvemos la incidencia con nota explicativa pero NO tocamos el shift real.
+      } else {
+        const { error } = await supabase.from('shifts').update({
+          status: 'absent', classification, incidents,
+        }).eq('id', existing.id).eq('tenant_id', profile?.tenant_id)
+        if (error) throw error
+      }
+    } else {
+      const { error } = await supabase.from('shifts').insert({
+        tenant_id: detail.tenant_id, employee_id: detail.employee_id,
+        date_str: today, entry_time: null, exit_time: null,
+        duration_hours: 0, status: 'absent',
+        classification, incidents, corrections: [],
+      })
+      if (error) throw error
+    }
+
+    const { error: incErr } = await supabase.from('incidencias').update({
+      status: 'resolved', resolution: fullNote,
+      resolved_by: profile?.id || null, resolved_by_name: profile?.name || null,
+      resolved_at: new Date().toISOString(),
+    }).eq('id', detail.id).eq('tenant_id', profile?.tenant_id)
+    if (incErr) throw incErr
+
+    await supabase.from('audit_log').insert({
+      tenant_id: detail.tenant_id, action: 'RETARDOS_THRESHOLD_TO_FALTA',
+      employee_id: detail.employee_id, employee_name: detail.employee_name,
+      detail: `${fullNote} · ${today}`, success: true,
     })
   }
 
