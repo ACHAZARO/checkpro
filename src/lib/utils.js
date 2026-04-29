@@ -251,6 +251,84 @@ export function hasVacationPending(employee, periods = []) {
   return !alive.some(p => p.anniversary_year === currentYear)
 }
 
+// Calculo de salario diario para PAGO DE VACACIONES.
+// LFT art. 89 dicta salario diario = monthly_salary / 30.
+export function computeDailyRate(employee) {
+  if (!employee) return 0
+  const salary = Number(employee.monthly_salary) || 0
+  return salary / 30
+}
+
+function daysIntersect(aStart, aEnd, bStart, bEnd) {
+  if (!aStart || !aEnd || !bStart || !bEnd) return 0
+  const s = aStart > bStart ? aStart : bStart
+  const e = aEnd < bEnd ? aEnd : bEnd
+  if (s > e) return 0
+  const d1 = new Date(s + 'T12:00:00')
+  const d2 = new Date(e + 'T12:00:00')
+  return Math.round((d2 - d1) / (24 * 3600 * 1000)) + 1
+}
+
+export function vacationPayForWeek(employee, periodsForEmp, weekStart, weekEnd) {
+  const dailyRate = computeDailyRate(employee)
+  let daysInRange = 0
+  let normalPay = 0
+  let primaPay = 0
+  let compensationPay = 0
+  const details = []
+
+  for (const p of periodsForEmp || []) {
+    const tipo = p.tipo || 'tomadas'
+    const status = p.status
+    if (tipo === 'tomadas' && (status === 'active' || status === 'completed')) {
+      const startStr = String(p.start_date || '').slice(0, 10)
+      const endStr = String(p.end_date || '').slice(0, 10)
+      const days = daysIntersect(startStr, endStr, weekStart, weekEnd)
+      if (days > 0) {
+        const pct = Number(p.prima_pct) || 0
+        const baseNormal = days * dailyRate
+        const basePrima = baseNormal * (pct / 100)
+        daysInRange += days
+        normalPay += baseNormal
+        primaPay += basePrima
+        details.push({
+          type: 'tomadas',
+          periodId: p.id,
+          days,
+          rangeStart: startStr,
+          rangeEnd: endStr,
+          primaPct: pct,
+          normalPay: baseNormal,
+          primaPay: basePrima,
+        })
+      }
+    } else if (tipo === 'compensadas') {
+      const completedAt = p.completed_at ? String(p.completed_at).slice(0, 10) : null
+      if (completedAt && completedAt >= weekStart && completedAt <= weekEnd) {
+        const amt = Number(p.compensated_amount) || 0
+        compensationPay += amt
+        details.push({
+          type: 'compensadas',
+          periodId: p.id,
+          days: Number(p.compensated_days) || 0,
+          completedAt,
+          amount: amt,
+        })
+      }
+    }
+  }
+
+  return {
+    dailyRate: Math.round(dailyRate * 100) / 100,
+    daysInRange,
+    normalPay: Math.round(normalPay * 100) / 100,
+    primaPay: Math.round(primaPay * 100) / 100,
+    compensationPay: Math.round(compensationPay * 100) / 100,
+    totalVacationPay: Math.round((normalPay + primaPay + compensationPay) * 100) / 100,
+    details,
+  }
+}
+
 function resolvePayEmployee(employee, coveringEmployee, coveragePayMode) {
   if (!coveringEmployee) return employee
   const mode = coveragePayMode || 'covered'
@@ -269,7 +347,8 @@ function resolvePayEmployee(employee, coveringEmployee, coveragePayMode) {
 //   - festivo x3, día de descanso trabajado x2 (LFT art. 73)
 //   - OT corrections pagadas a 2x; empWeekSummary escala a 3x para OT >9h/semana
 export function calcShiftPay(shift, employee, coveringEmployee, coveragePayMode) {
-  if (shift.classification?.type === 'falta_injustificada') return 0
+  // FIX: faltas auto descuentan en nomina
+  if (shift.classification?.type === 'falta_injustificada' || shift.classification?.type === 'falta') return 0
   const worked = Math.max(0, Number(shift?.duration_hours || 0)) // FIX: evitar nomina negativa/NaN por duration_hours invalido.
   if (!worked) return 0
   const payEmp = resolvePayEmployee(employee, coveringEmployee, coveragePayMode)
@@ -304,7 +383,11 @@ export function empWeekSummary(employee, weekShifts, allEmployees, coveragePayMo
   }, 0)
   const retardos = closed.filter(s => s.classification?.type === 'retardo').length
   const incidents = mine.filter(s => s.status === 'incident').length
-  const faltasInjustificadas = mine.filter(s => s.classification?.type === 'falta_injustificada').length
+  // FIX: faltas auto descuentan en nomina
+  const faltasInjustificadas = mine.filter(s =>
+    s.classification?.type === 'falta_injustificada' ||
+    s.classification?.type === 'falta'
+  ).length
   const faltasJustificadas = mine.filter(s =>
     s.classification?.type === 'falta_justificada_pagada' ||
     s.classification?.type === 'falta_justificada_no_pagada'
@@ -393,7 +476,8 @@ export function managerFreeScheduleAlerts(employee, weekShifts) {
 export function countGraveIncidents(allShifts, employeeId) {
   return allShifts.filter(s =>
     s.employee_id === employeeId &&
-    s.classification?.type === 'falta_injustificada'
+    // FIX: faltas auto descuentan en nomina
+    (s.classification?.type === 'falta_injustificada' || s.classification?.type === 'falta')
   ).length
 }
 

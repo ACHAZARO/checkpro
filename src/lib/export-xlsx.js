@@ -3,7 +3,7 @@
 // Compatible con la Secretaría del Trabajo — incluye detalle diario + resumen totales.
 
 import * as XLSX from 'xlsx'
-import { calcShiftPay, monthlyToHourly, empWeekSummary } from '@/lib/utils'
+import { calcShiftPay, monthlyToHourly, empWeekSummary, vacationPayForWeek } from '@/lib/utils'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const fmtT = d => d ? new Date(d).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : ''
@@ -190,7 +190,7 @@ export function generateAttendanceXLSX({ shifts, emps, branches, periodFrom, per
 //   branchName  — nombre de la sucursal
 //   empWeekSummaryFn  — función empWeekSummary de utils.js (importada en el page)
 //   coveragePayMode   — 'covered' | 'own' | 'lower'
-export function generatePayrollXLSX({ cut, weekShifts, emps, branchName, empWeekSummaryFn, coveragePayMode }) {
+export function generatePayrollXLSX({ cut, weekShifts, emps, branchName, empWeekSummaryFn, coveragePayMode, vacationPeriods = [] }) {
   const wb = XLSX.utils.book_new()
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -205,14 +205,24 @@ export function generatePayrollXLSX({ cut, weekShifts, emps, branchName, empWeek
     [],
   ]
 
-  let grandGross = 0, grandNet = 0, grandH = 0
+  const vacByEmp = {}
+  for (const p of vacationPeriods || []) {
+    if (!vacByEmp[p.employee_id]) vacByEmp[p.employee_id] = []
+    vacByEmp[p.employee_id].push(p)
+  }
+
+  let grandGross = 0, grandNet = 0, grandH = 0, grandVac = 0
 
   const summaryRows = emps.map(emp => {
     const s = empWeekSummaryFn(emp, weekShifts, emps, coveragePayMode)
-    const net = Math.max(0, s.grossPay - s.retardoDesc - s.incidentDesc)
-    grandGross += s.grossPay
+    // FIX: XLSX nomina incluye vacaciones
+    const vac = vacationPayForWeek(emp, vacByEmp[emp.id] || [], cut.start_date, cut.end_date)
+    const grossWithVac = s.grossPay + vac.totalVacationPay
+    const net = Math.max(0, grossWithVac - s.retardoDesc - s.incidentDesc)
+    grandGross += grossWithVac
     grandNet += net
     grandH += s.totalH
+    grandVac += vac.totalVacationPay
     const worked = s.shifts.filter(sh => sh.status === 'closed' || sh.status === 'incident').length
     return {
       'Empleado': emp.name,
@@ -225,7 +235,10 @@ export function generatePayrollXLSX({ cut, weekShifts, emps, branchName, empWeek
       'Incidencias': s.incidents,
       'Faltas Injust.': s.faltasInjustificadas,
       'Faltas Just.': s.faltasJustificadas,
-      'Salario Bruto ($)': parseFloat(s.grossPay.toFixed(2)),
+      'Vacaciones Dias': vac.daysInRange,
+      'Pago Vacaciones ($)': parseFloat((vac.normalPay + vac.primaPay).toFixed(2)),
+      'Compensaciones ($)': parseFloat(vac.compensationPay.toFixed(2)),
+      'Salario Bruto ($)': parseFloat(grossWithVac.toFixed(2)),
       'Desc. Retardos ($)': parseFloat(s.retardoDesc.toFixed(2)),
       'Desc. Incidencias ($)': parseFloat(s.incidentDesc.toFixed(2)),
       'Neto a Pagar ($)': parseFloat(net.toFixed(2)),
@@ -244,6 +257,9 @@ export function generatePayrollXLSX({ cut, weekShifts, emps, branchName, empWeek
     'Incidencias': '',
     'Faltas Injust.': '',
     'Faltas Just.': '',
+    'Vacaciones Dias': '',
+    'Pago Vacaciones ($)': parseFloat(grandVac.toFixed(2)),
+    'Compensaciones ($)': '',
     'Salario Bruto ($)': parseFloat(grandGross.toFixed(2)),
     'Desc. Retardos ($)': '',
     'Desc. Incidencias ($)': '',
@@ -259,6 +275,35 @@ export function generatePayrollXLSX({ cut, weekShifts, emps, branchName, empWeek
   // HOJA 2 — DETALLE DE TURNOS DEL CORTE
   // ────────────────────────────────────────────────────────────────────────────
   const empMap = Object.fromEntries(emps.map(e => [e.id, e]))
+
+  const vacationRows = []
+  for (const emp of emps) {
+    const vac = vacationPayForWeek(emp, vacByEmp[emp.id] || [], cut.start_date, cut.end_date)
+    for (const d of vac.details) {
+      vacationRows.push({
+        'Empleado': emp.name,
+        'Codigo': emp.employee_code || '',
+        'Tipo': d.type === 'tomadas' ? 'Vacaciones' : 'Compensacion',
+        'Dias': d.days || 0,
+        'Periodo / Fecha': d.type === 'tomadas' ? `${d.rangeStart} al ${d.rangeEnd}` : d.completedAt,
+        'Pago Base ($)': d.type === 'tomadas' ? round2(d.normalPay) : 0,
+        'Prima / Comp. ($)': d.type === 'tomadas' ? round2(d.primaPay) : round2(d.amount),
+        'Prima %': d.type === 'tomadas' ? d.primaPct : '',
+      })
+    }
+  }
+  if (vacationRows.length > 0) {
+    // FIX: XLSX nomina incluye vacaciones
+    const vacInfoRows = [
+      ['VACACIONES Y COMPENSACIONES - ' + (branchName || '')],
+      ['Periodo:', cut.start_date + ' al ' + cut.end_date],
+      [],
+    ]
+    const wsVac = XLSX.utils.aoa_to_sheet(vacInfoRows)
+    XLSX.utils.sheet_add_json(wsVac, vacationRows, { origin: vacInfoRows.length })
+    autoWidth(wsVac, vacationRows)
+    XLSX.utils.book_append_sheet(wb, wsVac, 'Vacaciones')
+  }
 
   const sortedShifts = [...weekShifts].sort((a, b) => {
     const ea = empMap[a.employee_id]?.name || ''

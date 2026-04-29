@@ -2,7 +2,7 @@
 // src/app/dashboard/payroll/page.js
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
-import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate, dayKey, DAY_FL } from '@/lib/utils'
+import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate, dayKey, DAY_FL, vacationPayForWeek } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import { Building2, Lock, AlertTriangle, Printer, FileSpreadsheet, Loader2, X, Check, Minus, DollarSign, Flag } from 'lucide-react'
 
@@ -13,25 +13,8 @@ const DEFAULT_PAYROLL_LEGEND = 'Al firmar el presente comprobante de nómina, el
 // BUG 4: LFT art. 89 dicta salario diario = monthly_salary / 30.
 // Se usa 30 fijo (no workDaysPerWeek*52/12) para que jornadas de <5 dias
 // no inflen el diario. Coincide con lib/vacations.js computeCompensationAmount.
-function computeDailyRate(emp) {
-  if (!emp) return 0
-  const salary = Number(emp.monthly_salary) || 0
-  return salary / 30
-}
-
 // Numero de dias entre dos fechas ISO (inclusive) que intersectan [aStart, aEnd]
 // con [bStart, bEnd]. Todos como strings YYYY-MM-DD.
-function daysIntersect(aStart, aEnd, bStart, bEnd) {
-  if (!aStart || !aEnd || !bStart || !bEnd) return 0
-  const s = aStart > bStart ? aStart : bStart
-  const e = aEnd < bEnd ? aEnd : bEnd
-  if (s > e) return 0
-  // Diferencia en dias inclusive
-  const d1 = new Date(s + 'T12:00:00')
-  const d2 = new Date(e + 'T12:00:00')
-  return Math.round((d2 - d1) / (24 * 3600 * 1000)) + 1
-}
-
 // ── Resumen de vacaciones que impactan el corte semanal ────────────────────
 // Para un empleado, con sus periodos y rango de semana (weekStart, weekEnd):
 // - tomadas (active o completed): dias en rango * dailyRate + prima.
@@ -44,66 +27,6 @@ function daysIntersect(aStart, aEnd, bStart, bEnd) {
 // agregando week_cuts.vacation_period_ids + enganche en closeWeek. Por ahora,
 // dejamos la logica tal cual: el flujo normal (cortes inmutables una vez
 // cerrados) no tiene el problema. Revisar cuando agreguemos edicion de cortes.
-function vacationPayForWeek(emp, periodsForEmp, weekStart, weekEnd) {
-  const dailyRate = computeDailyRate(emp)
-  let daysInRange = 0
-  let normalPay = 0
-  let primaPay = 0
-  let compensationPay = 0
-  const details = []
-
-  for (const p of periodsForEmp || []) {
-    const tipo = p.tipo || 'tomadas'
-    const status = p.status
-    if (tipo === 'tomadas' && (status === 'active' || status === 'completed')) {
-      const startStr = String(p.start_date || '').slice(0, 10)
-      const endStr = String(p.end_date || '').slice(0, 10)
-      const days = daysIntersect(startStr, endStr, weekStart, weekEnd)
-      if (days > 0) {
-        const pct = Number(p.prima_pct) || 0
-        const baseNormal = days * dailyRate
-        const basePrima = baseNormal * (pct / 100)
-        daysInRange += days
-        normalPay += baseNormal
-        primaPay += basePrima
-        details.push({
-          type: 'tomadas',
-          periodId: p.id,
-          days,
-          rangeStart: startStr,
-          rangeEnd: endStr,
-          primaPct: pct,
-          normalPay: baseNormal,
-          primaPay: basePrima,
-        })
-      }
-    } else if (tipo === 'compensadas') {
-      const completedAt = p.completed_at ? String(p.completed_at).slice(0, 10) : null
-      if (completedAt && completedAt >= weekStart && completedAt <= weekEnd) {
-        const amt = Number(p.compensated_amount) || 0
-        compensationPay += amt
-        details.push({
-          type: 'compensadas',
-          periodId: p.id,
-          days: Number(p.compensated_days) || 0,
-          completedAt,
-          amount: amt,
-        })
-      }
-    }
-  }
-
-  return {
-    dailyRate: Math.round(dailyRate * 100) / 100,
-    daysInRange,
-    normalPay: Math.round(normalPay * 100) / 100,
-    primaPay: Math.round(primaPay * 100) / 100,
-    compensationPay: Math.round(compensationPay * 100) / 100,
-    totalVacationPay: Math.round((normalPay + primaPay + compensationPay) * 100) / 100,
-    details,
-  }
-}
-
 // FIX 10: escape HTML en todas las interpolaciones de datos del cliente
 // dentro del HTML del reporte (corre en un iframe same-origin). Previene XSS
 // si un gerente pega algo como "<img src=x onerror=...>" en notas del corte,
@@ -314,6 +237,7 @@ export default function PayrollPage() {
   const [printHTML, setPrintHTML] = useState(null)
   const [resolvingId, setResolvingId] = useState(null)
   const [exportingXLS, setExportingXLS] = useState(false)
+  const [openPayrollIncidents, setOpenPayrollIncidents] = useState(0)
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -397,7 +321,7 @@ export default function PayrollPage() {
     myEmpIds.has(s.employee_id)
   )
   const incidentShifts = weekShifts.filter(s => s.status === 'incident')
-  const hasUnresolved = incidentShifts.length > 0
+  const hasUnresolved = incidentShifts.length > 0 || openPayrollIncidents > 0
 
   // FIX BUG: solo se permite cerrar el día configurado por la sucursal.
   // dayKey() usa hora local (no UTC) — el gerente cierra cuando es ese día
@@ -427,6 +351,28 @@ export default function PayrollPage() {
   }
 
   // ── Resolve an incident shift ─────────────────────────────────────────────
+  useEffect(() => {
+    setOpenPayrollIncidents(0)
+  }, [selectedBranchId, weekStartStr, weekEndStr])
+
+  async function countOpenPeriodIncidents(supabase, startStr, endStr) {
+    if (!tenantId || myEmpIds.size === 0) return 0
+    // FIX: cierre nomina bloquea incidencias abiertas
+    const { count, error } = await supabase
+      .from('incidencias')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('status', 'open')
+      .gte('date_str', startStr)
+      .lte('date_str', endStr)
+      .in('employee_id', [...myEmpIds])
+    if (error) {
+      console.error('[payroll] open incidencias check error:', error)
+      throw error
+    }
+    return count || 0
+  }
+
   async function resolveIncident(shiftId, action) {
     setResolvingId(shiftId)
     const supabase = createClient()
@@ -450,8 +396,12 @@ export default function PayrollPage() {
 
   // ── Close week ────────────────────────────────────────────────────────────
   async function closeWeek() {
-    if (hasUnresolved) {
+    if (incidentShifts.length > 0) {
       toast.error(`Resuelve las ${incidentShifts.length} incidencia(s) antes de cerrar la semana`)
+      return
+    }
+    if (openPayrollIncidents > 0) {
+      toast.error(`Hay ${openPayrollIncidents} incidencia(s) abierta(s) en el periodo. Resuelvelas antes de cerrar el corte.`)
       return
     }
     // FIX BUG: bloquear cierre si hoy no es el dia de corte de la sucursal.
@@ -466,6 +416,20 @@ export default function PayrollPage() {
     setClosing(true)
     const supabase = createClient()
     const startStr = isoDate(range.start), endStr = isoDate(range.end)
+    let openIncCount = 0
+    try {
+      openIncCount = await countOpenPeriodIncidents(supabase, startStr, endStr)
+    } catch (e) {
+      toast.error('No se pudieron validar incidencias abiertas antes del corte')
+      setClosing(false)
+      return
+    }
+    if (openIncCount > 0) {
+      setOpenPayrollIncidents(openIncCount)
+      toast.error(`Hay ${openIncCount} incidencia(s) abierta(s) en el periodo. Resuelvelas antes de cerrar el corte.`)
+      setClosing(false)
+      return
+    }
     const uncutShifts = weekShifts.filter(s => !s.week_cut_id)
     const { data: cut, error } = await supabase.from('week_cuts').insert({
       tenant_id: tenantId, start_date: startStr, end_date: endStr,
@@ -539,6 +503,7 @@ export default function PayrollPage() {
         branchName: cfg?.branchName || myBranchName,
         empWeekSummaryFn: empWeekSummary,
         coveragePayMode: cfg?.coveragePayMode ?? 'covered',
+        vacationPeriods: vacPeriods,
       })
       toast.success('Archivo generado correctamente')
     } catch (err) {
@@ -669,6 +634,19 @@ export default function PayrollPage() {
       )}
 
       {/* ── Resumen de la semana por empleado ─────────────────────────────── */}
+      {openPayrollIncidents > 0 && (
+        <div className="mb-6 px-4 py-3 bg-red-500/10 border border-red-500/30 rounded-xl">
+          <p className="text-red-400 text-sm font-bold">
+            Hay {openPayrollIncidents} incidencia(s) abierta(s) en el periodo. Resuelvelas antes de cerrar el corte.
+          </p>
+          <button
+            onClick={() => { window.location.href = '/dashboard/incidencias?status=open' }}
+            className="mt-3 px-3 py-1.5 bg-red-500/15 border border-red-500/30 rounded-lg text-red-300 text-xs font-semibold active:bg-red-500/25">
+            Ir a incidencias
+          </button>
+        </div>
+      )}
+
       <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Resumen semanal</p>
       <div className="space-y-2 mb-6">
         {emps.map(emp => {
