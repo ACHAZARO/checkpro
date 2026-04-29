@@ -45,7 +45,7 @@ export async function GET(req) {
   const monthStart = `${month}-01`
   const monthEnd = toDateStr(new Date(year, monthNum, 0))
 
-  const [{ data: shifts, error: shiftsErr }, { data: employees, error: empErr }] = await Promise.all([
+  const [{ data: shifts, error: shiftsErr }, { data: employees, error: empErr }, { data: incidencias, error: incErr }] = await Promise.all([
     admin
       .from('shifts')
       .select('employee_id, date_str, status, classification')
@@ -58,15 +58,34 @@ export async function GET(req) {
       .eq('tenant_id', profile.tenant_id)
       .eq('status', 'active')
       .eq('has_shift', true),
+    admin
+      .from('incidencias')
+      .select('employee_id, kind, date_str')
+      .eq('tenant_id', profile.tenant_id)
+      .gte('date_str', monthStart)
+      .lte('date_str', monthEnd)
+      .in('kind', ['abandono', 'falta_injustificada']),
   ])
 
-  if (shiftsErr || empErr) {
-    console.error('[employees/ranking] db error', shiftsErr || empErr)
+  if (shiftsErr || empErr || incErr) {
+    console.error('[employees/ranking] db error', shiftsErr || empErr || incErr)
     return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 })
   }
 
   const rows = shifts || []
+  const severeEmployeeIds = new Set()
+  rows.forEach(s => {
+    const type = s.classification?.type || s.classification
+    if (type === 'falta_injustificada' || type === 'abandono' || s.kind === 'falta_injustificada') {
+      severeEmployeeIds.add(s.employee_id)
+    }
+  })
+  ;(incidencias || []).forEach(i => {
+    if (i.kind === 'abandono' || i.kind === 'falta_injustificada') severeEmployeeIds.add(i.employee_id)
+  })
+  const excluded = (employees || []).filter(employee => severeEmployeeIds.has(employee.id)).length
   const ranking = (employees || [])
+    .filter(employee => !severeEmployeeIds.has(employee.id)) // FIX: ranking siempre visible top 3
     .map(employee => {
       const empShifts = rows.filter(s => s.employee_id === employee.id)
       const puntual = empShifts.filter(s => s.classification?.type === 'puntual').length
@@ -88,7 +107,7 @@ export async function GET(req) {
     })
     .filter(item => item.dias_trabajados > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 5)
+    .slice(0, 3)
 
-  return NextResponse.json({ ok: true, month, ranking })
+  return NextResponse.json({ ok: true, month, items: ranking, excluded }) // FIX: ranking siempre visible top 3
 }

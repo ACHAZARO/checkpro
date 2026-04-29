@@ -761,7 +761,8 @@ export default function EmployeeDetailPage() {
       {/* ── Histórico ─────────────────────────────────────────────────────── */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-bold text-white">Histórico de periodos</h2>
+          <h2 className="text-sm font-bold text-white">Historial de vacaciones</h2>
+          {/* FIX: historico de periodos */}
           <span className="text-[10px] font-mono text-gray-500">{periods.length} registro{periods.length !== 1 ? 's' : ''}</span>
         </div>
 

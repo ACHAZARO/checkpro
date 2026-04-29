@@ -80,7 +80,7 @@ export function toMonthlySalary(employee) {
 }
 
 // CAMBIO — classifyEntry compara en la TZ del tenant
-export function classifyEntry(schedule, entryTime, toleranceMinutes, tz = DEFAULT_TZ) {
+export function classifyEntry(schedule, entryTime, toleranceMinutes, absenceMinutes = 60, tz = DEFAULT_TZ) {
   const dk = dayKey(entryTime, tz)
   const s = schedule?.[dk]
   if (s?.work && (!s.start || !/^\d{2}:\d{2}$/.test(String(s.start)))) return { type:'no_laboral', label:'Horario invalido' } // FIX: evitar Date invalida con horario incompleto.
@@ -89,9 +89,11 @@ export function classifyEntry(schedule, entryTime, toleranceMinutes, tz = DEFAUL
   const refUtc = fromZonedTime(`${dateStr}T${s.start}:00`, tz)
   const diff = Math.round((new Date(entryTime) - refUtc) / 60000)
   const tolerance = Math.max(0, Number(toleranceMinutes) || 0) // FIX: tolerancia invalida no debe volver NaN la clasificacion.
+  const absence = Math.max(1, Number(absenceMinutes) || 60) // FIX: umbral falta configurable
   if (diff <= 0) return { type:'puntual', label:'Puntual' }
   if (diff <= tolerance) return { type:'tolerancia', label:`Tolerancia (${diff} min)` }
-  return { type:'retardo', label:`Retardo (${diff} min)` }
+  if (diff <= absence) return { type:'retardo', label:`Retardo (${diff} min)` }
+  return { type:'falta', label:`Falta (${diff} min tarde)` }
 }
 
 // NUEVO — gerentes con horario libre: siempre "libre", nunca retardo/no_laboral.

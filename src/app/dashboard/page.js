@@ -5,7 +5,8 @@ import { createClient } from '@/lib/supabase'
 import { fmtTime, weekRange, isoDate, diffMin, DAYS, countGraveIncidents, hasVacationPending, calcVacationDays, managerFreeScheduleAlerts } from '@/lib/utils'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
-import { Unlock, Palmtree, Cake, Award, AlertTriangle, Clock, ClipboardList, X } from 'lucide-react'
+import BottomSheet from '@/components/BottomSheet'
+import { Unlock, Palmtree, Cake, Award, AlertTriangle, Clock, ClipboardList, X, Info, Trophy } from 'lucide-react'
 
 function daysUntilBirthday(iso) {
   if (!iso) return null
@@ -43,13 +44,16 @@ function formatDDMM(iso) {
   return `${s[2]}/${s[1]}`
 }
 
-function StatCard({ label, value, color = 'text-white', sub }) {
+function StatCard({ label, value, color = 'text-white', sub, onClick }) {
+  const Comp = onClick ? 'button' : 'div'
   return (
-    <div className={`stat-premium ${color}`}>
+    <Comp
+      {...(onClick ? { type: 'button', onClick } : {})}
+      className={`stat-premium ${color} ${onClick ? 'w-full text-left cursor-pointer hover:bg-dark-card/50 transition' : ''}`}>
       <div className="stat-label" style={{ color: 'var(--cp-text-muted)' }}>{label}</div>
       <div className={`stat-value ${color}`}>{value}</div>
       {sub && <div className="stat-sub">{sub}</div>}
-    </div>
+    </Comp>
   )
 }
 
@@ -57,6 +61,7 @@ function ShiftBadge({ status, classification }) {
   if (status === 'open') return <span className="badge-blue">Activo</span>
   if (status === 'incident') return <span className="badge-red">Incidencia</span>
   const t = classification?.type
+  if (t === 'falta') return <span className="badge-red">Falta</span>
   if (t === 'retardo') return <span className="badge-orange">Retardo</span>
   if (t === 'tolerancia') return <span className="badge-orange">Tolerancia</span>
   if (t === 'no_laboral') return <span className="badge-gray">No laboral</span>
@@ -138,6 +143,7 @@ export default function DashboardPage() {
   const [vacExpired, setVacExpired] = useState({ loading: true, items: [], error: null })
   const [reactivating, setReactivating] = useState(null)
   const [ranking, setRanking] = useState({ loading: true, items: [], error: null })
+  const [kpiSheet, setKpiSheet] = useState({ open: false, title: '', items: [], renderItem: null }) // FIX: KPIs clickeables
 
   const now = new Date()
 
@@ -255,7 +261,7 @@ export default function DashboardPage() {
       const r = await fetch('/api/employees/ranking?month=' + month, { cache: 'no-store' })
       const j = await r.json()
       if (!r.ok || !j.ok) throw new Error(j.error || 'HTTP ' + r.status)
-      setRanking({ loading: false, items: j.ranking || [], error: null })
+      setRanking({ loading: false, items: j.items || j.ranking || [], error: null })
     } catch (e) {
       setRanking({ loading: false, items: [], error: e.message || 'error' })
     }
@@ -284,6 +290,8 @@ export default function DashboardPage() {
   if (!data) return null
 
   const { employees, todayShifts, incidents, graveShifts, vacTable, weekShifts = [] } = data
+  const todayDayKey = DAYS[now.getDay() === 0 ? 6 : now.getDay() - 1]
+  const todayScheduleStart = e => e.schedule?.[todayDayKey]?.start || null
 
   // feat/gerente-libre — alertas para gerentes con horario libre.
   const freeManagers = employees.filter(e => e.free_schedule)
@@ -304,10 +312,19 @@ export default function DashboardPage() {
     .map(e => ({ ...e, _bdDays: daysUntilBirthday(e.birth_date) }))
     .filter(e => e._bdDays !== null && e._bdDays >= 0 && e._bdDays <= 7)
     .sort((a, b) => a._bdDays - b._bdDays)
-  const notYet = employees.filter(e => !todayShifts.some(s => s.employee_id === e.id))
+  const notYet = employees.filter(e => { // FIX: gerentes horario libre
+    const isManager = e.can_manage === true || e.role === 'manager'
+    const hasNoStartToday = !todayScheduleStart(e)
+    if (isManager && (e.schedule_free === true || e.free_schedule === true || hasNoStartToday)) return false
+    return !todayShifts.some(s => s.employee_id === e.id)
+  })
   const retardos = todayShifts.filter(s => s.classification?.type === 'retardo')
   const activeNow = todayShifts.filter(s => s.status === 'open')
   const getEmpName = id => employees.find(e => e.id === id)?.name || id
+  const getShiftEmployee = shift => employees.find(e => e.id === shift.employee_id)
+  const openKpiSheet = (title, items, renderItem) => { // FIX: KPIs clickeables
+    setKpiSheet({ open: true, title, items, renderItem })
+  }
 
   return (
     <div className="p-5 md:p-6 max-w-5xl mx-auto">
@@ -397,10 +414,17 @@ export default function DashboardPage() {
       )}
 
       <div className="grid grid-cols-2 gap-3 mb-5">
-        <StatCard label="Con entrada" value={checkedIn.length} color="text-brand-400" sub={`de ${employees.length}`} />
-        <StatCard label="Sin checar" value={notYet.length} color="text-orange-400" />
-        <StatCard label="Retardos" value={retardos.length} color={retardos.length > 0 ? 'text-orange-400' : 'text-white'} />
-        <StatCard label="Activos ahora" value={activeNow.length} color="text-blue-400" />
+        <StatCard label="Con entrada" value={checkedIn.length} color="text-brand-400" sub={`de ${employees.length}`} onClick={() => openKpiSheet('Con entrada', checkedIn, e => {
+          const shift = todayShifts.find(s => s.employee_id === e.id)
+          return `${e.name} · ${fmtTime(shift?.entry_time)}`
+        })} />
+        <StatCard label="Sin checar" value={notYet.length} color="text-orange-400" onClick={() => openKpiSheet('Sin checar', notYet, e => `${e.name} · ${e.department || 'Sin departamento'}`)} />
+        <StatCard label="Retardos" value={retardos.length} color={retardos.length > 0 ? 'text-orange-400' : 'text-white'} onClick={() => openKpiSheet('Retardos', retardos, s => {
+          const emp = getShiftEmployee(s)
+          const labelMinutes = String(s.classification?.label || '').match(/(\d+)\s*min/i)?.[1]
+          return `${emp?.name || s.employee_id} · ${labelMinutes || 0} min retardo`
+        })} />
+        <StatCard label="Activos ahora" value={activeNow.length} color="text-blue-400" onClick={() => openKpiSheet('Activos ahora', activeNow, s => `${getEmpName(s.employee_id)} · ${fmtTime(s.entry_time)} · ${diffMin(s.entry_time, now.toISOString())} min`)} />
       </div>
 
       {/* ---------- VACATIONS WIDGETS GRID ---------- */}
@@ -517,12 +541,16 @@ export default function DashboardPage() {
 
         {/* D. Prescripciones (expired) */}
         {vacExpired.loading ? (
-          <WidgetSkeleton title="Prescripciones" />
+          <WidgetSkeleton title="Vacaciones por vencer" />
         ) : vacExpired.error ? (
-          <WidgetError title="Prescripciones" onRetry={fetchExpired} />
+          <WidgetError title="Vacaciones por vencer" onRetry={fetchExpired} />
         ) : (
           <div className="card">
-            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5"><AlertTriangle size={12} /> Prescripciones</p>
+            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+              <AlertTriangle size={12} /> Vacaciones por vencer
+              <Info size={14} title="La LFT 2023 establece que los dias de vacaciones prescriben a los 18 meses sin uso. Aqui ves empleados con dias en riesgo." />
+              {/* FIX: rename prescripciones */}
+            </p>
             {vacExpired.items.length === 0 ? (
               <p className="text-xs text-gray-400">Sin periodos prescritos.</p>
             ) : (
@@ -565,34 +593,44 @@ export default function DashboardPage() {
         <div className="mb-5">
           <WidgetError title="Ranking del mes" onRetry={fetchRanking} />
         </div>
-      ) : ranking.items.length > 0 && (
+      ) : (
         <div className="card mb-5">
           <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Award size={12} /> Ranking del mes</p>
-          <div className="space-y-2">
-            {ranking.items.map((item, index) => {
-              const medalClass = index === 0
-                ? 'text-yellow-400'
-                : index === 1
-                ? 'text-gray-300'
-                : index === 2
-                ? 'text-orange-400'
-                : 'text-gray-500'
-              return (
-                <div key={item.employee_id || item.name} className="flex items-center justify-between gap-3 px-3 py-2 border rounded-lg bg-dark-700 border-dark-border">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className={`text-lg font-extrabold font-mono w-6 text-center shrink-0 ${medalClass}`}>{index + 1}</div>
-                    <div className="min-w-0">
-                      <div className="text-sm text-white font-semibold truncate">{item.name}</div>
-                      <div className="text-[11px] text-gray-400 font-mono mt-0.5">
-                        {item.puntual || 0}p / {item.tolerancia || 0}t / {item.retardo || 0}r / {item.dias_trabajados || 0}d
+          {ranking.items.length === 0 ? (
+            <div className="text-center py-8">
+              <div className="flex justify-center mb-2"><Trophy size={28} className="text-gray-500" /></div>
+              <p className="text-sm text-gray-300 font-semibold">Aun no hay datos suficientes para el ranking de este mes</p>
+              <p className="text-[11px] text-gray-500 font-mono mt-1">Las incidencias graves descalifican del ranking</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {ranking.items.map((item, index) => {
+                const medalClass = index === 0
+                  ? 'text-yellow-400'
+                  : index === 1
+                  ? 'text-gray-300'
+                  : index === 2
+                  ? 'text-orange-400'
+                  : 'text-gray-500'
+                return (
+                  <div key={item.employee_id || item.name} className="flex items-center justify-between gap-3 px-3 py-2 border rounded-lg bg-dark-700 border-dark-border">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`text-lg font-extrabold font-mono w-6 text-center shrink-0 ${medalClass}`}>{index + 1}</div>
+                      <div className="min-w-0">
+                        {index === 0 && <div className="inline-block bg-yellow-500/20 text-yellow-300 border border-yellow-500/40 px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider mb-1">Empleado del mes</div>}
+                        <div className="text-sm text-white font-semibold truncate">{item.name}</div>
+                        <div className="text-[11px] text-gray-400 font-mono mt-0.5">
+                          {item.puntual || 0}p / {item.tolerancia || 0}t / {item.retardo || 0}r / {item.dias_trabajados || 0}d
+                        </div>
                       </div>
                     </div>
+                    <div className="text-sm font-extrabold text-brand-400 font-mono">{item.score || 0}</div>
                   </div>
-                  <div className="text-sm font-extrabold text-brand-400 font-mono">{item.score || 0}</div>
-                </div>
-              )
-            })}
-          </div>
+                )
+              })}
+            </div>
+          )}
+          {/* FIX: ranking siempre visible top 3 */}
         </div>
       )}
 
@@ -623,7 +661,10 @@ export default function DashboardPage() {
             <div key={e.id} className="flex items-center justify-between py-2.5 border-b border-dark-border last:border-0">
               <div>
                 <div className="font-semibold text-sm text-white">{e.name}</div>
-                <div className="text-xs text-gray-400">{e.department} · desde {e.schedule?.[DAYS[now.getDay()===0?6:now.getDay()-1]]?.start || '—'}</div>
+                <div className="text-xs text-gray-400">
+                  {e.department} · {todayScheduleStart(e) ? `desde ${todayScheduleStart(e)}` : 'Horario libre'}
+                  {/* FIX: gerentes horario libre */}
+                </div>
               </div>
               <span className="badge-gray">Sin registro</span>
             </div>
@@ -660,6 +701,24 @@ export default function DashboardPage() {
           <Link href="/dashboard/employees" className="text-brand-400 text-sm font-semibold mt-2 inline-block">+ Agregar empleados →</Link>
         </div>
       )}
+
+      <BottomSheet
+        open={kpiSheet.open}
+        title={kpiSheet.title}
+        onClose={() => setKpiSheet(s => ({ ...s, open: false }))}>
+        {/* FIX: KPIs clickeables */}
+        {kpiSheet.items.length === 0 ? (
+          <p className="text-xs text-gray-400 font-mono">Sin empleados en este grupo</p>
+        ) : (
+          <div className="space-y-2">
+            {kpiSheet.items.map((item, index) => (
+              <div key={item.id || item.employee_id || index} className="px-3 py-2 bg-dark-700 border border-dark-border rounded-lg text-sm text-white">
+                {kpiSheet.renderItem ? kpiSheet.renderItem(item) : String(item?.name || item?.employee_id || item)}
+              </div>
+            ))}
+          </div>
+        )}
+      </BottomSheet>
     </div>
   )
 }

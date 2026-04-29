@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 
 // Fields managers are allowed to mutate inside branch.config
 const MANAGER_CONFIG_FIELDS = new Set([
-  'toleranceMinutes','alertHours','weekClosingDay',
+  'toleranceMinutes','absenceMinutes','alertHours','weekClosingDay',
   'location','businessHours','holidays','restDays',
   'printHeader','printLegalText','printFooter'
 ])

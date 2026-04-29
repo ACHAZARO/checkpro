@@ -120,7 +120,16 @@ export async function POST(req) {
 
     // Cargar config del tenant
     const { data: tenant } = await supabase.from('tenants').select('config').eq('id', tenantId).single()
-    const cfg = tenant?.config || {}
+    let cfg = tenant?.config || {}
+    if (branchId) {
+      const { data: branchCfg } = await supabase
+        .from('branches')
+        .select('config')
+        .eq('tenant_id', tenantId)
+        .eq('id', branchId)
+        .maybeSingle()
+      cfg = { ...cfg, ...(branchCfg?.config || {}) } // FIX: umbral falta configurable
+    }
     const tz = cfg.timezone || 'America/Mexico_City'
     const now = new Date().toISOString()
     const dateStr = isoDate(now, tz)
@@ -193,9 +202,9 @@ export async function POST(req) {
     }
 
     const branch = branchId ? (cfg.branches || []).find(b => b.id === branchId) : null
-    const branchIp = branch?.ip || null
+    const branchIp = cfg.ip || branch?.ip || null
     const ipMatchesBranch = branchIp ? (currentIp === branchIp) : true
-    const coveragePayMode = branch?.coveragePayMode || 'covered'
+    const coveragePayMode = cfg.coveragePayMode || branch?.coveragePayMode || 'covered'
 
     const safeGeo = { lat: geo?.lat ?? null, lng: geo?.lng ?? null, dist, accuracy: geo?.accuracy ?? null, verified: geoValid, outOfRange }
 
@@ -261,7 +270,7 @@ export async function POST(req) {
       } else if (emp.is_mixed) {
         classification = classifyEntryMixed(mixedPlan, now, cfg.toleranceMinutes || 10, tz)
       } else {
-        classification = classifyEntry(emp.schedule || {}, now, cfg.toleranceMinutes || 10, tz)
+        classification = classifyEntry(emp.schedule || {}, now, cfg.toleranceMinutes || 10, cfg.absenceMinutes || 60, tz) // FIX: umbral falta configurable
       }
 
       const holidays = cfg.holidays || []
@@ -333,6 +342,21 @@ export async function POST(req) {
           date_str: dateStr,
           kind: 'retardo',
           description: minutes != null ? `Retardo de ${minutes} minutos.` : classification.label,
+          status: 'open',
+        })
+      }
+
+      if (classification.type === 'falta') { // FIX: umbral falta configurable
+        const minutes = minutesFromLabel(classification.label)
+        await insertIncidenciaOnce(supabase, {
+          tenant_id: tenantId,
+          branch_id: branchId || null,
+          employee_id: emp.id,
+          employee_name: emp.name,
+          shift_id: insertedShift?.id || null,
+          date_str: dateStr,
+          kind: 'falta',
+          description: minutes != null ? `Entrada reclasificada como falta por ${minutes} minutos tarde.` : classification.label,
           status: 'open',
         })
       }

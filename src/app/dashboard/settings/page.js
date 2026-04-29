@@ -924,6 +924,12 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
           <input className="input" type="number" min="0" max="60" value={cfg.toleranceMinutes ?? 10} onChange={e => F('toleranceMinutes', parseInt(e.target.value) || 0)} />
         </div>
         <div>
+          <label className="label">Umbral de falta (minutos)</label>
+          <input className="input" type="number" min="1" max="480" step="1" value={cfg.absenceMinutes ?? 60} onChange={e => F('absenceMinutes', parseInt(e.target.value) || 60)} />
+          <p className="text-[10px] text-gray-400 font-mono mt-1">Despues de este tiempo el retardo se reclasifica como falta. Default 60.</p>
+          {/* FIX: umbral falta configurable */}
+        </div>
+        <div>
           <label className="label">Alerta jornada abierta (horas)</label>
           <input className="input" type="number" min="1" max="24" value={cfg.alertHours ?? 8} onChange={e => F('alertHours', parseInt(e.target.value) || 8)} />
         </div>
