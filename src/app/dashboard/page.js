@@ -183,13 +183,13 @@ export default function DashboardPage() {
       if (isManagerBranch) incidentsQuery = myEmpIds.length ? incidentsQuery.in('employee_id', myEmpIds) : null
       const { data: incidents } = incidentsQuery ? await incidentsQuery : { data: [] }
 
-      // Grave incidents (last 12 months) for alert
-      const cutoff12m = isoDate(new Date(Date.now() - 365 * 24 * 3600 * 1000))
+      // Grave incidents (LFT Art. 47 fr. X: ventana de 30 dias para causal de despido)
+      const cutoff30d = isoDate(new Date(Date.now() - 30 * 24 * 3600 * 1000))
       let graveShiftsQuery = supabase.from('shifts')
         .select('employee_id,classification')
         .eq('tenant_id', profile.tenant_id)
         .eq('status', 'absent')
-        .gte('date_str', cutoff12m)
+        .gte('date_str', cutoff30d)
       if (isManagerBranch) graveShiftsQuery = myEmpIds.length ? graveShiftsQuery.in('employee_id', myEmpIds) : null
       const { data: graveShifts } = graveShiftsQuery ? await graveShiftsQuery : { data: [] }
 
@@ -324,8 +324,8 @@ export default function DashboardPage() {
   const absentToday = todayShifts.filter(s => s.status === 'absent')
   const checkedIn = employees.filter(e => realEntries.some(s => s.employee_id === e.id))
 
-  // Employees with 3+ grave incidents
-  const graveAlerts = employees.filter(e => countGraveIncidents(graveShifts, e.id) >= 3)
+  // LFT Art. 47 fr. X: "mas de tres faltas en 30 dias" = 4+. graveShifts ya viene con la ventana de 30d.
+  const graveAlerts = employees.filter(e => countGraveIncidents(graveShifts, e.id) > 3)
   // Employees with vacation pending
   // FIX R6: pasar vacPeriods como 2º arg (nueva signatura de hasVacationPending)
   const vacationPending = employees.filter(e => hasVacationPending(e, vacPeriods))
@@ -374,7 +374,7 @@ export default function DashboardPage() {
           className="mb-3">
           <div className="pl-4 pr-10 py-3 bg-red-600/15 border border-red-600/30 rounded-xl">
             <p className="text-red-400 text-sm font-bold mb-1 flex items-center gap-1.5">
-              <AlertTriangle size={14} /> ALERTA: {graveAlerts.length} empleado{graveAlerts.length > 1 ? 's' : ''} con 3+ faltas graves
+              <AlertTriangle size={14} /> ALERTA: {graveAlerts.length} empleado{graveAlerts.length > 1 ? 's' : ''} con 4+ faltas en 30 días
             </p>
             {graveAlerts.map(e => {
               const n = countGraveIncidents(graveShifts, e.id)

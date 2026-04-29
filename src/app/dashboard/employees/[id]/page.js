@@ -724,7 +724,7 @@ export default function EmployeeDetailPage() {
               </p>
             </div>
             <div className="card-sm">
-              <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider mb-1">Dias trabajados (12m)</p>
+              <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider mb-1">Dias trabajados (30d)</p>
               <p className="text-lg font-extrabold text-white">{attendanceSummary.counts?.dias_trabajados || 0}</p>
               <p className="text-[11px] text-gray-400 font-mono mt-0.5">
                 {attendanceSummary.counts?.puntual || 0} puntuales / {attendanceSummary.counts?.tolerancia || 0} tolerancia

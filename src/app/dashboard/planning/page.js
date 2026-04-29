@@ -300,14 +300,15 @@ export default function PlanningPage() {
           </div>
 
           <div className="card overflow-x-auto">
-            <table className="min-w-full text-xs">
+            <table className="min-w-full text-xs border-separate border-spacing-0">
               <thead>
                 <tr>
-                  <th className={`text-left p-2 font-mono border-b sticky left-0 z-10 ${
+                  <th className={`text-left p-2 font-mono border-b sticky left-0 z-20 min-w-[150px] ${
                     isDark
                       ? 'text-gray-500 border-dark-border bg-dark-800'
                       : 'text-gray-600 border-gray-200 bg-white'
-                  }`}>Empleado</th>
+                  }`}
+                    style={!isDark ? { boxShadow: '6px 0 8px -4px rgba(0,0,0,0.08)' } : { boxShadow: '6px 0 8px -4px rgba(0,0,0,0.4)' }}>Empleado</th>
                   {dates.map((d, i) => (
                     <th key={d} className={`text-center p-2 font-mono border-b min-w-[90px] ${
                       isDark ? 'text-gray-500 border-dark-border' : 'text-gray-600 border-gray-200'
@@ -323,10 +324,12 @@ export default function PlanningPage() {
                   <tr key={emp.id} className={`border-b ${
                     isDark ? 'border-dark-border/50 hover:bg-dark-700/40' : 'border-gray-100 hover:bg-gray-50'
                   }`}>
-                    <td className={`p-2 align-top sticky left-0 z-10 ${
+                    <td className={`p-2 align-top sticky left-0 z-20 min-w-[150px] ${
                       isDark ? 'bg-dark-800' : 'bg-white'
                     }`}
-                      style={!isDark ? { boxShadow: '4px 0 6px -4px rgba(0,0,0,0.06)' } : undefined}>
+                      style={!isDark
+                        ? { boxShadow: '6px 0 8px -4px rgba(0,0,0,0.08)' }
+                        : { boxShadow: '6px 0 8px -4px rgba(0,0,0,0.4)' }}>
                       <div className={`font-semibold text-xs whitespace-nowrap max-w-[160px] truncate ${isDark ? 'text-white' : 'text-gray-900'}`} title={emp.name}>{emp.name}</div>
                       <div className={`text-[10px] font-mono ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{emp.daily_hours || '?'} h/día · {emp.employee_code}</div>
                     </td>
