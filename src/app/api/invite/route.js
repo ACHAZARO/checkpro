@@ -33,7 +33,7 @@ export async function GET() {
   }
   const { data, error } = await admin
     .from('invitations')
-    .select('id, email, role, branch_id, expires_at, accepted_at, created_at')
+    .select('id, email, role, branch_id, employee_id, expires_at, accepted_at, created_at')
     .eq('tenant_id', profile.tenant_id)
     .order('created_at', { ascending: false })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -51,8 +51,25 @@ export async function POST(req) {
 
   const body = await req.json().catch(() => ({}))
   const email = String(body.email || '').trim().toLowerCase()
-  const branchId = body.branchId || null
+  const employeeId = body.employee_id || null
+  let branchId = body.branchId || null
   if (!email || !email.includes('@')) return NextResponse.json({ error: 'Correo inválido' }, { status: 400 })
+  // FIX: manager flow integrado
+  if (employeeId) {
+    const { data: employee, error: empErr } = await admin
+      .from('employees')
+      .select('id, tenant_id, branch_id')
+      .eq('id', employeeId)
+      .maybeSingle()
+    if (empErr) return NextResponse.json({ error: empErr.message }, { status: 500 })
+    if (!employee || employee.tenant_id !== profile.tenant_id) {
+      return NextResponse.json({ error: 'Empleado invalido' }, { status: 400 })
+    }
+    branchId = branchId || employee.branch_id
+    if (branchId && employee.branch_id && branchId !== employee.branch_id) {
+      return NextResponse.json({ error: 'La sucursal no coincide con el empleado' }, { status: 400 })
+    }
+  }
   if (!branchId) return NextResponse.json({ error: 'Falta la sucursal' }, { status: 400 })
 
   // Verify branch belongs to tenant
@@ -63,17 +80,40 @@ export async function POST(req) {
 
   // Create invitation token
   const token = randomBytes(24).toString('base64url')
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
 
-  const { data: inv, error: invErr } = await admin
-    .from('invitations')
-    .insert({
-      tenant_id: profile.tenant_id,
-      branch_id: branchId,
-      email,
-      role: 'manager',
-      token,
-      invited_by: profile.id
-    })
+  // FIX: manager flow integrado
+  let existingInvitation = null
+  if (employeeId) {
+    const { data: existing, error: existingErr } = await admin
+      .from('invitations')
+      .select('id')
+      .eq('tenant_id', profile.tenant_id)
+      .eq('employee_id', employeeId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (existingErr) return NextResponse.json({ error: existingErr.message }, { status: 500 })
+    existingInvitation = existing
+  }
+
+  const invitationPayload = {
+    tenant_id: profile.tenant_id,
+    branch_id: branchId,
+    employee_id: employeeId,
+    email,
+    role: body.role || 'manager',
+    token,
+    expires_at: expiresAt,
+    accepted_at: null,
+    invited_by: profile.id,
+  }
+
+  const invitationQuery = existingInvitation
+    ? admin.from('invitations').update(invitationPayload).eq('id', existingInvitation.id)
+    : admin.from('invitations').insert(invitationPayload)
+
+  const { data: inv, error: invErr } = await invitationQuery
     .select()
     .single()
   if (invErr) return NextResponse.json({ error: invErr.message }, { status: 500 })
@@ -92,6 +132,7 @@ export async function POST(req) {
       invitation_token: token,
       tenant_id: profile.tenant_id,
       branch_id: branchId,
+      employee_id: employeeId,
       role: 'manager'
     }
   })

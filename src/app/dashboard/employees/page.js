@@ -13,7 +13,7 @@ import { ConfirmSheet } from '@/components/ConfirmSheet'
 // Carga masiva (feat/bulk-employees-upload): modal de 3 pasos con plantilla + preview
 import BulkUploadModal from '@/components/BulkUploadModal'
 import { generateAllEmployeesBySheetXLSX } from '@/lib/export-xlsx'
-import { Upload, Plus, Download, Users, Building2, Calendar, Pencil, Trash2, AlertTriangle, Shuffle, Unlock, Eye } from 'lucide-react'
+import { Upload, Plus, Download, Users, Building2, Calendar, Pencil, Trash2, AlertTriangle, Shuffle, Unlock, Eye, Mail } from 'lucide-react'
 
 const DEF_BASE = { start: '09:00', end: '18:00' }
 
@@ -59,6 +59,10 @@ export default function EmployeesPage() {
   const [sheet, setSheet] = useState(null)
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
+  const [managerInvite, setManagerInvite] = useState(null)
+  const [managerEmail, setManagerEmail] = useState('')
+  const [managerInviteLoading, setManagerInviteLoading] = useState(false)
+  const [managerInviteBusy, setManagerInviteBusy] = useState(false)
   const [base, setBase] = useState({ ...DEF_BASE })
   // R7: estado del modal de confirmacion (reemplaza window.confirm()).
   // Forma: { title, message, onConfirm, danger, confirmLabel, cancelLabel, loading }
@@ -220,6 +224,9 @@ export default function EmployeesPage() {
   function openAdd() {
     const b = { ...DEF_BASE }
     setBase(b)
+    setManagerInvite(null)
+    setManagerEmail('')
+    setManagerInviteLoading(false)
     setForm({
       schedule: buildSchedule(b),
       has_shift: true,
@@ -237,6 +244,90 @@ export default function EmployeesPage() {
       free_min_hours_week: 40,
     })
     setSheet('add')
+  }
+
+  // FIX: manager flow integrado
+  async function loadManagerInvite(employeeId) {
+    if (!employeeId) {
+      setManagerInvite(null)
+      setManagerEmail('')
+      return
+    }
+    setManagerInviteLoading(true)
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from('invitations')
+      .select('id,email,accepted_at,created_at,expires_at')
+      .eq('employee_id', employeeId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    setManagerInviteLoading(false)
+    if (error) {
+      console.error('[employees] invitation load error:', error)
+      toast.error('No se pudo cargar la invitacion')
+      return
+    }
+    const expired = data?.expires_at && new Date(data.expires_at) <= new Date() && !data.accepted_at
+    setManagerInvite(expired ? null : data || null)
+    setManagerEmail(data?.email || '')
+  }
+
+  // FIX: manager flow integrado
+  async function sendManagerInvite() {
+    const email = String(managerInvite?.email || managerEmail || '').trim().toLowerCase()
+    if (!form.id) { toast.error('Guarda el empleado antes de invitar'); return }
+    if (!form.branch_id) { toast.error('Selecciona una sucursal'); return }
+    if (!email || !email.includes('@')) { toast.error('Correo invalido'); return }
+    setManagerInviteBusy(true)
+    try {
+      const r = await fetch('/api/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          branchId: form.branch_id,
+          employee_id: form.id,
+          role: 'manager',
+        }),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        toast.error(d.error || 'No se pudo enviar la invitacion')
+        if (d.manualLink) {
+          navigator.clipboard?.writeText(d.manualLink).then(() => toast('Link copiado para envio manual'))
+        }
+        return
+      }
+      toast.success(managerInvite ? 'Invitacion reenviada' : 'Invitacion enviada')
+      await loadManagerInvite(form.id)
+    } finally {
+      setManagerInviteBusy(false)
+    }
+  }
+
+  // FIX: manager flow integrado
+  async function patchManagerInvite(action) {
+    if (!managerInvite?.id) return
+    if (action === 'revoke' && !confirm('¿Revocar el acceso de este gerente?')) return
+    if (action === 'cancel' && !confirm('¿Cancelar esta invitacion?')) return
+    setManagerInviteBusy(true)
+    try {
+      const r = await fetch(`/api/invite/${managerInvite.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        toast.error(d.error || 'No se pudo actualizar la invitacion')
+        return
+      }
+      toast.success(action === 'revoke' ? 'Acceso revocado' : 'Invitacion cancelada')
+      await loadManagerInvite(form.id)
+    } finally {
+      setManagerInviteBusy(false)
+    }
   }
 
   async function save() {
@@ -399,6 +490,7 @@ export default function EmployeesPage() {
       free_min_days_week: emp.free_min_days_week ?? 5,
       free_min_hours_week: emp.free_min_hours_week ?? 40,
     })
+    loadManagerInvite(emp.id)
     setSheet('edit')
   }
 
@@ -664,6 +756,85 @@ export default function EmployeesPage() {
                     <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${form.has_shift ? 'left-5' : 'left-1'}`} />
                   </button>
                 </div>
+
+                {/* FIX: manager flow integrado */}
+                {form.can_manage && (
+                  <div className="border-t border-dark-border pt-3">
+                    <div className="p-3 bg-dark-700 border border-dark-border rounded-xl space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Mail size={16} className="text-brand-400" />
+                        <div>
+                          <p className="text-sm font-bold text-white">Acceso al panel de gerente</p>
+                          <p className="text-[10px] text-gray-500 font-mono">Invitacion asociada a este empleado.</p>
+                        </div>
+                      </div>
+
+                      {!form.id ? (
+                        <div className="text-xs text-gray-400 bg-dark-800 border border-dark-border rounded-lg p-3">
+                          Guarda el empleado primero para enviar la invitacion.
+                        </div>
+                      ) : managerInviteLoading ? (
+                        <p className="text-xs text-gray-500 font-mono">Cargando invitacion...</p>
+                      ) : managerInvite?.accepted_at ? (
+                        <div className="space-y-3">
+                          <p className="text-xs text-gray-300">
+                            Acceso activo desde {new Date(managerInvite.accepted_at).toLocaleDateString('es-MX')} como <span className="font-bold text-white">{managerInvite.email}</span>
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => patchManagerInvite('revoke')}
+                            disabled={managerInviteBusy}
+                            className="w-full px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-xs font-bold active:bg-red-500/20 disabled:opacity-40">
+                            Revocar acceso
+                          </button>
+                        </div>
+                      ) : managerInvite ? (
+                        <div className="space-y-3">
+                          <p className="text-xs text-gray-300 leading-snug">
+                            Invitacion enviada el {new Date(managerInvite.created_at).toLocaleDateString('es-MX')} a <span className="font-bold text-white">{managerInvite.email}</span>. Pendiente de confirmar.
+                          </p>
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <button
+                              type="button"
+                              onClick={sendManagerInvite}
+                              disabled={managerInviteBusy}
+                              className="flex-1 px-3 py-2 bg-brand-400 text-black rounded-lg text-xs font-bold active:brightness-90 disabled:opacity-40">
+                              Reenviar invitacion
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => patchManagerInvite('cancel')}
+                              disabled={managerInviteBusy}
+                              className="flex-1 px-3 py-2 bg-dark-800 border border-dark-border rounded-lg text-gray-300 text-xs font-bold active:bg-dark-600 disabled:opacity-40">
+                              Cancelar invitacion
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <label className="label" htmlFor="manager-email">Correo del gerente</label>
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <input
+                              id="manager-email"
+                              className="input text-sm flex-1"
+                              type="email"
+                              value={managerEmail}
+                              onChange={e => setManagerEmail(e.target.value)}
+                              placeholder="gerente@tuempresa.com"
+                            />
+                            <button
+                              type="button"
+                              onClick={sendManagerInvite}
+                              disabled={managerInviteBusy}
+                              className="px-4 py-2 bg-brand-400 text-black rounded-xl text-sm font-bold active:brightness-90 disabled:opacity-40">
+                              Enviar invitacion
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* feat/mixed-schedule: toggle horario mixto (solo si está habilitado en config) */}
                 {mixedCfgForBranch(form.branch_id).enabled && !form.free_schedule && (

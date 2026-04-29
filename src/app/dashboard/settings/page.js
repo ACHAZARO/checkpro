@@ -1,10 +1,9 @@
 'use client'
 // src/app/dashboard/settings/page.js
-// Tabs: Empresa / Sucursales / Equipo
+// Tabs: Configuracion / Apariencia / Ayuda
 // - Empresa: tenant-wide identity (name, logo, payroll legend, vacation table)
 // - Sucursales: list + open each one → per-branch config (hours, GPS, tolerancia,
 //   holidays, rest days, printing, coverage pay, IP, QR).
-// - Equipo: invitations (owner-only).
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { DAYS, DAY_L, DAY_FL, LFT_VACATION_TABLE } from '@/lib/utils'
@@ -20,7 +19,7 @@ const DEFAULT_LEYENDA = 'Al firmar el presente comprobante de nómina, el trabaj
 const FALLBACK_URL = 'https://checkpro-self.vercel.app'
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState('empresa')
+  const [tab, setTab] = useState('configuracion')
   const [profile, setProfile] = useState(null)
   const [tenant, setTenant] = useState(null)
   const [branches, setBranches] = useState([])
@@ -77,6 +76,13 @@ export default function SettingsPage() {
 
   useEffect(() => { load() }, [load])
 
+  useEffect(() => {
+    if (!profile) return
+    const owner = profile.role === 'owner' || profile.role === 'super_admin'
+    if (owner && !['configuracion', 'apariencia', 'ayuda'].includes(tab)) setTab('configuracion')
+    if (!owner && !['sucursales', 'ayuda'].includes(tab)) setTab('sucursales')
+  }, [profile, tab])
+
   if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando...</div>
 
   const isOwner = profile?.role === 'owner' || profile?.role === 'super_admin'
@@ -98,11 +104,8 @@ export default function SettingsPage() {
   }
 
   const TABS = isOwner
-    ? [['empresa','Empresa'],['sucursales','Sucursales'],['equipo','Equipo'],['apariencia','Apariencia'],['ayuda','Ayuda']]
+    ? [['configuracion','Configuracion'],['apariencia','Apariencia'],['ayuda','Ayuda']]
     : [['sucursales','Mi sucursal'],['ayuda','Ayuda']]
-
-  // Manager can't see Empresa/Equipo tabs; default to sucursales (Ayuda sí la ven)
-  if (!isOwner && tab !== 'sucursales' && tab !== 'ayuda') setTab('sucursales')
 
   return (
     <div className="p-5 md:p-6 max-w-3xl mx-auto">
@@ -122,9 +125,18 @@ export default function SettingsPage() {
         ))}
       </div>
 
-      {tab === 'empresa' && isOwner && (
+      {tab === 'configuracion' && isOwner && (
         tenant
-          ? <TenantIdentityTab tenant={tenant} onSaved={async () => { await load() }} />
+          ? (
+            <UnifiedSettingsTab
+              tenant={tenant}
+              branches={branches}
+              isOwner={isOwner}
+              myBranchId={profile?.branch_id}
+              onOpen={setOpenBranchId}
+              onChanged={async () => { await load() }}
+            />
+          )
           : (
             <div className="card text-center py-8">
               <div className="flex justify-center mb-2"><AlertTriangle size={32} className="text-red-400" /></div>
@@ -152,10 +164,6 @@ export default function SettingsPage() {
           onOpen={setOpenBranchId}
           onChanged={async () => { await load() }}
         />
-      )}
-
-      {tab === 'equipo' && isOwner && (
-        <TeamTab branches={branches} onChanged={load} />
       )}
 
 
@@ -199,6 +207,68 @@ export default function SettingsPage() {
       {tab === 'ayuda' && (
         <HelpCenter />
       )}
+    </div>
+  )
+}
+
+// FIX: settings unificado sin tab equipo
+function UnifiedSettingsTab({ tenant, branches, isOwner, myBranchId, onOpen, onChanged }) {
+  const [companyOpen, setCompanyOpen] = useState(!tenant?.name)
+  const cfg = tenant?.config || {}
+
+  useEffect(() => {
+    setCompanyOpen(!tenant?.name)
+  }, [tenant?.id, tenant?.name])
+
+  return (
+    <div className="space-y-4">
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">Empresa</p>
+            <p className="text-[11px] text-gray-500">Identidad general y textos legales.</p>
+          </div>
+          {!companyOpen && (
+            <button
+              type="button"
+              onClick={() => setCompanyOpen(true)}
+              className="px-3 py-1.5 bg-brand-400 text-black text-xs font-bold rounded-lg active:brightness-90">
+              Editar
+            </button>
+          )}
+        </div>
+
+        {companyOpen ? (
+          <TenantIdentityTab tenant={tenant} onSaved={async () => { await onChanged?.(); setCompanyOpen(false) }} />
+        ) : (
+          <div className="card flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-dark-700 border border-dark-border flex items-center justify-center overflow-hidden shrink-0">
+              {cfg.logoUrl
+                ? <img src={cfg.logoUrl} alt="" className="w-full h-full object-contain" onError={e => { e.target.style.display = 'none' }} />
+                : <Building2 size={22} className="text-gray-500" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-white truncate">{tenant.name}</p>
+              <p className="text-xs text-gray-400 truncate">{cfg.razonSocial || 'Sin razon social capturada'}</p>
+              <p className="text-[10px] text-gray-500 font-mono mt-0.5">Configuracion de empresa guardada.</p>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">Sucursales</p>
+          <p className="text-[11px] text-gray-500">Configura ubicacion, horarios, tolerancias e impresos por sucursal.</p>
+        </div>
+        <BranchesTab
+          branches={branches}
+          isOwner={isOwner}
+          myBranchId={myBranchId}
+          onOpen={onOpen}
+          onChanged={onChanged}
+        />
+      </section>
     </div>
   )
 }
@@ -1032,103 +1102,6 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
         className="w-full flex items-center justify-center gap-1.5 px-5 py-3 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40">
         {saving ? '...' : '✓ Guardar sucursal'}
       </button>
-    </div>
-  )
-}
-
-// ── Tab: Team / invitations (owner-only) ─────────────────────────────────────
-function TeamTab({ branches, onChanged }) {
-  const [invs, setInvs] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [form, setForm] = useState({ email: '', branchId: branches[0]?.id || '' })
-  const [sending, setSending] = useState(false)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    const r = await fetch('/api/invite')
-    const d = await r.json()
-    setInvs(d.invitations || [])
-    setLoading(false)
-  }, [])
-
-  useEffect(() => { load() }, [load])
-
-  async function invite() {
-    if (!form.email || !form.email.includes('@')) { toast.error('Correo inválido'); return }
-    if (!form.branchId) { toast.error('Elige una sucursal'); return }
-    setSending(true)
-    const r = await fetch('/api/invite', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: form.email, branchId: form.branchId })
-    })
-    const d = await r.json()
-    setSending(false)
-    if (!r.ok) {
-      toast.error(d.error || 'No se pudo invitar')
-      if (d.manualLink) {
-        navigator.clipboard.writeText(d.manualLink).then(() => toast('Link copiado — mándaselo manualmente', { icon: '📋' }))
-      }
-      return
-    }
-    toast.success('Invitación enviada')
-    setForm({ email: '', branchId: branches[0]?.id || '' })
-    load()
-  }
-
-  async function cancel(id) {
-    if (!confirm('¿Cancelar esta invitación?')) return
-    const r = await fetch(`/api/invite?id=${id}`, { method: 'DELETE' })
-    if (!r.ok) { toast.error('No se pudo cancelar'); return }
-    toast.success('Invitación cancelada')
-    load()
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="card space-y-3">
-        <p className="text-sm font-bold text-white">Invitar gerente</p>
-        <p className="text-xs text-gray-500">El gerente sólo podrá gestionar empleados, asistencia y nómina de su sucursal. No podrá crear sucursales ni cambiar la identidad de la empresa.</p>
-        <div>
-          <label className="label">Correo del gerente</label>
-          <input className="input" type="email" value={form.email} placeholder="gerente@tuempresa.com"
-            onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-        </div>
-        <div>
-          <label className="label">Sucursal asignada</label>
-          <select className="input" value={form.branchId} onChange={e => setForm(f => ({ ...f, branchId: e.target.value }))}>
-            <option value="">— Elegir sucursal —</option>
-            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-        </div>
-        <button onClick={invite} disabled={sending}
-          className="w-full md:w-auto px-5 py-2.5 bg-brand-400 text-black text-sm font-bold rounded-xl active:brightness-90 disabled:opacity-40">
-          {sending ? 'Enviando...' : 'Enviar invitación'}
-        </button>
-      </div>
-
-      <div>
-        <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Invitaciones activas</p>
-        {loading && <p className="text-xs text-gray-500 font-mono">Cargando...</p>}
-        {!loading && invs.length === 0 && <p className="text-xs text-gray-400 font-mono">Sin invitaciones activas.</p>}
-        {invs.map(i => {
-          const branch = branches.find(b => b.id === i.branch_id)
-          const expired = new Date(i.expires_at) < new Date()
-          return (
-            <div key={i.id} className="card flex items-center justify-between gap-2 mb-2">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-white truncate">{i.email}</div>
-                <div className="text-[10px] text-gray-500 font-mono">
-                  {branch?.name || 'Sucursal eliminada'} · {i.accepted_at ? '✓ Aceptada' : expired ? '⏱ Expirada' : '⏳ Pendiente'}
-                </div>
-              </div>
-              {!i.accepted_at && (
-                <button onClick={() => cancel(i.id)} className="p-1.5 text-red-400 text-xs active:bg-red-500/10 rounded-lg"><Trash2 size={14} aria-label="Eliminar" /></button>
-              )}
-            </div>
-          )
-        })}
-      </div>
     </div>
   )
 }
