@@ -76,7 +76,7 @@ export default function DashboardLayout({ children }) {
   )
 
   return (
-    <div className="flex min-h-dvh" style={{ backgroundColor: 'var(--cp-bg)' }}>
+    <div className="flex h-dvh overflow-hidden" style={{ backgroundColor: 'var(--cp-bg)' }}>
       {/* Desktop sidebar */}
       <aside data-sidebar className="hidden md:flex flex-col w-60 shrink-0 relative" style={{ background: 'linear-gradient(180deg, #0c0f15 0%, #101318 40%, #0e1117 100%)', borderRight: '1px solid #1f2636' }}>
         <div className="absolute top-0 left-0 right-0 h-px" style={{ background: 'linear-gradient(90deg, transparent, rgba(61,255,160,0.25), transparent)' }} />
