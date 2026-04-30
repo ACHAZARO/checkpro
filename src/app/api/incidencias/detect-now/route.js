@@ -69,12 +69,16 @@ export async function POST(req) {
 
   const { data: profile } = await admin
     .from('profiles')
-    .select('tenant_id, role')
+    .select('tenant_id, role, branch_id')
     .eq('id', user.id)
     .single()
   if (!profile?.tenant_id) return NextResponse.json({ error: 'Sin tenant' }, { status: 403 })
   if (!['owner', 'admin', 'manager', 'super_admin'].includes(profile.role)) { // FIX: alinear roles reales y evitar bloquear owners.
     return NextResponse.json({ error: 'Sin permisos' }, { status: 403 })
+  }
+  if (profile.role === 'manager' && !profile.branch_id) {
+    // FIX: manager sin branch_id no debe operar todo el tenant.
+    return NextResponse.json({ error: 'Gerente sin sucursal asignada' }, { status: 403 })
   }
 
   // Rate limit: max 5 detecciones/min por usuario. Cliente ya throttle a 60s,
@@ -85,6 +89,7 @@ export async function POST(req) {
   }
 
   const tenantId = profile.tenant_id
+  const managerBranchId = profile.role === 'manager' ? profile.branch_id : null // FIX: manager solo detecta su sucursal.
   const now = new Date()
   const targetDate = isoDateInTz(now, TZ)
   const targetDayKey = dayKeyInTz(new Date(`${targetDate}T12:00:00Z`), TZ)
@@ -100,21 +105,25 @@ export async function POST(req) {
   )
 
   if (!isHoliday) {
-    const { data: emps } = await admin
+    let empQuery = admin
       .from('employees')
       .select('id, name, branch_id, schedule, has_shift, free_schedule, is_mixed')
       .eq('tenant_id', tenantId)
       .eq('status', 'active')
+    if (managerBranchId) empQuery = empQuery.eq('branch_id', managerBranchId)
+    const { data: emps } = await empQuery
 
     const fixedCandidates = (emps || []).filter(e =>
       !e.is_mixed && e.has_shift !== false && !e.free_schedule && e.schedule?.[targetDayKey]?.work === true
     )
 
-    const { data: plans } = await admin
+    let planQuery = admin
       .from('shift_plans')
       .select('employee_id')
       .eq('tenant_id', tenantId)
       .eq('date_str', targetDate)
+    if (managerBranchId) planQuery = planQuery.eq('branch_id', managerBranchId)
+    const { data: plans } = await planQuery
     const plannedEmpIds = new Set((plans || []).map(p => p.employee_id))
     const mixedCandidates = (emps || []).filter(e =>
       e.is_mixed && e.has_shift !== false && plannedEmpIds.has(e.id)
@@ -176,13 +185,15 @@ export async function POST(req) {
   }
 
   // ── 2. detect-shifts: abandono y salida temprana ──
-  const { data: shifts } = await admin
+  let shiftsQuery = admin
     .from('shifts')
     .select('id, employee_id, branch_id, entry_time, exit_time, status')
     .eq('tenant_id', tenantId)
     .eq('date_str', targetDate)
     .not('entry_time', 'is', null)
     .in('status', ['open', 'closed'])
+  if (managerBranchId) shiftsQuery = shiftsQuery.eq('branch_id', managerBranchId)
+  const { data: shifts } = await shiftsQuery
 
   if (shifts && shifts.length > 0) {
     const empIds = [...new Set(shifts.map(s => s.employee_id))]
@@ -301,12 +312,14 @@ export async function POST(req) {
     // Solo seguimos si al menos UNA branch (o tenant) tiene threshold configurado.
     const anyThreshold = tenantThreshold || [...branchThresholds.values()].some(Boolean)
     if (anyThreshold) {
-      const { data: retardoShifts } = await admin
+      let retardoQuery = admin
         .from('shifts')
         .select('employee_id, date_str, classification')
         .eq('tenant_id', tenantId)
         .gte('date_str', cutoffStr)
         .lte('date_str', targetDate)
+      if (managerBranchId) retardoQuery = retardoQuery.eq('branch_id', managerBranchId)
+      const { data: retardoShifts } = await retardoQuery
 
       // Cuenta retardos por empleado (solo classification.type === 'retardo')
       const retardoCount = new Map()
@@ -316,11 +329,13 @@ export async function POST(req) {
       }
       if (retardoCount.size > 0) {
         const empIds = [...retardoCount.keys()]
-        const { data: emps } = await admin
+        let thresholdEmpQuery = admin
           .from('employees')
           .select('id, name, branch_id, free_schedule, status')
           .in('id', empIds)
           .eq('tenant_id', tenantId)
+        if (managerBranchId) thresholdEmpQuery = thresholdEmpQuery.eq('branch_id', managerBranchId)
+        const { data: emps } = await thresholdEmpQuery
 
         // Idempotencia: ya existe 4_retardos_falta para este empleado en los ultimos 30 dias?
         const { data: existingThresholdIncs } = await admin

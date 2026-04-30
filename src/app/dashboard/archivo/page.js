@@ -37,6 +37,7 @@ export default function ArchivoPage() {
   const [employeeId, setEmployeeId] = useState('')
   const [busyPath, setBusyPath] = useState('')
   const [error, setError] = useState('')
+  const [isManager, setIsManager] = useState(false)
 
   const lastWeek = (() => {
     const d = new Date()
@@ -66,7 +67,7 @@ export default function ArchivoPage() {
       }
       const { data: profile } = await supabase
         .from('profiles')
-        .select('tenant_id')
+        .select('tenant_id, role, branch_id')
         .eq('id', user.id)
         .single()
       if (!profile) {
@@ -74,12 +75,24 @@ export default function ArchivoPage() {
         return
       }
 
-      const { data: emps } = await supabase
+      const managerScoped = profile.role === 'manager' && !!profile.branch_id
+      setIsManager(managerScoped)
+
+      let empQuery = supabase
         .from('employees')
         .select('id, name, employee_code')
         .eq('tenant_id', profile.tenant_id)
         .order('employee_code')
+      // FIX: gerente solo ve empleados de su sucursal.
+      if (managerScoped) empQuery = empQuery.eq('branch_id', profile.branch_id)
+      const { data: emps } = await empQuery
       setEmployees(emps || [])
+
+      if (managerScoped) {
+        // FIX: archive_files es tenant-wide y no trae branch_id; no exponer paquetes globales al gerente.
+        setFiles([])
+        return
+      }
 
       let q = supabase
         .from('archive_files')
@@ -162,7 +175,7 @@ export default function ArchivoPage() {
         )}
 
         {/* Generador */}
-        <div className="rounded-xl bg-slate-800/60 border border-slate-700 p-4 mb-6">
+        {!isManager && <div className="rounded-xl bg-slate-800/60 border border-slate-700 p-4 mb-6">
           <div className="font-semibold mb-2">Archivar semana</div>
           <p className="text-xs text-slate-400 mb-3">
             Genera un paquete con XLSX por empleado + XLSX por sucursal + PDF maestro con hash SHA-256.
@@ -199,7 +212,7 @@ export default function ArchivoPage() {
               Paquete creado: {genResult.filesGenerated} archivos en {genResult.basePath}
             </div>
           )}
-        </div>
+        </div>}
 
         {/* Filtros */}
         <div className="flex flex-wrap gap-3 mb-4">
@@ -245,6 +258,10 @@ export default function ArchivoPage() {
 
         {loading ? (
           <div className="text-slate-400">Cargando...</div>
+        ) : isManager ? (
+          <div className="text-slate-400 text-center py-12">
+            Archivo historico disponible solo para propietario. Los paquetes actuales no tienen alcance por sucursal.
+          </div>
         ) : weeks.length === 0 ? (
           <div className="text-slate-400 text-center py-12">
             No hay archivos para estos filtros. Genera el primero arriba.

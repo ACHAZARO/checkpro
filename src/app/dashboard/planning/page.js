@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase'
 import { useTheme } from '@/lib/ThemeContext'
 import { DAYS, DAY_L, addHoursToTimeStr } from '@/lib/utils'
 import toast from 'react-hot-toast'
+import BranchFilter from '@/components/BranchFilter'
 
 function localDateISO(d) {
   const y = d.getFullYear()
@@ -287,10 +288,10 @@ export default function PlanningPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {branches.length > 0 && !isManagerBranch && (
-            <select className="input py-1.5 text-xs" value={selectedBranchId} onChange={e => setSelectedBranchId(e.target.value)}>
-              <option value="all">Todas las sucursales</option>
-              {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
+            <>
+              {/* FIX: unificar selector de sucursal con Equipo/Hoy. */}
+              <BranchFilter branches={branches} value={selectedBranchId} onChange={setSelectedBranchId} />
+            </>
           )}
           <button onClick={() => setWeekStart(w => addDaysIso(w, -7))} className="px-3 py-2 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-xs active:bg-dark-600">← Anterior</button>
           <input type="date" className="input py-1.5 text-xs" value={weekStart} onChange={e => setWeekStart(mondayOf(e.target.value))} />
@@ -318,20 +319,20 @@ export default function PlanningPage() {
             </button>
           </div>
 
-          <div className="card overflow-x-auto">
-            {/* FIX: sticky-left solido para que los dias scrolleen por debajo. */}
-            <table className="min-w-full text-xs border-separate border-spacing-0">
+          <div className="card overflow-x-auto isolate bg-[#fff] dark:bg-[#101318]">
+            {/* FIX: stacking aislado y fondos opacos evitan que los dias se vean bajo la columna sticky. */}
+            <table className="min-w-full text-xs border-separate border-spacing-0 bg-[#fff] dark:bg-[#101318]">
               <thead>
                 <tr>
                   <th className={`text-left p-2 font-mono border-b sticky left-0 z-30 min-w-[150px] ${
                     isDark
-                      ? 'text-gray-500 border-dark-border bg-dark-800'
-                      : 'text-gray-600 border-gray-200 bg-white'
+                      ? 'text-gray-500 border-dark-border bg-[#101318]'
+                      : 'text-gray-600 border-gray-200 bg-[#fff]'
                   }`}
                     style={!isDark ? { boxShadow: '6px 0 8px -4px rgba(0,0,0,0.08)' } : { boxShadow: '6px 0 8px -4px rgba(0,0,0,0.4)' }}>Empleado</th>
                   {dates.map((d, i) => (
-                    <th key={d} className={`text-center p-2 font-mono border-b min-w-[90px] ${
-                      isDark ? 'text-gray-500 border-dark-border bg-dark-800' : 'text-gray-600 border-gray-200 bg-white'
+                    <th key={d} className={`text-center p-2 font-mono border-b min-w-[90px] z-10 ${
+                      isDark ? 'text-gray-500 border-dark-border bg-[#101318]' : 'text-gray-600 border-gray-200 bg-[#fff]'
                     }`}>
                       <div className="text-brand-400">{DAY_L[DAYS[i]]}</div>
                       <div className={`text-[10px] font-normal ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{d.slice(5)}</div>
@@ -345,7 +346,7 @@ export default function PlanningPage() {
                     isDark ? 'border-dark-border/50 hover:bg-dark-700/40' : 'border-gray-100 hover:bg-gray-50'
                   }`}>
                     <td className={`p-2 align-top sticky left-0 z-20 min-w-[150px] ${
-                      isDark ? 'bg-dark-800' : 'bg-white'
+                      isDark ? 'bg-[#101318]' : 'bg-[#fff]'
                     }`}
                       style={!isDark
                         ? { boxShadow: '6px 0 8px -4px rgba(0,0,0,0.08)' }
@@ -357,7 +358,7 @@ export default function PlanningPage() {
                       const cell = plans[`${emp.id}|${d}`]
                       const entry = cell?.entry_time_str || ''
                       return (
-                        <td key={d} className="p-1.5 align-top">
+                        <td key={d} className={`p-1.5 align-top ${isDark ? 'bg-[#101318]' : 'bg-[#fff]'}`}>
                           <input
                             type="time"
                             className={`w-full border rounded-md px-1.5 py-1 text-xs text-center font-mono ${

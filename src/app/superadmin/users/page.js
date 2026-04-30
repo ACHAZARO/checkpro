@@ -32,6 +32,9 @@ export default function SuperAdminUsersPage() {
   }, [users, q])
 
   async function doAction(id, action, extra = {}) {
+    // FIX: acciones sensibles requieren confirmacion explicita en UI.
+    if (action === 'disable' && !confirm('Suspender este usuario impedira su acceso. Continuar?')) return
+    if (action === 'set_role' && !confirm(`Cambiar rol a ${extra.role}. Esta accion quedara auditada. Continuar?`)) return
     setWorking(id + ':' + action)
     try {
       const r = await fetch(`/api/admin/users/${id}`, {
@@ -51,6 +54,7 @@ export default function SuperAdminUsersPage() {
   }
 
   async function doDelete(u) {
+    // FIX: borrado destructivo con confirmacion explicita.
     if (!confirm(`¿Eliminar cuenta de ${u.email}? Esto borra su acceso permanentemente.`)) return
     setWorking(u.id + ':delete')
     try {

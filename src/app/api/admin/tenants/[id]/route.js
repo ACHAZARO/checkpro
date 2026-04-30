@@ -12,9 +12,24 @@ async function requireSuperAdmin() {
   const { data: { session } } = await supabase.auth.getSession()
   if (!session?.user) return { error: 'No autenticado', status: 401 }
   const admin = createServiceClient()
-  const { data: prof } = await admin.from('profiles').select('role').eq('id', session.user.id).maybeSingle()
+  const { data: prof } = await admin.from('profiles').select('id, role, tenant_id, name').eq('id', session.user.id).maybeSingle()
   if (!prof || prof.role !== 'super_admin') return { error: 'Sin acceso', status: 403 }
-  return { admin }
+  return { admin, actor: prof }
+}
+
+async function auditAdminAction(admin, actor, action, targetId, detail, success = true) {
+  // FIX: registrar acciones destructivas/sensibles de tenants en audit_log.
+  try {
+    await admin.from('audit_log').insert({
+      tenant_id: actor?.tenant_id || null,
+      action,
+      employee_name: actor?.name || 'super_admin',
+      detail: `tenant=${targetId}; ${detail}`,
+      success,
+    })
+  } catch (e) {
+    console.error('[admin/tenants] audit failed', e)
+  }
 }
 
 export async function GET(req, { params }) {
@@ -41,6 +56,7 @@ export async function PATCH(req, { params }) {
   if (ctx.error) return NextResponse.json({ error: ctx.error }, { status: ctx.status })
   const id = params.id
   const admin = ctx.admin
+  const actor = ctx.actor
   const body = await req.json().catch(() => ({}))
 
   const allowed = {}
@@ -54,6 +70,7 @@ export async function PATCH(req, { params }) {
 
   const { error } = await admin.from('tenants').update(allowed).eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  await auditAdminAction(admin, actor, 'admin_tenant_update', id, JSON.stringify(allowed))
   return NextResponse.json({ ok: true })
 }
 
@@ -62,16 +79,18 @@ export async function DELETE(req, { params }) {
   if (ctx.error) return NextResponse.json({ error: ctx.error }, { status: ctx.status })
   const id = params.id
   const admin = ctx.admin
+  const actor = ctx.actor
 
   try {
     // Prevent deleting the system tenant (super-admin home)
-    const { data: t } = await admin.from('tenants').select('slug').eq('id', id).maybeSingle()
+    const { data: t } = await admin.from('tenants').select('slug, name').eq('id', id).maybeSingle()
     if (!t) return NextResponse.json({ error: 'No existe' }, { status: 404 })
     if (t.slug === 'checkpro-system') {
       return NextResponse.json({ error: 'No se puede eliminar el tenant del sistema.' }, { status: 400 })
     }
 
     // Fetch profiles to also delete their auth users (optional — we keep auth users by default)
+    await auditAdminAction(admin, actor, 'admin_tenant_delete_started', id, `Eliminacion iniciada: ${t.name || t.slug}`)
     const { data: profs } = await admin.from('profiles').select('id').eq('tenant_id', id)
 
     // Delete children explicitly (in case FKs aren't cascading)
@@ -90,6 +109,7 @@ export async function DELETE(req, { params }) {
       try { await admin.auth.admin.deleteUser(p.id) } catch {}
     }
 
+    await auditAdminAction(admin, actor, 'admin_tenant_delete_completed', id, `Eliminacion completada: ${t.name || t.slug}`)
     return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json({ error: err?.message }, { status: 500 })

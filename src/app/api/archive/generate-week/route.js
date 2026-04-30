@@ -47,6 +47,8 @@ async function getAdminTenantId() {
     .eq('status', 'active')
     .maybeSingle()
   if (!profile) return null
+  // FIX: archive_files no tiene branch_id; solo roles globales pueden generar paquetes tenant-wide.
+  if (!['owner', 'super_admin'].includes(profile.role)) return { error: 'Solo propietario puede generar archivo historico', status: 403 }
   return { profileId: profile.id, tenantId: profile.tenant_id }
 }
 
@@ -56,6 +58,7 @@ export async function POST(req) {
     if (!auth) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
     }
+    if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
     const { weekStart, weekEnd } = await req.json()
     if (!weekStart || !weekEnd || !DATE_RE.test(weekStart) || !DATE_RE.test(weekEnd)) {

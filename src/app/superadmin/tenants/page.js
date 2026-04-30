@@ -32,6 +32,8 @@ export default function SuperAdminTenantsPage() {
   }, [tenants, q])
 
   async function doPatch(id, patch) {
+    // FIX: suspender/reactivar empresas requiere confirmacion explicita.
+    if (typeof patch.active === 'boolean' && !confirm(`${patch.active ? 'Reactivar' : 'Suspender'} esta empresa?`)) return
     setWorking(id + ':patch')
     const r = await fetch(`/api/admin/tenants/${id}`, {
       method: 'PATCH',
@@ -45,6 +47,7 @@ export default function SuperAdminTenantsPage() {
   }
 
   async function doDelete(t) {
+    // FIX: borrado destructivo con doble confirmacion explicita.
     if (!confirm(`Eliminar empresa "${t.name}" y TODOS sus datos (empleados, asistencia, usuarios)?\n\nEsta acción NO se puede deshacer.`)) return
     if (!confirm(`Confirma una vez más: esto borrará ${t.employees} empleados, ${t.branches} sucursales y ${t.profiles} usuarios.`)) return
     setWorking(t.id + ':delete')
@@ -62,6 +65,15 @@ export default function SuperAdminTenantsPage() {
     if (r.ok) setDetail({ loading: false, ...data })
     else { setDetail(null); toast.error(data.error || 'Error') }
   }
+
+  useEffect(() => {
+    if (!detail) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') setDetail(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [detail])
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto">

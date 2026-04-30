@@ -27,17 +27,21 @@ async function getAdminTenantId() {
   const svc = createServiceClient()
   const { data: profile } = await svc
     .from('profiles')
-    .select('id, tenant_id, status')
+    .select('id, tenant_id, role, status')
     .eq('id', session.user.id)
     .eq('status', 'active')
     .maybeSingle()
-  return profile ? { tenantId: profile.tenant_id } : null
+  if (!profile) return null
+  // FIX: archive_files no tiene branch_id; evitar descarga tenant-wide por gerentes.
+  if (!['owner', 'super_admin'].includes(profile.role)) return { error: 'Solo propietario puede descargar archivo historico', status: 403 }
+  return { tenantId: profile.tenant_id }
 }
 
 export async function GET(req) {
   try {
     const auth = await getAdminTenantId()
     if (!auth) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+    if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
     const { searchParams } = new URL(req.url)
     const path = searchParams.get('path')

@@ -3,6 +3,8 @@
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { verifyTenant } from '@/lib/tenant-token'
+import { createServiceClient } from '@/lib/supabase'
+import { rateLimit } from '@/lib/rate-limit'
 
 function getClientIp(req) {
   const xff = req.headers.get('x-forwarded-for')
@@ -28,6 +30,19 @@ export async function POST(req) {
     }
 
     const ip = getClientIp(req)
+    const rl = rateLimit(`check-session:${effectiveTenant}:${ip}`, 20, 10 * 60_000)
+    if (!rl.ok) return NextResponse.json({ error: 'Demasiados intentos' }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } }) // FIX: rate limit para emision de sesiones.
+    if (branchId) {
+      const supabase = createServiceClient()
+      const { data: branch } = await supabase
+        .from('branches')
+        .select('id')
+        .eq('tenant_id', effectiveTenant)
+        .eq('id', branchId)
+        .eq('active', true)
+        .maybeSingle()
+      if (!branch) return NextResponse.json({ error: 'Sucursal invalida' }, { status: 403 }) // FIX: branch_id debe pertenecer al tenant firmado.
+    }
     const ts = Date.now()
     const payload = { ip, tenantId: effectiveTenant, branchId: branchId || null, deviceId: deviceId || null, ts }
     const sig = crypto.createHmac('sha256', secret()).update(JSON.stringify(payload)).digest('hex')
@@ -44,7 +59,9 @@ export function verifySessionToken(token) {
     const data = JSON.parse(Buffer.from(token, 'base64url').toString())
     const { sig, ...payload } = data
     const expected = crypto.createHmac('sha256', secret()).update(JSON.stringify(payload)).digest('hex')
-    if (sig !== expected) return { valid: false, reason: 'tampered' }
+    const a = Buffer.from(String(sig || ''))
+    const b = Buffer.from(expected)
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return { valid: false, reason: 'tampered' } // FIX: comparar firma en tiempo constante.
     if (Date.now() - payload.ts > TTL_MS) return { valid: false, reason: 'expired' }
     return { valid: true, ...payload }
   } catch {

@@ -17,8 +17,19 @@ export const dynamic = 'force-dynamic'
 const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL || 'alepolch@gmail.com'
 const SYSTEM_TENANT_SLUG = 'checkpro-system'
 
+function requireSetupToken(req) {
+  // FIX: setup habilitado requiere secreto server-side, no solo SETUP_ENABLED.
+  const expected = process.env.SETUP_TOKEN
+  if (!expected) return { error: 'Setup token no configurado', status: 500 }
+  const got = req.headers.get('x-setup-token') || ''
+  if (got !== expected) return { error: 'Not found', status: 404 }
+  return null
+}
+
 export async function POST(req) {
   if (process.env.SETUP_ENABLED !== '1') return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const tokenErr = requireSetupToken(req)
+  if (tokenErr) return NextResponse.json({ error: tokenErr.error }, { status: tokenErr.status })
   try {
     const admin = createServiceClient()
 
@@ -120,8 +131,10 @@ export async function POST(req) {
 }
 
 // GET: lightweight status check
-export async function GET() {
+export async function GET(req) {
   if (process.env.SETUP_ENABLED !== '1') return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const tokenErr = requireSetupToken(req)
+  if (tokenErr) return NextResponse.json({ error: tokenErr.error }, { status: tokenErr.status })
   try {
     const admin = createServiceClient()
     const u = await findAuthUserByEmail(admin, SUPER_ADMIN_EMAIL)

@@ -18,6 +18,8 @@ export default function RegisterPage() {
     e.preventDefault()
     if (form.password !== form.confirmPassword) { toast.error('Las contraseñas no coinciden'); return }
     if (form.password.length < 8) { toast.error('La contraseña debe tener al menos 8 caracteres'); return }
+    // FIX: misma complejidad minima que el endpoint de registro.
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(form.password)) { toast.error('La contrasena debe tener mayuscula, minuscula, numero y 8 caracteres'); return }
     setLoading(true)
 
     try {

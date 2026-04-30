@@ -16,15 +16,30 @@ async function requireSuperAdmin() {
   const { data: { session } } = await supabase.auth.getSession()
   if (!session?.user) return { error: 'No autenticado', status: 401 }
   const admin = createServiceClient()
-  const { data: prof } = await admin.from('profiles').select('role, id').eq('id', session.user.id).maybeSingle()
+  const { data: prof } = await admin.from('profiles').select('role, id, tenant_id, name').eq('id', session.user.id).maybeSingle()
   if (!prof || prof.role !== 'super_admin') return { error: 'Sin acceso', status: 403 }
-  return { admin, selfId: prof.id }
+  return { admin, selfId: prof.id, actor: prof }
+}
+
+async function auditAdminAction(admin, actor, action, targetId, detail, success = true) {
+  // FIX: registrar acciones sensibles del super admin en audit_log.
+  try {
+    await admin.from('audit_log').insert({
+      tenant_id: actor?.tenant_id || null,
+      action,
+      employee_name: actor?.name || 'super_admin',
+      detail: `target=${targetId}; ${detail}`,
+      success,
+    })
+  } catch (e) {
+    console.error('[admin/users] audit failed', e)
+  }
 }
 
 export async function PATCH(req, { params }) {
   const ctx = await requireSuperAdmin()
   if (ctx.error) return NextResponse.json({ error: ctx.error }, { status: ctx.status })
-  const { admin } = ctx
+  const { admin, actor } = ctx
   const id = params.id
   const body = await req.json().catch(() => ({}))
   const action = body.action
@@ -34,11 +49,13 @@ export async function PATCH(req, { params }) {
       case 'disable': {
         const { error } = await admin.auth.admin.updateUserById(id, { ban_duration: '876000h' })
         if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+        await auditAdminAction(admin, actor, 'admin_user_disable', id, 'Usuario suspendido')
         return NextResponse.json({ ok: true, action })
       }
       case 'enable': {
         const { error } = await admin.auth.admin.updateUserById(id, { ban_duration: 'none' })
         if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+        await auditAdminAction(admin, actor, 'admin_user_enable', id, 'Usuario reactivado')
         return NextResponse.json({ ok: true, action })
       }
       case 'confirm_email': {
@@ -69,6 +86,7 @@ export async function PATCH(req, { params }) {
         }
         const { error } = await admin.from('profiles').update({ role }).eq('id', id)
         if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+        await auditAdminAction(admin, actor, 'admin_user_set_role', id, `Rol actualizado a ${role}`)
         return NextResponse.json({ ok: true, action, role })
       }
       default:
@@ -82,7 +100,7 @@ export async function PATCH(req, { params }) {
 export async function DELETE(req, { params }) {
   const ctx = await requireSuperAdmin()
   if (ctx.error) return NextResponse.json({ error: ctx.error }, { status: ctx.status })
-  const { admin, selfId } = ctx
+  const { admin, selfId, actor } = ctx
   const id = params.id
 
   if (id === selfId) {
@@ -91,7 +109,7 @@ export async function DELETE(req, { params }) {
 
   try {
     // Check role — refuse to delete another super_admin from the API
-    const { data: prof } = await admin.from('profiles').select('role').eq('id', id).maybeSingle()
+    const { data: prof } = await admin.from('profiles').select('role, tenant_id, name').eq('id', id).maybeSingle()
     if (prof?.role === 'super_admin') {
       return NextResponse.json({ error: 'No se puede eliminar a otro super admin.' }, { status: 400 })
     }
@@ -99,6 +117,7 @@ export async function DELETE(req, { params }) {
     await admin.from('profiles').delete().eq('id', id)
     const { error } = await admin.auth.admin.deleteUser(id)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await auditAdminAction(admin, actor, 'admin_user_delete', id, `Cuenta eliminada; tenant=${prof?.tenant_id || 'n/a'}; name=${prof?.name || 'n/a'}`)
     return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json({ error: err?.message || 'delete failed' }, { status: 500 })

@@ -31,7 +31,9 @@ function verifyToken(token) {
     const data = JSON.parse(Buffer.from(token, 'base64url').toString())
     const { sig, ...payload } = data
     const expected = crypto.createHmac('sha256', secret()).update(JSON.stringify(payload)).digest('hex')
-    if (sig !== expected) return null
+    const a = Buffer.from(String(sig || ''))
+    const b = Buffer.from(expected)
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null // FIX: comparar firma en tiempo constante.
     if (Date.now() - payload.ts > TTL_MS) return null
     return payload
   } catch { return null }
@@ -70,9 +72,14 @@ function minutesFromLabel(label) {
 export async function POST(req) {
   try {
     const body = await req.json()
-    const { tenantId, employeeCode, pin, action, coveringEmployeeId, geo, sessionToken, deviceId } = body
+    const { employeeCode, pin, action, coveringEmployeeId, geo, sessionToken, deviceId } = body
     const supabase = createServiceClient()
     const currentIp = getClientIp(req)
+    const sess = verifyToken(sessionToken)
+    if (!sess?.tenantId || (sess.deviceId && deviceId && sess.deviceId !== deviceId)) {
+      return NextResponse.json({ ok: false, msg: 'Sesion invalida. Escanea de nuevo el QR.' }, { status: 401 })
+    }
+    const tenantId = sess.tenantId // FIX: tenant isolation desde sesion firmada, no desde body.
 
     if (!tenantId || !employeeCode || !pin || !['in', 'out'].includes(action)) {
       return NextResponse.json({ ok: false, msg: 'Datos incompletos.' }, { status: 400 })
@@ -93,16 +100,8 @@ export async function POST(req) {
       )
     }
 
-    // Session token (opcional)
-    let sessionDeviceId = null, branchId = null, sessionValid = false
-    if (sessionToken) {
-      const sess = verifyToken(sessionToken)
-      if (sess && sess.tenantId === tenantId) {
-        sessionDeviceId = sess.deviceId || null
-        branchId = sess.branchId || null
-        sessionValid = true
-      }
-    }
+    // FIX: session token obligatorio; branch_id viene del token firmado.
+    let sessionDeviceId = sess.deviceId || null, branchId = sess.branchId || null, sessionValid = true
 
     // Validar PIN (usa RPC con crypt())
     const { data: authResult } = await supabase.rpc('validate_employee_pin', {
@@ -167,18 +166,21 @@ export async function POST(req) {
     let geoValid = true
     let dist = null
     let outOfRange = false
-    if (locCfg?.lat != null && locCfg?.lng != null && geo?.lat != null && geo?.lng != null) {
-      dist = haversineMeters(geo.lat, geo.lng, locCfg.lat, locCfg.lng)
+    const lat = Number(geo?.lat)
+    const lng = Number(geo?.lng)
+    const accuracy = Number(geo?.accuracy)
+    if (locCfg?.lat != null && locCfg?.lng != null && Number.isFinite(lat) && Number.isFinite(lng) && Number.isFinite(accuracy) && accuracy <= 100) {
+      dist = haversineMeters(lat, lng, locCfg.lat, locCfg.lng)
       const radius = locCfg.radius || 300
       geoValid = dist <= radius
-    } else if (!geo?.lat || !geo?.lng) {
+    } else {
       geoValid = false
     }
 
     if (!geoValid) {
       outOfRange = true
-      const hasGeo = geo?.lat != null && geo?.lng != null
-      const mapsLink = hasGeo ? ` https://www.google.com/maps?q=${geo.lat},${geo.lng}` : ''
+      const hasGeo = Number.isFinite(lat) && Number.isFinite(lng)
+      const mapsLink = hasGeo ? ` https://www.google.com/maps?q=${lat},${lng}` : '' // FIX: no interpolar coordenadas sin validar.
       await supabase.from('audit_log').insert({
         tenant_id: tenantId, action: action === 'in' ? 'CHK_IN_REJ' : 'CHK_OUT_REJ',
         employee_id: emp.id, employee_name: emp.name,
@@ -206,7 +208,7 @@ export async function POST(req) {
     const ipMatchesBranch = branchIp ? (currentIp === branchIp) : true
     const coveragePayMode = cfg.coveragePayMode || branch?.coveragePayMode || 'covered'
 
-    const safeGeo = { lat: geo?.lat ?? null, lng: geo?.lng ?? null, dist, accuracy: geo?.accuracy ?? null, verified: geoValid, outOfRange }
+    const safeGeo = { lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null, dist, accuracy: Number.isFinite(accuracy) ? accuracy : null, verified: geoValid, outOfRange }
 
     // Plan del dia para mixtos — se busca una sola vez, usado en entrada y salida.
     let mixedPlan = null
@@ -409,6 +411,8 @@ export async function POST(req) {
       return NextResponse.json({
         ok: true,
         msg: `Entrada registrada. ${classification.label}${coverName ? ' · Cubriendo a ' + coverName : ''}${holiday ? ' — Pago ×3 🎉' : ''}.`,
+        employee: { id: emp.id, name: emp.name, can_manage: emp.can_manage, department: emp.department, role_label: emp.role_label }, // FIX: PII solo post-PIN.
+        entry_time: now,
         ipMatchesBranch,
         birthday: isBirthdayToday, // R7
         mixedNoPlan: emp.is_mixed && !mixedPlan, // aviso al cliente
@@ -568,7 +572,7 @@ export async function POST(req) {
     const msg = isIncident
       ? `Salida registrada (${duration}h). ⚠ Se creó una incidencia para revisión.`
       : `Salida registrada. Jornada: ${duration} horas.${overtimeHours > 0 ? ` · ${overtimeHours} HE.` : ''}`
-    return NextResponse.json({ ok: true, msg, overtimeHours, incident: isIncident, birthday: isBirthdayToday })
+    return NextResponse.json({ ok: true, msg, overtimeHours, incident: isIncident, birthday: isBirthdayToday, employee: { id: emp.id, name: emp.name, can_manage: emp.can_manage, department: emp.department, role_label: emp.role_label } }) // FIX: PII solo post-PIN.
 
   } catch (err) {
     console.error('punch/route error:', err?.message)

@@ -6,7 +6,8 @@ import { fmtTime, weekRange, isoDate, diffMin, DAYS, countGraveIncidents, hasVac
 import Link from 'next/link'
 import toast from 'react-hot-toast'
 import BottomSheet from '@/components/BottomSheet'
-import { Unlock, Palmtree, Cake, Award, AlertTriangle, Clock, ClipboardList, X, Info, Trophy, Building2 } from 'lucide-react'
+import BranchFilter from '@/components/BranchFilter'
+import { Unlock, Palmtree, Cake, Award, AlertTriangle, Clock, ClipboardList, X, Info, Trophy } from 'lucide-react'
 
 function daysUntilBirthday(iso) {
   if (!iso) return null
@@ -138,7 +139,7 @@ export default function DashboardPage() {
   const [tenantId, setTenantId] = useState(null)
   const [profile, setProfile] = useState(null)
   const [branches, setBranches] = useState([])
-  const [selectedRankingBranch, setSelectedRankingBranch] = useState('all')
+  const [selectedBranchId, setSelectedBranchId] = useState('all')
   // FIX R6: vacation_periods vivos para poder evaluar hasVacationPending
   // con la tabla real (no contra el array legacy schedule.vacationYearsTaken).
   const [vacPeriods, setVacPeriods] = useState([])
@@ -172,6 +173,7 @@ export default function DashboardPage() {
       let empQuery = supabase
         .from('employees').select('*').eq('tenant_id', profile.tenant_id).eq('status', 'active').eq('has_shift', true)
       if (isManagerBranch) empQuery = empQuery.eq('branch_id', profile.branch_id)
+      else if (selectedBranchId !== 'all') empQuery = empQuery.eq('branch_id', selectedBranchId) // FIX: filtro general de sucursal para toda la pagina Hoy.
       const { data: employees } = await empQuery
       const myEmpIds = (employees || []).map(e => e.id)
 
@@ -207,7 +209,11 @@ export default function DashboardPage() {
         ? (branchData || []).filter(b => b.id === profile.branch_id)
         : (branchData || [])
       setBranches(visibleBranches)
-      setSelectedRankingBranch(isManagerBranch ? (profile.branch_id || 'all') : 'all')
+      setSelectedBranchId(cur => {
+        if (isManagerBranch) return profile.branch_id || 'all'
+        if (cur !== 'all' && visibleBranches.some(b => b.id === cur)) return cur
+        return 'all'
+      })
       const vacTable = tenantData?.config?.vacationTable || null
 
       // feat/gerente-libre — turnos de la semana actual para alertas de gerentes libres.
@@ -246,7 +252,7 @@ export default function DashboardPage() {
       setLoading(false)
     }
     load()
-  }, [])
+  }, [selectedBranchId])
 
   // ---- Vacation widgets: paralelo via API endpoints ----
   const fetchUpcoming = useCallback(async () => {
@@ -290,8 +296,8 @@ export default function DashboardPage() {
     try {
       const now = new Date()
       const month = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0')
-      const branchQs = selectedRankingBranch && selectedRankingBranch !== 'all'
-        ? '&branch=' + encodeURIComponent(selectedRankingBranch)
+      const branchQs = selectedBranchId && selectedBranchId !== 'all'
+        ? '&branch=' + encodeURIComponent(selectedBranchId)
         : ''
       const r = await fetch('/api/employees/ranking?month=' + month + branchQs, { cache: 'no-store' })
       const j = await r.json()
@@ -300,7 +306,7 @@ export default function DashboardPage() {
     } catch (e) {
       setRanking({ loading: false, items: [], error: e.message || 'error' })
     }
-  }, [selectedRankingBranch])
+  }, [selectedBranchId])
 
   useEffect(() => {
     Promise.all([fetchUpcoming(), fetchActive(), fetchExpired(), fetchRanking()])
@@ -325,7 +331,7 @@ export default function DashboardPage() {
   if (!data) return null
 
   const { employees, todayShifts, incidents, graveShifts, vacTable, weekShifts = [] } = data
-  const isRankingManagerFixed = profile?.role === 'manager' && !!profile?.branch_id
+  const isManagerBranch = profile?.role === 'manager' && !!profile?.branch_id
   const todayDayKey = DAYS[now.getDay() === 0 ? 6 : now.getDay() - 1]
   const todayScheduleStart = e => e.schedule?.[todayDayKey]?.start || null
 
@@ -369,12 +375,15 @@ export default function DashboardPage() {
 
   return (
     <div className="p-5 md:p-6 max-w-5xl mx-auto">
-      <div className="mb-6">
+      <div className="mb-6 flex items-start justify-between gap-3 flex-wrap">
+        <div>
         <div className="page-eyebrow mb-2">Panel · {now.toLocaleDateString('es-MX', { weekday: 'long' })}</div>
         <h1 className="page-title">Hoy</h1>
         <p className="text-[13px] font-mono mt-1.5" style={{ color: 'var(--cp-text-muted)' }}>
           {now.toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' })} · {employees.length} empleado{employees.length !== 1 ? 's' : ''} activo{employees.length !== 1 ? 's' : ''}
         </p>
+        </div>
+        {!isManagerBranch && <BranchFilter branches={branches} value={selectedBranchId} onChange={setSelectedBranchId} />}
       </div>
 
       {incidents.length > 0 && (
@@ -638,20 +647,6 @@ export default function DashboardPage() {
         <div className="card mb-5">
           <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
             <p className="text-xs font-mono text-gray-500 uppercase tracking-wider flex items-center gap-1.5"><Award size={12} /> Ranking del mes</p>
-            {branches.length > 0 && (
-              <label className="inline-flex items-center gap-1.5 text-[10px] font-mono text-gray-400">
-                <Building2 size={12} />
-                <select
-                  className="input py-1.5 text-xs"
-                  value={selectedRankingBranch}
-                  onChange={e => setSelectedRankingBranch(e.target.value)}
-                  disabled={isRankingManagerFixed}
-                >
-                  {!isRankingManagerFixed && <option value="all">Todas las sucursales</option>}
-                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-              </label>
-            )}
           </div>
           {ranking.items.length === 0 ? (
             <div className="text-center py-8">

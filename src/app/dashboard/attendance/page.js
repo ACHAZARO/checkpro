@@ -33,6 +33,7 @@ export default function AttendancePage() {
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterBranch, setFilterBranch] = useState('all')
   const [branches, setBranches] = useState([])
+  const [profile, setProfile] = useState(null)
   const [filterFrom, setFilterFrom] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 7); return isoDate(d)
   })
@@ -52,6 +53,7 @@ export default function AttendancePage() {
     const { data: prof } = await supabase.from('profiles').select('tenant_id,role,branch_id').eq('id', session.user.id).single()
     if (!prof?.tenant_id) return
     setTenantId(prof.tenant_id)
+    setProfile(prof)
 
     // FIX: branch isolation server-side
     const isManagerBranch = prof.role === 'manager' && !!prof.branch_id
@@ -138,23 +140,37 @@ export default function AttendancePage() {
 
   async function saveCorr() {
     if (!corrForm.note) { toast.error('El motivo es obligatorio'); return }
+    if (profile?.role === 'manager' && profile?.branch_id && empBranchMap[corrSheet.employee_id] !== profile.branch_id) {
+      // FIX: gerente no puede corregir jornadas fuera de su sucursal.
+      toast.error('No puedes corregir otra sucursal')
+      return
+    }
     setSaving(true)
     const supabase = createClient()
     const entryTime = corrForm.entryTime ? new Date(corrForm.entryTime).toISOString() : corrSheet.entry_time
     const exitTime  = corrForm.exitTime  ? new Date(corrForm.exitTime).toISOString()  : corrSheet.exit_time
     const duration  = entryTime && exitTime ? parseFloat(((new Date(exitTime)-new Date(entryTime))/3600000).toFixed(2)) : corrSheet.duration_hours
     const corrections = [...(corrSheet.corrections || []), { ts: new Date().toISOString(), note: corrForm.note, entryTime, exitTime }]
-    await supabase.from('shifts').update({ entry_time: entryTime, exit_time: exitTime, duration_hours: duration, status: exitTime ? 'closed' : corrSheet.status, corrections }).eq('id', corrSheet.id)
+    let q = supabase.from('shifts').update({ entry_time: entryTime, exit_time: exitTime, duration_hours: duration, status: exitTime ? 'closed' : corrSheet.status, corrections }).eq('id', corrSheet.id).eq('tenant_id', tenantId)
+    if (profile?.role === 'manager' && profile?.branch_id) q = q.in('employee_id', emps.map(e => e.id))
+    await q
     await supabase.from('audit_log').insert({ tenant_id: tenantId, action: 'CORRECTION', employee_name: getEmpName(corrSheet.employee_id), detail: corrForm.note, success: true })
     toast.success('Corrección guardada')
     setSaving(false); setCorrSheet(null); await load()
   }
 
   async function saveFlag() {
+    if (profile?.role === 'manager' && profile?.branch_id && empBranchMap[flagSheet.employee_id] !== profile.branch_id) {
+      // FIX: gerente no puede marcar incidencias fuera de su sucursal.
+      toast.error('No puedes marcar otra sucursal')
+      return
+    }
     setSaving(true)
     const supabase = createClient()
     const incidents = [...(flagSheet.incidents || []), { id: crypto.randomUUID(), ts: new Date().toISOString(), type: flagForm.type, note: flagForm.note }]
-    await supabase.from('shifts').update({ status: 'incident', incidents }).eq('id', flagSheet.id)
+    let q = supabase.from('shifts').update({ status: 'incident', incidents }).eq('id', flagSheet.id).eq('tenant_id', tenantId)
+    if (profile?.role === 'manager' && profile?.branch_id) q = q.in('employee_id', emps.map(e => e.id))
+    await q
     await supabase.from('audit_log').insert({ tenant_id: tenantId, action: 'INCIDENT', employee_name: getEmpName(flagSheet.employee_id), detail: flagForm.type, success: true })
     toast.success('Incidencia registrada')
     setSaving(false); setFlagSheet(null); await load()

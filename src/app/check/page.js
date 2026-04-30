@@ -38,14 +38,13 @@ function LiveClock({ locationName, branchName }) {
   const [t, setT] = useState(new Date())
   useEffect(() => { const id = setInterval(() => setT(new Date()), 1000); return () => clearInterval(id) }, [])
   return (
-    <div className="text-center py-5">
-      <div className="font-mono text-6xl font-semibold text-brand-400 leading-none tracking-wide"
-        style={{ textShadow: '0 0 40px rgba(61,255,160,.2)' }}>
+    <div className="min-h-[160px] flex flex-col items-center justify-center text-center px-4 py-6">
+      <div className="font-mono tabular-nums text-[clamp(2.75rem,13vw,4.75rem)] font-semibold leading-none tracking-normal text-brand-400">
         {t.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
       </div>
-      <div className="font-mono text-xs text-gray-500 mt-2 tracking-widest uppercase">{fmtDate(t)}</div>
+      <div className="font-mono tabular-nums text-sm text-gray-400 mt-3">{fmtDate(t)}</div>
       {(branchName || locationName) && (
-        <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 bg-dark-700 border border-dark-border rounded-full text-xs text-gray-500 font-mono">
+        <div className="inline-flex items-center gap-1.5 mt-3 px-3 py-1 bg-dark-700 border border-dark-border rounded-full text-xs text-gray-400 font-mono">
           <Building2 size={14} /> {branchName || locationName}
         </div>
       )}
@@ -54,18 +53,17 @@ function LiveClock({ locationName, branchName }) {
 }
 
 // ── GpsStatus ─────────────────────────────────────────────────────────────────
-function GpsStatus({ gps, onVerify, simMode, setSimMode }) {
+function GpsStatus({ gps, onVerify }) {
   const ok = gps.status === 'ok' && gps.valid
   const out = gps.status === 'ok' && !gps.valid
   return (
-    <div className="space-y-2 mb-4">
+    <div className="mb-4">
       <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-sm font-semibold
-        ${gps.simulated ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' :
-          ok ? 'bg-brand-400/10 border-brand-400/20 text-brand-400' :
+        ${ok ? 'bg-brand-400/10 border-brand-400/20 text-brand-400' :
           out || gps.status === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
           'bg-dark-700 border-dark-border text-gray-500'}`}>
         <span className="flex items-center">
-          {ok || gps.simulated
+          {ok
             ? <CheckCircle2 size={20} />
             : out || gps.status === 'error'
               ? <XCircle size={20} />
@@ -74,8 +72,7 @@ function GpsStatus({ gps, onVerify, simMode, setSimMode }) {
                 : <MapPin size={20} />}
         </span>
         <span className="flex-1 text-xs">
-          {gps.simulated ? 'Simulado — dentro del área (modo prueba)' :
-           gps.status === 'idle' ? 'Verifica tu ubicación antes de checar' :
+          {gps.status === 'idle' ? 'Verifica tu ubicación antes de checar' :
            gps.status === 'loading' ? 'Obteniendo GPS...' :
            gps.status === 'error' ? gps.error :
            ok ? `Dentro del área · ${gps.dist}m · ±${gps.accuracy}m` :
@@ -84,13 +81,6 @@ function GpsStatus({ gps, onVerify, simMode, setSimMode }) {
         <button onClick={onVerify} disabled={gps.status === 'loading'}
           className="px-3 py-1.5 bg-dark-600 border border-dark-border rounded-lg text-xs font-bold text-white disabled:opacity-40 active:bg-dark-500 transition-all">
           {gps.status === 'loading' ? '...' : '↻'}
-        </button>
-      </div>
-      <div className="flex items-center justify-between px-3 py-2 bg-dark-800 border border-dark-border rounded-lg">
-        <span className="text-xs text-gray-500 font-mono">🧪 Modo simulación (prueba)</span>
-        <button onClick={() => setSimMode(m => !m)}
-          className={`w-10 h-6 rounded-full relative transition-colors ${simMode ? 'bg-brand-400' : 'bg-dark-600'}`}>
-          <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${simMode ? 'left-5' : 'left-1'}`} />
         </button>
       </div>
     </div>
@@ -330,8 +320,7 @@ export default function CheckPage() {
   const [vacationAccepted, setVacationAccepted] = useState(false) // true cuando el empleado acepto reincorporarse
 
   // GPS
-  const [gps, setGps]           = useState({ status: 'idle', valid: false, simulated: false })
-  const [simMode, setSimMode]   = useState(false)
+  const [gps, setGps]           = useState({ status: 'idle', valid: false })
 
   // Dual monitoring (active when shift is open)
   const [currentIp, setCurrentIp] = useState(null)
@@ -429,17 +418,13 @@ export default function CheckPage() {
       body: JSON.stringify({ tenantToken, branchId, deviceId })
     })
       .then(r => r.json())
-      .then(data => { setSession({ token: data.token, ip: data.ip }); setCurrentIp(data.ip) })
+      .then(data => { if (data?.token) { setSession({ token: data.token, ip: data.ip }); setCurrentIp(data.ip) } })
       .catch(() => {})
       .finally(() => setSessionLoading(false))
   }, [tenantId, branchId, deviceId, tenantToken])
 
   // ── GPS one-shot verify ───────────────────────────────────────────────────
   const verifyGps = useCallback(() => {
-    if (simMode && cfg) {
-      setGps({ status: 'ok', lat: cfg.location?.lat, lng: cfg.location?.lng, accuracy: 5, dist: 0, valid: true, simulated: true })
-      return
-    }
     if (!navigator.geolocation) { setGps(g => ({ ...g, status: 'error', error: 'GPS no disponible.' })); return }
     setGps(g => ({ ...g, status: 'loading' }))
     navigator.geolocation.getCurrentPosition(
@@ -447,7 +432,7 @@ export default function CheckPage() {
         if (!cfg?.location) { setGps(g => ({ ...g, status: 'error', error: 'Sin ubicación configurada.' })); return }
         const { latitude: lat, longitude: lng, accuracy } = pos.coords
         const dist = Math.round(haversineMeters(lat, lng, cfg.location.lat, cfg.location.lng))
-        setGps({ status: 'ok', lat, lng, accuracy: Math.round(accuracy), dist, valid: dist <= (cfg.location.radius || 300), simulated: false })
+        setGps({ status: 'ok', lat, lng, accuracy: Math.round(accuracy), dist, valid: dist <= (cfg.location.radius || 300) })
       },
       err => {
         const m = { 1: 'Permiso denegado.', 2: 'No se obtuvo posición.', 3: 'Tiempo agotado.' }
@@ -455,7 +440,7 @@ export default function CheckPage() {
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     )
-  }, [simMode, cfg])
+  }, [cfg])
 
   // ── Dual monitoring while shift is open (step=done + openShift) ───────────
   // En modo kiosko el dispositivo se queda fijo en la entrada: no tiene sentido
@@ -501,7 +486,7 @@ export default function CheckPage() {
     let lastIpOutside = false
 
     // ── GPS watch (disabled when screen is locked — browser limitation)
-    if (!simMode && navigator.geolocation && cfg?.location) {
+    if (navigator.geolocation && cfg?.location) {
       gpsWatchId = navigator.geolocation.watchPosition(
         pos => {
           const { latitude: lat, longitude: lng } = pos.coords
@@ -542,7 +527,7 @@ export default function CheckPage() {
     function handleVisibility() {
       if (document.visibilityState === 'visible') {
         // Re-check GPS immediately
-        if (!simMode && navigator.geolocation && cfg?.location) {
+        if (navigator.geolocation && cfg?.location) {
           navigator.geolocation.getCurrentPosition(
             pos => {
               const { latitude: lat, longitude: lng } = pos.coords
@@ -567,7 +552,7 @@ export default function CheckPage() {
       clearInterval(countdownTimer)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [step, openShift, tenantId, cfg, simMode, branchId])
+  }, [step, openShift, tenantId, cfg, branchId])
 
   // ── Reset ─────────────────────────────────────────────────────────────────
   const reset = () => {
@@ -580,17 +565,19 @@ export default function CheckPage() {
 
   // ── Identify employee ─────────────────────────────────────────────────────
   async function submitId() {
-    if (!tenantId) { setMsg({ type: 'err', text: 'Sistema no configurado.' }); return }
+    if (!tenantId || !session?.token) { setMsg({ type: 'err', text: 'Escanea de nuevo el QR de la sucursal.' }); return }
     setBusy(true)
     try {
       const res = await fetch('/api/check/identify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenantId, employeeCode: empCode.trim().toUpperCase() })
+        body: JSON.stringify({ employeeCode: empCode.trim().toUpperCase(), sessionToken: session.token, deviceId })
       })
       const data = await res.json()
-      if (!data.found) { setMsg({ type: 'err', text: 'ID no encontrado.' }); setBusy(false); return }
-      setFoundEmp(data.employee); setOpenShift(data.openShift); setAllEmps(data.allEmployees || [])
+      if (!data.found) { setMsg({ type: 'err', text: data.error || 'No pudimos validar ese ID.' }); setBusy(false); return }
+      setFoundEmp({ code: empCode.trim().toUpperCase() }) // FIX: no exponer PII antes de PIN valido.
+      setOpenShift(data.openShift || null)
+      setAllEmps([])
 
       // BUG N: consultar estatus de vacaciones SIEMPRE despues de identify,
       // sin importar si hay turno abierto. Antes, un shift abierto fantasma
@@ -680,7 +667,7 @@ export default function CheckPage() {
           body: JSON.stringify({
             tenantId, employeeCode: empCode.trim().toUpperCase(), pin, action,
             coveringEmployeeId: coverMode && coverTarget ? coverTarget : null,
-            geo: { lat: gps.lat, lng: gps.lng, dist: gps.dist, accuracy: gps.accuracy, simulated: gps.simulated, valid: gps.valid },
+            geo: { lat: gps.lat, lng: gps.lng, dist: gps.dist, accuracy: gps.accuracy, valid: gps.valid },
             sessionToken: session?.token || null,
             deviceId,
           })
@@ -701,6 +688,7 @@ export default function CheckPage() {
           return
         }
         if (data.ok) {
+          if (data.employee) setFoundEmp(data.employee) // FIX: mostrar PII solo despues de PIN correcto.
           setMsg({ type: 'ok', text: data.msg })
           toast.success(data.msg)
           // R7: el servidor marca birthday:true si hoy es cumpleanios del
@@ -715,7 +703,7 @@ export default function CheckPage() {
           }
           if (action === 'in') {
             setStep('done')
-            setOpenShift({ employee_id: foundEmp?.id, entry_time: new Date().toISOString() })
+            setOpenShift({ employee_id: data.employee?.id || foundEmp?.id, entry_time: data.entry_time || new Date().toISOString() })
             // En modo kiosko el dispositivo es compartido: devolverlo al teclado
             // de ID unos segundos después para que el siguiente empleado entre.
             // El turno ya quedó abierto en BD — al volver a checar su salida,
@@ -727,7 +715,8 @@ export default function CheckPage() {
             setTimeout(reset, 4000)
           }
         } else {
-          setMsg({ type: 'err', text: data.msg }); toast.error(data.msg)
+          const safeMsg = data.msg || data.error || 'No se pudo registrar. Intenta de nuevo.'
+          setMsg({ type: 'err', text: safeMsg }); toast.error(safeMsg)
         }
       } catch { setMsg({ type: 'err', text: 'Error de conexión.' }); toast.error('Error de conexión') }
       finally { setBusy(false) }
@@ -836,7 +825,7 @@ export default function CheckPage() {
         )}
 
         <div className="px-4 pt-3">
-          <GpsStatus gps={gps} onVerify={verifyGps} simMode={simMode} setSimMode={setSimMode} />
+          <GpsStatus gps={gps} onVerify={verifyGps} />
 
           {/* ── DONE screen: shift is open, waiting for QR rescan ── */}
           {step === 'done' && openShift && (
@@ -955,7 +944,7 @@ export default function CheckPage() {
                   ${foundEmp?.can_manage ? 'bg-orange-500/10 border-2 border-orange-400/30 text-orange-400' : 'bg-brand-400/10 border-2 border-brand-400/20 text-brand-400'}`}>
                   {initials}
                 </div>
-                <div className="font-bold text-lg text-white">{foundEmp?.name}</div>
+                <div className="font-bold text-lg text-white">{foundEmp?.name || 'Empleado identificado'}</div>
                 {/* BUG 9: renderizar solo si hay valores — antes imprimía
                     "undefined · undefined" cuando el endpoint no los devolvía. */}
                 {(foundEmp?.department || foundEmp?.role_label) && (
@@ -966,7 +955,7 @@ export default function CheckPage() {
                 {openShift ? (
                   <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 bg-brand-400/10 border border-brand-400/20 rounded-full text-brand-400 text-xs font-semibold">
                     <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
-                    Jornada desde {fmtTime(openShift.entry_time)}
+                    {openShift.entry_time ? `Jornada desde ${fmtTime(openShift.entry_time)}` : 'Jornada activa'}
                   </div>
                 ) : vacationAccepted ? (
                   <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 bg-purple-500/10 border border-purple-500/20 rounded-full text-purple-300 text-xs font-semibold">

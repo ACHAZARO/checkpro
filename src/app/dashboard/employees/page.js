@@ -229,7 +229,14 @@ export default function EmployeesPage() {
     // FIX: badge Art. 47 en card de empleado con mismo criterio del detalle.
     setArt47Set(new Set([...graveCounts.entries()].filter(([, n]) => n > 3).map(([id]) => id)))
     // FIX: preferir tabla branches; si vacia fallback al array legacy por si algun tenant viejo no migro
-    setBranches((branchData && branchData.length > 0) ? branchData : (tenantData?.config?.branches || []))
+    const visibleBranches = isManagerBranch
+      ? (branchData || []).filter(b => b.id === prof.branch_id)
+      : (branchData || [])
+    const legacyBranches = isManagerBranch
+      ? (tenantData?.config?.branches || []).filter(b => b.id === prof.branch_id)
+      : (tenantData?.config?.branches || [])
+    // FIX: gerente no debe ver ni elegir sucursales fuera de su branch.
+    setBranches((visibleBranches && visibleBranches.length > 0) ? visibleBranches : legacyBranches)
     setSelectedBranchId(cur => {
       if (isManagerBranch) return prof.branch_id || 'all'
       if (cur !== 'all' && (branchData || []).some(b => b.id === cur)) return cur
@@ -363,6 +370,11 @@ export default function EmployeesPage() {
     if (!form.name || !form.pin) { toast.error('Nombre y PIN son obligatorios'); return }
     if (form.pin.length !== 4 || !/^\d{4}$/.test(form.pin)) { toast.error('El PIN debe ser exactamente 4 dígitos'); return }
     if (!form.branch_id) { toast.error('Debes seleccionar una sucursal'); return }
+    // FIX: defensa cliente para gerente; el create se revalida en API y el update no debe cambiar de sucursal.
+    if (profile?.role === 'manager' && profile?.branch_id && form.branch_id !== profile.branch_id) {
+      toast.error('No puedes guardar empleados de otra sucursal')
+      return
+    }
     if (!form.hire_date) { toast.error('La fecha de ingreso es obligatoria'); return }
 
     // feat/mixed-schedule: validaciones específicas para mixto
@@ -449,7 +461,10 @@ export default function EmployeesPage() {
       } else {
         // FIX: antes se swallowed el error silently y el toast decia "actualizado"
         // aunque la update fallara por RLS o constraint.
-        const { error: upErr } = await supabase.from('employees').update({ ...payload, status: form.status || 'active' }).eq('id', form.id)
+        const updateQuery = supabase.from('employees').update({ ...payload, status: form.status || 'active' }).eq('id', form.id)
+        const { error: upErr } = profile?.role === 'manager' && profile?.branch_id
+          ? await updateQuery.eq('branch_id', profile.branch_id)
+          : await updateQuery
         // FIX: check supabase error before showing success toast
         if (upErr) {
           console.error('[employees] update error:', upErr)
@@ -478,10 +493,13 @@ export default function EmployeesPage() {
         setConfirmState(s => (s ? { ...s, loading: true } : s))
         try {
           const supabase = createClient()
-          const { error } = await supabase
+          let deleteQuery = supabase
             .from('employees')
             .update({ status: 'deleted' })
             .eq('id', emp.id)
+            .eq('tenant_id', tenantId) // FIX: baja siempre scoped al tenant actual.
+          if (profile?.role === 'manager' && profile?.branch_id) deleteQuery = deleteQuery.eq('branch_id', profile.branch_id)
+          const { error } = await deleteQuery
           if (error) {
             toast.error(error.message || 'No se pudo dar de baja')
           } else {

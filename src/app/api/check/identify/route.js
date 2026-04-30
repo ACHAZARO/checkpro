@@ -14,6 +14,7 @@ import { createServiceClient } from '@/lib/supabase'
 import { NextResponse } from 'next/server'
 import { rateLimit } from '@/lib/rate-limit'
 import { isoDate } from '@/lib/utils'
+import crypto from 'crypto'
 
 function getClientIp(req) {
   const xff = req.headers.get('x-forwarded-for')
@@ -22,11 +23,36 @@ function getClientIp(req) {
 }
 
 const CODE_RE = /^[A-Z0-9]{1,20}$/
+const TTL_MS = 4 * 60 * 60 * 1000
+
+function secret() {
+  const s = process.env.KIOSK_SESSION_SECRET
+  if (!s) throw new Error('KIOSK_SESSION_SECRET no configurado')
+  return s
+}
+
+function verifyToken(token) {
+  try {
+    const data = JSON.parse(Buffer.from(token, 'base64url').toString())
+    const { sig, ...payload } = data
+    const expected = crypto.createHmac('sha256', secret()).update(JSON.stringify(payload)).digest('hex')
+    const a = Buffer.from(String(sig || ''))
+    const b = Buffer.from(expected)
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null // FIX: comparar firma en tiempo constante.
+    if (Date.now() - payload.ts > TTL_MS) return null
+    return payload
+  } catch { return null }
+}
 
 export async function POST(req) {
   try {
-    const { tenantId, employeeCode } = await req.json()
-    if (!tenantId || !employeeCode) {
+    const { employeeCode, sessionToken, deviceId } = await req.json()
+    const sess = verifyToken(sessionToken)
+    if (!sess?.tenantId || (sess.deviceId && deviceId && sess.deviceId !== deviceId)) {
+      return NextResponse.json({ found: false, error: 'Sesion invalida' }, { status: 401 })
+    }
+    const tenantId = sess.tenantId // FIX: tenant isolation desde sesion firmada, no desde body.
+    if (!employeeCode) {
       return NextResponse.json({ found: false, error: 'Datos incompletos' }, { status: 400 })
     }
 
@@ -51,7 +77,7 @@ export async function POST(req) {
     // a cualquier atacante que conociera employee_code.
     const { data: emp } = await supabase
       .from('employees')
-      .select('id,name,can_manage,department,role_label,is_mixed')
+      .select('id,is_mixed')
       .eq('tenant_id', tenantId)
       .eq('employee_code', code)
       .eq('status', 'active')
@@ -68,14 +94,6 @@ export async function POST(req) {
       .eq('employee_id', emp.id)
       .eq('status', 'open')
       .maybeSingle()
-
-    const { data: coverageList } = await supabase
-      .from('employees')
-      .select('id,name,department')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'active')
-      .eq('has_shift', true)
-      .neq('id', emp.id)
 
     // Plan del dia para mixtos — solo si emp.is_mixed.
     let mixedPlanToday = null
@@ -106,18 +124,10 @@ export async function POST(req) {
 
     return NextResponse.json({
       found: true,
-      employee: {
-        id: emp.id,
-        name: emp.name,
-        // FIX R6: birth_date removido — no filtrar PII antes de validar PIN
-        can_manage: emp.can_manage,
-        department: emp.department,
-        role_label: emp.role_label,
-        is_mixed: !!emp.is_mixed,
-      },
+      employee: { is_mixed: !!emp.is_mixed }, // FIX: no filtrar PII antes de validar PIN.
       mixedPlanToday, // null para empleados fijos o mixtos sin plan
-      openShift: openShift ? { id: openShift.id, entry_time: openShift.entry_time } : null,
-      allEmployees: coverageList || [],
+      openShift: openShift ? { open: true } : null, // FIX: no exponer hora de entrada antes del PIN.
+      allEmployees: [],
     })
   } catch (err) {
     console.error('identify/route error:', err?.message)

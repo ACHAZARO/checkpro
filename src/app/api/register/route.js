@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { findAuthUserByEmail } from '@/lib/supabase-server'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -18,14 +19,25 @@ function slugify(s) {
     .slice(0, 40) || 'empresa'
 }
 
+function isStrongPassword(password) {
+  return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(String(password || ''))
+}
+
 export async function POST(req) {
   try {
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown'
+    const rl = rateLimit(`register:${ip}`, 5, 60 * 60_000)
+    if (!rl.ok) {
+      // FIX: rate limit contra abuso/brute force de registro.
+      return NextResponse.json({ error: 'Demasiados intentos. Intenta mas tarde.', retryAfter: rl.retryAfter }, { status: 429 })
+    }
     const { companyName, email, password } = await req.json()
 
     if (!companyName || !email || !password) {
       return NextResponse.json({ error: 'Faltan datos (empresa, email, contraseña).' }, { status: 400 })
     }
-    if (String(password).length < 8) {
+    // FIX: complejidad minima consistente server-side.
+    if (!isStrongPassword(password)) {
       return NextResponse.json({ error: 'La contraseña debe tener al menos 8 caracteres.' }, { status: 400 })
     }
 

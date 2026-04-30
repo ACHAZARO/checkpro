@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase'
 import { scheduledExitDate, scheduledDayHours } from '@/lib/utils'
 import { fromZonedTime } from 'date-fns-tz'
 import toast from 'react-hot-toast'
+import BranchFilter from '@/components/BranchFilter'
 import {
   AlertCircle, CheckCircle2, Plus, Inbox, Lock, X, RefreshCw,
   MapPin, Smartphone, Wifi, Clock, UserCheck, UserX, AlertTriangle,
@@ -566,12 +567,9 @@ export default function IncidenciasPage() {
       </div>
 
       {branches.length > 0 && !isManagerBranch && (
-        <div className="card mb-4">
-          <label className="label flex items-center gap-1.5"><MapPin size={12} /> Sucursal</label>
-          <select className="input text-sm" value={selectedBranchId} onChange={e => setSelectedBranchId(e.target.value)}>
-            <option value="all">Todas las sucursales</option>
-            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
+        <div className="mb-4">
+          {/* FIX: unificar selector de sucursal en dashboard. */}
+          <BranchFilter branches={branches} value={selectedBranchId} onChange={setSelectedBranchId} />
         </div>
       )}
 

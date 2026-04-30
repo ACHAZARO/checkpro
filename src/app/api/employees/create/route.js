@@ -58,7 +58,7 @@ export async function POST(req) {
 
   const employee_code = generateEmployeeCode(existing || [])
 
-  // FIX: validate branch_id belongs to tenant before employee creation
+  // FIX: validate branch_id belongs to tenant and manager scope before employee creation
   if (body.branch_id) {
     const { data: branchCheck } = await admin
       .from('branches')
@@ -68,6 +68,9 @@ export async function POST(req) {
       .maybeSingle()
     if (!branchCheck) {
       return NextResponse.json({ ok: false, error: 'Sucursal no valida' }, { status: 400 })
+    }
+    if (profile.role === 'manager' && profile.branch_id && branchCheck.id !== profile.branch_id) {
+      return NextResponse.json({ ok: false, error: 'Sucursal invalida' }, { status: 403 })
     }
   }
 
