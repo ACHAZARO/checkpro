@@ -441,15 +441,17 @@ export default function PayrollPage() {
   const currentWeekCut = cutsForBranch.find(c => c.start_date === weekStartStr && c.end_date === weekEndStr) || null
   const weekAlreadyClosed = !!currentWeekCut
   const isGraceDay = isGraceDayForRange // FIX: reutilizar el ya calculado.
-  const canCloseToday = isClosingDayOrNextDay && !weekAlreadyClosed
-  // FIX shifts pendientes: si cierra el closingDay y hay shifts abiertos del
-  // mismo dia (sin exit_time), advertir antes de cerrar — quedaran huerfanos
-  // y se rescataran en el siguiente corte.
+  // FIX precision: bloquear cierre el closingDay si hay turnos abiertos del dia.
+  // Esto evita crear shifts huerfanos en primer lugar. El gerente debe esperar a
+  // que los empleados cierren sus turnos, o cerrar al dia siguiente en periodo
+  // de gracia (cuando ya todos los shifts del closingDay tienen su exit_time fijo).
   const openShiftsToday = shifts.filter(s =>
     s.date_str === weekEndStr &&
     myEmpIds.has(s.employee_id) &&
     s.status === 'open'
   )
+  const blockedByOpenShifts = todayKey === closingDay && openShiftsToday.length > 0
+  const canCloseToday = isClosingDayOrNextDay && !weekAlreadyClosed && !blockedByOpenShifts
 
   // Agrupa vacation_periods por employee_id para lookup rapido
   const vacByEmp = {}
@@ -518,8 +520,13 @@ export default function PayrollPage() {
       return
     }
     // FIX: bloquear cierre fuera del día de corte o su ventana de gracia.
-    if (!canCloseToday) {
-      toast.error(`El corte de esta sucursal se puede cerrar los ${DAY_FL[closingDay]} y ${DAY_FL[nextClosingDay]}. Hoy es ${DAY_FL[todayKey]}.`)
+    if (!isClosingDayOrNextDay) {
+      toast.error(`El corte se puede cerrar los ${DAY_FL[closingDay]} y ${DAY_FL[nextClosingDay]}. Hoy es ${DAY_FL[todayKey]}.`)
+      return
+    }
+    // FIX precision: bloquear cierre el closingDay con turnos abiertos del dia.
+    if (blockedByOpenShifts) {
+      toast.error(`Hay ${openShiftsToday.length} turno(s) abierto(s) de hoy. Espera a que cierren o cierra mañana en periodo de gracia.`)
       return
     }
     if (!myBranchId) {
@@ -829,16 +836,16 @@ export default function PayrollPage() {
       <div className={`card mb-4 ${hasUnresolved || !canCloseToday ? 'opacity-60' : ''}`}>
         <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Corte semanal</p>
         <p className="text-[11px] text-gray-400 font-mono mb-3">Corte de {weekStartStr} a {weekEndStr}</p>
-        {/* FIX info: rescate de turnos huerfanos de cortes previos. */}
+        {/* FIX info: rescate de turnos huerfanos de cortes previos (safety net). */}
         {orphanShifts.length > 0 && !weekAlreadyClosed && (
           <div className="px-3 py-2 mb-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-300 text-xs">
-            <strong>{orphanShifts.length} turno{orphanShifts.length > 1 ? 's' : ''} pendiente{orphanShifts.length > 1 ? 's' : ''}</strong> de cortes anteriores se incluirán en este corte (rescate de turnos cerrados después del cierre previo).
+            <strong>{orphanShifts.length} turno{orphanShifts.length > 1 ? 's' : ''} pendiente{orphanShifts.length > 1 ? 's' : ''}</strong> de cortes anteriores se incluirán en este corte.
           </div>
         )}
-        {/* FIX warning: shifts abiertos del closingDay que se quedaran como huerfanos. */}
-        {!weekAlreadyClosed && todayKey === closingDay && openShiftsToday.length > 0 && (
-          <div className="px-3 py-2 mb-3 bg-blue-500/10 border border-blue-500/30 rounded-lg text-blue-300 text-xs">
-            Hay <strong>{openShiftsToday.length} turno{openShiftsToday.length > 1 ? 's' : ''} abierto{openShiftsToday.length > 1 ? 's' : ''}</strong> de hoy ({DAY_FL[closingDay]}). Si los empleados cierran después de este corte, se incluirán automáticamente en el siguiente cierre.
+        {/* FIX precision: bloquear cierre con shifts abiertos del closingDay. */}
+        {blockedByOpenShifts && !weekAlreadyClosed && (
+          <div className="px-3 py-2 mb-3 bg-orange-500/10 border border-orange-500/30 rounded-lg text-orange-300 text-xs">
+            <strong>{openShiftsToday.length} turno{openShiftsToday.length > 1 ? 's' : ''} abierto{openShiftsToday.length > 1 ? 's' : ''}</strong> de hoy ({DAY_FL[closingDay]}). Espera a que cierren para preservar la fecha exacta de cada turno, o cierra mañana ({DAY_FL[nextClosingDay]}) en período de gracia.
           </div>
         )}
         {weekAlreadyClosed && currentWeekCut && (
@@ -870,7 +877,7 @@ export default function PayrollPage() {
           <button onClick={closeWeek} disabled={closing || hasUnresolved || !canCloseToday || weekAlreadyClosed}
             className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed flex-1">
             <span className="inline-flex items-center justify-center gap-1.5">
-              {closing ? <><Loader2 size={14} className="animate-spin" /> Cerrando...</> : weekAlreadyClosed ? <><Lock size={14} /> Semana ya cerrada</> : !canCloseToday ? <><Lock size={14} /> Disponible {DAY_FL[closingDay]} / {DAY_FL[nextClosingDay]}</> : <><Printer size={14} /> Cerrar semana e imprimir reporte</>}
+              {closing ? <><Loader2 size={14} className="animate-spin" /> Cerrando...</> : weekAlreadyClosed ? <><Lock size={14} /> Semana ya cerrada</> : blockedByOpenShifts ? <><Lock size={14} /> Espera turnos abiertos</> : !isClosingDayOrNextDay ? <><Lock size={14} /> Disponible {DAY_FL[closingDay]} / {DAY_FL[nextClosingDay]}</> : <><Printer size={14} /> Cerrar semana e imprimir reporte</>}
             </span>
           </button>
           {weekAlreadyClosed && currentWeekCut && (
