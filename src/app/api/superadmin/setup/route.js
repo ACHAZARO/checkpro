@@ -19,8 +19,10 @@ const SYSTEM_TENANT_SLUG = 'checkpro-system'
 
 function requireSetupToken(req) {
   // FIX: setup habilitado requiere secreto server-side, no solo SETUP_ENABLED.
+  // FIX: si SETUP_TOKEN no esta configurado, responder 404 igual que cuando esta
+  // deshabilitado — no exponer si el endpoint esta a medias configurado.
   const expected = process.env.SETUP_TOKEN
-  if (!expected) return { error: 'Setup token no configurado', status: 500 }
+  if (!expected) return { error: 'Not found', status: 404 }
   const got = req.headers.get('x-setup-token') || ''
   if (got !== expected) return { error: 'Not found', status: 404 }
   return null

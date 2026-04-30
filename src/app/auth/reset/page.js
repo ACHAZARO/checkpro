@@ -60,7 +60,11 @@ function ResetPageInner() {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (password.length < 6) { toast.error('La contraseña debe tener al menos 6 caracteres'); return }
+    // FIX: misma complejidad minima que /register para no degradar password al hacer reset.
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(password)) {
+      toast.error('La contraseña debe tener al menos 8 caracteres, con mayúscula, minúscula y número')
+      return
+    }
     if (password !== confirm) { toast.error('Las contraseñas no coinciden'); return }
     setLoading(true)
     try {

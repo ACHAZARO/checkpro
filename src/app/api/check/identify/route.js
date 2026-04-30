@@ -87,6 +87,18 @@ export async function POST(req) {
       return NextResponse.json({ found: false })
     }
 
+    // FIX cobertura: lista minima de companeros (id+name) solo se devuelve a alguien
+    // que ya conoce un employee_code valido del tenant + paso rate limit. Es la lista
+    // que el toggle "Cubriendo a companero" necesita; sin esto el flujo queda roto.
+    // No hay PII grave: ni depto, ni horario, ni fecha de nacimiento, ni salario.
+    const { data: peers } = await supabase
+      .from('employees')
+      .select('id, name')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'active')
+      .neq('id', emp.id)
+      .order('name')
+
     const { data: openShift } = await supabase
       .from('shifts')
       .select('id,entry_time')
@@ -127,7 +139,7 @@ export async function POST(req) {
       employee: { is_mixed: !!emp.is_mixed }, // FIX: no filtrar PII antes de validar PIN.
       mixedPlanToday, // null para empleados fijos o mixtos sin plan
       openShift: openShift ? { open: true } : null, // FIX: no exponer hora de entrada antes del PIN.
-      allEmployees: [],
+      allEmployees: peers || [], // FIX: lista minima id+name para flujo de cobertura.
     })
   } catch (err) {
     console.error('identify/route error:', err?.message)

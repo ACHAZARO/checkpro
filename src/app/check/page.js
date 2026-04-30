@@ -577,7 +577,7 @@ export default function CheckPage() {
       if (!data.found) { setMsg({ type: 'err', text: data.error || 'No pudimos validar ese ID.' }); setBusy(false); return }
       setFoundEmp({ code: empCode.trim().toUpperCase() }) // FIX: no exponer PII antes de PIN valido.
       setOpenShift(data.openShift || null)
-      setAllEmps([])
+      setAllEmps(data.allEmployees || []) // FIX: cobertura necesita lista de companeros (id+name).
 
       // BUG N: consultar estatus de vacaciones SIEMPRE despues de identify,
       // sin importar si hay turno abierto. Antes, un shift abierto fantasma

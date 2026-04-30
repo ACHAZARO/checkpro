@@ -169,7 +169,10 @@ export async function POST(req) {
     const lat = Number(geo?.lat)
     const lng = Number(geo?.lng)
     const accuracy = Number(geo?.accuracy)
-    if (locCfg?.lat != null && locCfg?.lng != null && Number.isFinite(lat) && Number.isFinite(lng) && Number.isFinite(accuracy) && accuracy <= 100) {
+    // FIX UX: accuracy <=100m era muy estricto y rechazaba celulares legitimos en
+    // interiores con peor GPS. La defensa real es dist <= radius; subimos a 200m
+    // que es el umbral practico de mobile GPS (urbano + interior leve).
+    if (locCfg?.lat != null && locCfg?.lng != null && Number.isFinite(lat) && Number.isFinite(lng) && Number.isFinite(accuracy) && accuracy <= 200) {
       dist = haversineMeters(lat, lng, locCfg.lat, locCfg.lng)
       const radius = locCfg.radius || 300
       geoValid = dist <= radius
