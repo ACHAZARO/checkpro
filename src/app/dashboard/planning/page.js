@@ -319,70 +319,114 @@ export default function PlanningPage() {
             </button>
           </div>
 
-          <div className="card overflow-x-auto isolate bg-[#fff] dark:bg-[#101318]">
-            {/* FIX: stacking aislado y fondos opacos evitan que los dias se vean bajo la columna sticky. */}
-            <table className="min-w-full text-xs border-separate border-spacing-0 bg-[#fff] dark:bg-[#101318]">
-              <thead>
-                <tr>
-                  <th className={`text-left p-2 font-mono border-b sticky left-0 z-30 min-w-[150px] ${
-                    isDark
-                      ? 'text-gray-500 border-dark-border bg-[#101318]'
-                      : 'text-gray-600 border-gray-200 bg-[#fff]'
-                  }`}
-                    style={!isDark ? { boxShadow: '6px 0 8px -4px rgba(0,0,0,0.08)' } : { boxShadow: '6px 0 8px -4px rgba(0,0,0,0.4)' }}>Empleado</th>
-                  {dates.map((d, i) => (
-                    <th key={d} className={`text-center p-2 font-mono border-b min-w-[90px] z-10 ${
-                      isDark ? 'text-gray-500 border-dark-border bg-[#101318]' : 'text-gray-600 border-gray-200 bg-[#fff]'
-                    }`}>
-                      <div className="text-brand-400">{DAY_L[DAYS[i]]}</div>
-                      <div className={`text-[10px] font-normal ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{d.slice(5)}</div>
+          {/* FIX scroll planificador: el padding del .card estaba DENTRO del overflow,
+             dejando un gap visible donde las celdas pasaban antes de llegar al sticky.
+             Solucion: card visual (border + shadow) en outer wrapper SIN padding;
+             scroll container interno sin padding, con isolation isolate y bg explicito.
+             Backgrounds via inline style para no depender de `dark:` modifier (el config
+             previo no tenia darkMode:'class', asi que dark: no respondia a html.dark). */}
+          <div
+            className="rounded-2xl border shadow-sm"
+            style={{
+              borderColor: isDark ? '#1f2636' : '#e2e8f0',
+              backgroundColor: isDark ? '#101318' : '#ffffff',
+            }}
+          >
+            <div
+              className="overflow-x-auto rounded-2xl"
+              style={{
+                isolation: 'isolate',
+                backgroundColor: isDark ? '#101318' : '#ffffff',
+              }}
+            >
+              <table className="min-w-full text-xs border-separate border-spacing-0">
+                <thead>
+                  <tr>
+                    <th
+                      className="text-left p-2 font-mono border-b sticky left-0 min-w-[150px]"
+                      style={{
+                        backgroundColor: isDark ? '#101318' : '#ffffff',
+                        color: isDark ? '#94a3b8' : '#64748b',
+                        borderColor: isDark ? '#1f2636' : '#e2e8f0',
+                        zIndex: 30,
+                        boxShadow: isDark
+                          ? '6px 0 8px -4px rgba(0,0,0,0.4)'
+                          : '6px 0 8px -4px rgba(0,0,0,0.08)',
+                      }}
+                    >
+                      Empleado
                     </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {mixedEmps.map(emp => (
-                  <tr key={emp.id} className={`border-b ${
-                    isDark ? 'border-dark-border/50 hover:bg-dark-700/40' : 'border-gray-100 hover:bg-gray-50'
-                  }`}>
-                    <td className={`p-2 align-top sticky left-0 z-20 min-w-[150px] ${
-                      isDark ? 'bg-[#101318]' : 'bg-[#fff]'
-                    }`}
-                      style={!isDark
-                        ? { boxShadow: '6px 0 8px -4px rgba(0,0,0,0.08)' }
-                        : { boxShadow: '6px 0 8px -4px rgba(0,0,0,0.4)' }}>
-                      <div className={`font-semibold text-xs whitespace-nowrap max-w-[160px] truncate ${isDark ? 'text-white' : 'text-gray-900'}`} title={emp.name}>{emp.name}</div>
-                      <div className={`text-[10px] font-mono ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{emp.daily_hours || '?'} h/día · {emp.employee_code}</div>
-                    </td>
-                    {dates.map(d => {
-                      const cell = plans[`${emp.id}|${d}`]
-                      const entry = cell?.entry_time_str || ''
-                      return (
-                        <td key={d} className={`p-1.5 align-top ${isDark ? 'bg-[#101318]' : 'bg-[#fff]'}`}>
-                          <input
-                            type="time"
-                            className={`w-full border rounded-md px-1.5 py-1 text-xs text-center font-mono ${
-                              isDark
-                                ? 'bg-dark-700 border-dark-border text-white'
-                                : 'bg-white border-gray-300 text-gray-900'
-                            }`}
-                            value={entry}
-                            onChange={e => setCell(emp.id, d, e.target.value)}
-                          />
-                          {entry ? (
-                            <div className="text-[9px] text-brand-400/80 mt-1 text-center font-mono">
-                              sale {cell.exit_time_str}
-                            </div>
-                          ) : (
-                            <div className={`text-[9px] mt-1 text-center font-mono ${isDark ? 'text-gray-700' : 'text-gray-300'}`}>—</div>
-                          )}
-                        </td>
-                      )
-                    })}
+                    {dates.map((d, i) => (
+                      <th
+                        key={d}
+                        className="text-center p-2 font-mono border-b min-w-[90px]"
+                        style={{
+                          backgroundColor: isDark ? '#101318' : '#ffffff',
+                          color: isDark ? '#94a3b8' : '#64748b',
+                          borderColor: isDark ? '#1f2636' : '#e2e8f0',
+                          zIndex: 10,
+                        }}
+                      >
+                        <div className="text-brand-400">{DAY_L[DAYS[i]]}</div>
+                        <div className={`text-[10px] font-normal ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{d.slice(5)}</div>
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {mixedEmps.map(emp => (
+                    <tr key={emp.id}>
+                      <td
+                        className="p-2 align-top sticky left-0 min-w-[150px] border-b"
+                        style={{
+                          backgroundColor: isDark ? '#101318' : '#ffffff',
+                          borderColor: isDark ? 'rgba(31,38,54,0.5)' : '#f1f5f9',
+                          zIndex: 20,
+                          boxShadow: isDark
+                            ? '6px 0 8px -4px rgba(0,0,0,0.4)'
+                            : '6px 0 8px -4px rgba(0,0,0,0.08)',
+                        }}
+                      >
+                        <div className={`font-semibold text-xs whitespace-nowrap max-w-[160px] truncate ${isDark ? 'text-white' : 'text-gray-900'}`} title={emp.name}>{emp.name}</div>
+                        <div className={`text-[10px] font-mono ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{emp.daily_hours || '?'} h/día · {emp.employee_code}</div>
+                      </td>
+                      {dates.map(d => {
+                        const cell = plans[`${emp.id}|${d}`]
+                        const entry = cell?.entry_time_str || ''
+                        return (
+                          <td
+                            key={d}
+                            className="p-1.5 align-top border-b"
+                            style={{
+                              backgroundColor: isDark ? '#101318' : '#ffffff',
+                              borderColor: isDark ? 'rgba(31,38,54,0.5)' : '#f1f5f9',
+                            }}
+                          >
+                            <input
+                              type="time"
+                              className={`w-full border rounded-md px-1.5 py-1 text-xs text-center font-mono ${
+                                isDark
+                                  ? 'bg-dark-700 border-dark-border text-white'
+                                  : 'bg-white border-gray-300 text-gray-900'
+                              }`}
+                              value={entry}
+                              onChange={e => setCell(emp.id, d, e.target.value)}
+                            />
+                            {entry ? (
+                              <div className="text-[9px] text-brand-400/80 mt-1 text-center font-mono">
+                                sale {cell.exit_time_str}
+                              </div>
+                            ) : (
+                              <div className={`text-[9px] mt-1 text-center font-mono ${isDark ? 'text-gray-700' : 'text-gray-300'}`}>—</div>
+                            )}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div className="mt-4 text-[11px] text-gray-500 leading-relaxed">

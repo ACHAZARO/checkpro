@@ -1,6 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: ["./src/**/*.{js,jsx,ts,tsx}"],
+  // FIX: usar `class` strategy para que `dark:` modifiers respondan a `html.dark`
+  // (el toggle de tema del app), no a `prefers-color-scheme` del SO.
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
