@@ -210,6 +210,7 @@ export async function POST(req) {
     const branchIp = cfg.ip || branch?.ip || null
     const ipMatchesBranch = branchIp ? (currentIp === branchIp) : true
     const coveragePayMode = cfg.coveragePayMode || branch?.coveragePayMode || 'covered'
+    const prepCloseMinutes = cfg.prepCloseMinutes ?? branch?.prepCloseMinutes ?? 30 // FIX: tiempo de preparacion de cierre configurable.
 
     const safeGeo = { lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null, dist, accuracy: Number.isFinite(accuracy) ? accuracy : null, verified: geoValid, outOfRange }
 
@@ -454,7 +455,7 @@ export async function POST(req) {
         const minutesOver = Math.round((new Date(now) - scheduledExit) / 60000)
         if (minutesOver > 0) {
           overtimeMinutes = minutesOver
-          overtimeHours = calcOvertimeHours(minutesOver)
+          overtimeHours = calcOvertimeHours(minutesOver, prepCloseMinutes)
         }
       }
     }
@@ -500,7 +501,7 @@ export async function POST(req) {
         shift_id: openShift.id,
         date_str: openShift.date_str,
         kind: 'horas_extra',
-        description: `Horas extra detectadas: ${overtimeHours}h (${overtimeMinutes} min excedentes).`,
+        description: `Horas extra detectadas: ${Number(overtimeHours).toFixed(2)}h (${overtimeMinutes} min excedentes).`,
         status: 'open',
       })
     }
@@ -568,13 +569,13 @@ export async function POST(req) {
     await supabase.from('audit_log').insert({
       tenant_id: tenantId, action: 'CHK_OUT',
       employee_id: emp.id, employee_name: emp.name,
-      detail: `Duración ${duration}h${overtimeHours > 0 ? ` · HE ${overtimeHours}h` : ''} · IP ${currentIp}${isIncident ? ' ⚠ ' + newIncidents.map(i => i.type).join(',') : ''}`,
+      detail: `Duración ${duration}h${overtimeHours > 0 ? ` · HE ${Number(overtimeHours).toFixed(2)}h` : ''} · IP ${currentIp}${isIncident ? ' ⚠ ' + newIncidents.map(i => i.type).join(',') : ''}`,
       success: true
     })
 
     const msg = isIncident
       ? `Salida registrada (${duration}h). ⚠ Se creó una incidencia para revisión.`
-      : `Salida registrada. Jornada: ${duration} horas.${overtimeHours > 0 ? ` · ${overtimeHours} HE.` : ''}`
+      : `Salida registrada. Jornada: ${duration} horas.${overtimeHours > 0 ? ` · ${Number(overtimeHours).toFixed(2)} HE.` : ''}`
     return NextResponse.json({ ok: true, msg, overtimeHours, incident: isIncident, birthday: isBirthdayToday, employee: { id: emp.id, name: emp.name, can_manage: emp.can_manage, department: emp.department, role_label: emp.role_label } }) // FIX: PII solo post-PIN.
 
   } catch (err) {

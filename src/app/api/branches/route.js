@@ -50,6 +50,8 @@ export async function POST(req) {
   const defaultConfig = {
     toleranceMinutes: 10,
     absenceMinutes: 60,
+    prepCloseMinutes: 30,
+    coveragePayMode: 'covered',
     alertHours: 8,
     weekClosingDay: 'dom',
     location: { lat: 19.4326, lng: -99.1332, radius: 300, name: 'Sucursal' },

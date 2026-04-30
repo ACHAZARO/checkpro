@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { useTheme } from '@/lib/ThemeContext'
-import { DAYS, DAY_L, addHoursToTimeStr } from '@/lib/utils'
+import { DAYS, DAY_L, DAY_FL, addHoursToTimeStr } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import BranchFilter from '@/components/BranchFilter'
 
@@ -271,31 +271,32 @@ export default function PlanningPage() {
   const isManagerBranch = profile?.role === 'manager' && !!profile?.branch_id
 
   return (
-    <div className="p-5 md:p-6 max-w-6xl mx-auto">
-      <div className="flex items-end justify-between mb-5 flex-wrap gap-3">
-        <div>
+    <div className="p-4 md:p-6 max-w-6xl mx-auto">
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between mb-5 gap-4">
+        <div className="min-w-0">
           <h1 className="page-title">Planificador semanal</h1>
           <p className="text-gray-400 text-xs font-mono mt-0.5">EMPLEADOS MIXTOS · {mixedEmps.length} persona{mixedEmps.length !== 1 ? 's' : ''}</p>
           {savedMeta ? (
-            <div className="mt-1 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-brand-400/15 border border-brand-400/30 text-brand-300 text-[11px] font-mono">
+            <div className="mt-2 inline-flex max-w-full items-center gap-1.5 px-2 py-1 rounded-full bg-brand-400/15 border border-brand-400/30 text-brand-300 text-[11px] font-mono">
               ✓ {savedMeta.title || `Semana ${savedMeta.start_date}`} · guardada{savedMeta.saved_by_name ? ` por ${savedMeta.saved_by_name}` : ''}
             </div>
           ) : (
-            <div className="mt-1 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-300 text-[11px] font-mono">
+            <div className="mt-2 inline-flex max-w-full items-center gap-1.5 px-2 py-1 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-300 text-[11px] font-mono">
               ⚠ Esta semana aún no está guardada (bloquea el corte)
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center md:flex-wrap">
           {branches.length > 0 && !isManagerBranch && (
             <>
               {/* FIX: unificar selector de sucursal con Equipo/Hoy. */}
               <BranchFilter branches={branches} value={selectedBranchId} onChange={setSelectedBranchId} />
             </>
           )}
-          <button onClick={() => setWeekStart(w => addDaysIso(w, -7))} className="px-3 py-2 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-xs active:bg-dark-600">← Anterior</button>
-          <input type="date" className="input py-1.5 text-xs" value={weekStart} onChange={e => setWeekStart(mondayOf(e.target.value))} />
-          <button onClick={() => setWeekStart(w => addDaysIso(w, 7))} className="px-3 py-2 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-xs active:bg-dark-600">Siguiente →</button>
+          {/* FIX: controles de semana legibles en mobile. */}
+          <button onClick={() => setWeekStart(w => addDaysIso(w, -7))} className="w-full px-3 py-2.5 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-xs active:bg-dark-600 md:w-auto">← Anterior</button>
+          <input type="date" className="input w-full py-2 text-xs md:w-auto" value={weekStart} onChange={e => setWeekStart(mondayOf(e.target.value))} />
+          <button onClick={() => setWeekStart(w => addDaysIso(w, 7))} className="w-full px-3 py-2.5 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-xs active:bg-dark-600 md:w-auto">Siguiente →</button>
         </div>
       </div>
 
@@ -307,14 +308,15 @@ export default function PlanningPage() {
         </div>
       ) : (
         <>
-          <div className="flex gap-2 mb-4 flex-wrap">
-            <button onClick={save} disabled={saving} className="px-4 py-2 bg-brand-400 text-black font-bold rounded-xl text-sm active:brightness-90 disabled:opacity-50">
+          <div className="grid grid-cols-1 gap-2 mb-4 sm:grid-cols-3 md:flex md:flex-wrap">
+            {/* FIX: acciones del planificador no rompen layout en mobile. */}
+            <button onClick={save} disabled={saving} className="w-full px-4 py-2.5 bg-brand-400 text-black font-bold rounded-xl text-sm active:brightness-90 disabled:opacity-50 md:w-auto">
               {saving ? 'Guardando...' : '💾 Guardar plan'}
             </button>
-            <button onClick={copyPrevWeek} className="px-4 py-2 bg-dark-700 border border-dark-border rounded-xl text-gray-300 text-sm active:bg-dark-600">
+            <button onClick={copyPrevWeek} className="w-full px-4 py-2.5 bg-dark-700 border border-dark-border rounded-xl text-gray-300 text-sm active:bg-dark-600 md:w-auto">
               ↺ Copiar semana anterior
             </button>
-            <button onClick={exportPdf} className="px-4 py-2 bg-dark-700 border border-dark-border rounded-xl text-gray-300 text-sm active:bg-dark-600">
+            <button onClick={exportPdf} className="w-full px-4 py-2.5 bg-dark-700 border border-dark-border rounded-xl text-gray-300 text-sm active:bg-dark-600 md:w-auto">
               📄 Exportar PDF
             </button>
           </div>
@@ -339,11 +341,11 @@ export default function PlanningPage() {
                 backgroundColor: isDark ? '#101318' : '#ffffff',
               }}
             >
-              <table className="min-w-full text-xs border-separate border-spacing-0">
+              <table className="min-w-full text-xs md:text-sm border-separate border-spacing-0">
                 <thead>
                   <tr>
                     <th
-                      className="text-left p-2 font-mono border-b sticky left-0 min-w-[150px]"
+                      className="text-left p-2 md:p-3 font-mono border-b sticky left-0 min-w-[120px] md:min-w-[150px]"
                       style={{
                         backgroundColor: isDark ? '#101318' : '#ffffff',
                         color: isDark ? '#94a3b8' : '#64748b',
@@ -359,7 +361,8 @@ export default function PlanningPage() {
                     {dates.map((d, i) => (
                       <th
                         key={d}
-                        className="text-center p-2 font-mono border-b min-w-[90px]"
+                        aria-label={DAY_FL[DAYS[i]]}
+                        className="text-center p-2 md:p-3 font-mono border-b min-w-[110px] md:min-w-[120px]"
                         style={{
                           backgroundColor: isDark ? '#101318' : '#ffffff',
                           color: isDark ? '#94a3b8' : '#64748b',
@@ -367,8 +370,8 @@ export default function PlanningPage() {
                           zIndex: 10,
                         }}
                       >
-                        <div className="text-brand-400">{DAY_L[DAYS[i]]}</div>
-                        <div className={`text-[10px] font-normal ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{d.slice(5)}</div>
+                        <div className="text-brand-400 text-xs md:text-sm">{DAY_L[DAYS[i]]}</div>
+                        <div className={`text-[10px] md:text-xs font-normal ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{d.slice(5)}</div>
                       </th>
                     ))}
                   </tr>
@@ -377,7 +380,7 @@ export default function PlanningPage() {
                   {mixedEmps.map(emp => (
                     <tr key={emp.id}>
                       <td
-                        className="p-2 align-top sticky left-0 min-w-[150px] border-b"
+                        className="p-2 md:p-3 align-top sticky left-0 min-w-[120px] md:min-w-[150px] border-b"
                         style={{
                           backgroundColor: isDark ? '#101318' : '#ffffff',
                           borderColor: isDark ? 'rgba(31,38,54,0.5)' : '#f1f5f9',
@@ -387,8 +390,9 @@ export default function PlanningPage() {
                             : '6px 0 8px -4px rgba(0,0,0,0.08)',
                         }}
                       >
-                        <div className={`font-semibold text-xs whitespace-nowrap max-w-[160px] truncate ${isDark ? 'text-white' : 'text-gray-900'}`} title={emp.name}>{emp.name}</div>
-                        <div className={`text-[10px] font-mono ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{emp.daily_hours || '?'} h/día · {emp.employee_code}</div>
+                        <div className={`font-semibold text-xs md:text-sm whitespace-nowrap max-w-[96px] md:max-w-[160px] truncate ${isDark ? 'text-white' : 'text-gray-900'}`} title={emp.name}>{emp.name}</div>
+                        <div className={`mt-1 text-[10px] leading-tight font-mono truncate max-w-[96px] md:max-w-[160px] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{emp.daily_hours || '?'} h/día</div>
+                        <div className={`text-[10px] leading-tight font-mono truncate max-w-[96px] md:max-w-[160px] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{emp.employee_code}</div>
                       </td>
                       {dates.map(d => {
                         const cell = plans[`${emp.id}|${d}`]
@@ -396,7 +400,7 @@ export default function PlanningPage() {
                         return (
                           <td
                             key={d}
-                            className="p-1.5 align-top border-b"
+                            className="p-2 md:p-2.5 align-top border-b"
                             style={{
                               backgroundColor: isDark ? '#101318' : '#ffffff',
                               borderColor: isDark ? 'rgba(31,38,54,0.5)' : '#f1f5f9',
@@ -404,7 +408,7 @@ export default function PlanningPage() {
                           >
                             <input
                               type="time"
-                              className={`w-full border rounded-md px-1.5 py-1 text-xs text-center font-mono ${
+                              className={`w-full min-w-[100px] border rounded-md px-2 py-1.5 text-xs text-center font-mono ${
                                 isDark
                                   ? 'bg-dark-700 border-dark-border text-white'
                                   : 'bg-white border-gray-300 text-gray-900'

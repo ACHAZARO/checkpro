@@ -155,9 +155,17 @@ export function weekRange(refDate, closingDay, tz = DEFAULT_TZ) {
   return { start, end }
 }
 
-export function calcOvertimeHours(minutesOver) {
-  if (minutesOver <= 30) return 0
-  return Math.ceil((minutesOver - 30) / 60)
+// FIX LFT (Art. 67-68): horas extras se pagan con multiplicador (×2 las primeras
+// 9 hrs/sem, ×3 a partir de la decima) sobre el TIEMPO EFECTIVAMENTE TRABAJADO.
+// La ley NO obliga a redondear a hora completa; la jurisprudencia favorece el
+// pago por minutos reales. Devolvemos horas en decimal (minutos/60) redondeado
+// a 2 decimales para reflejar el tiempo exacto despues del umbral de preparacion
+// de cierre. El multiplicador se aplica aguas abajo en calcShiftPay.
+export function calcOvertimeHours(minutesOver, prepCloseMin = 30) {
+  const prepClose = Math.max(0, Number(prepCloseMin) || 0) // FIX: umbral de preparacion de cierre configurable por sucursal.
+  if (minutesOver <= prepClose) return 0
+  const otMinutes = minutesOver - prepClose
+  return Math.round((otMinutes / 60) * 100) / 100 // FIX LFT: pago por tiempo exacto, redondeo a 2 decimales.
 }
 
 // Horas programadas para un día concreto. Mixto → plan.duration_hours; fijo → schedule[dk].

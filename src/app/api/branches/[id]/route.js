@@ -10,10 +10,10 @@ export const dynamic = 'force-dynamic'
 
 // Fields managers are allowed to mutate inside branch.config
 const MANAGER_CONFIG_FIELDS = new Set([
-  'toleranceMinutes','absenceMinutes','alertHours','weekClosingDay',
+  'toleranceMinutes','absenceMinutes','prepCloseMinutes','coveragePayMode','alertHours','weekClosingDay',
   'location','businessHours','holidays','restDays',
   'printHeader','printLegalText','printFooter'
-])
+]) // FIX: permitir que managers guarden preparacion de cierre y tarifa de cobertura por sucursal.
 
 async function getAuthedProfile() {
   const supabase = createServerSupabaseClient()

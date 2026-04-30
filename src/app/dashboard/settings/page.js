@@ -1019,6 +1019,22 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
           <p className="text-[10px] text-gray-400 font-mono mt-1">Cuando un empleado acumule este número de retardos en 30 días, se genera una alerta en Incidencias para revisar manual. Deja en blanco para no generar alertas (cero retardos hacen falta).</p>
         </div>
         <div>
+          <label className="label">Tiempo de preparacion de cierre (minutos)</label>
+          <input className="input" type="number" min="0" max="120" step="1" value={cfg.prepCloseMinutes ?? 30} onChange={e => F('prepCloseMinutes', Math.min(120, Math.max(0, parseInt(e.target.value) || 0)))} />
+          <p className="text-[10px] text-gray-400 font-mono mt-1">Tiempo de gracia despues de la hora de salida programada antes de contar tiempo extra. Util para limpieza, cierre de caja, etc.</p>
+          {/* FIX: umbral de tiempo extra configurable por sucursal. */}
+        </div>
+        <div>
+          <label className="label">Tarifa al cubrir companero</label>
+          <select className="input" value={cfg.coveragePayMode || 'covered'} onChange={e => F('coveragePayMode', e.target.value)}>
+            <option value="covered">Tarifa del companero cubierto (default)</option>
+            <option value="own">Tarifa del empleado que cubre</option>
+            <option value="lower">La tarifa mas baja</option>
+          </select>
+          <p className="text-[10px] text-gray-400 font-mono mt-1">Cuando un empleado cubre a otro, define cual tarifa se paga por el turno cubierto.</p>
+          {/* FIX: modo de tarifa de cobertura configurable por sucursal. */}
+        </div>
+        <div>
           <label className="label">Alerta jornada abierta (horas)</label>
           <input className="input" type="number" min="1" max="24" value={cfg.alertHours ?? 8} onChange={e => F('alertHours', parseInt(e.target.value) || 8)} />
         </div>

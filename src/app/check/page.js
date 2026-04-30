@@ -984,7 +984,7 @@ export default function CheckPage() {
                         <option value="">— Selecciona al compañero —</option>
                         {otherEmps.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                       </select>
-                      <p className="text-xs text-blue-400 font-mono">💡 Tarifa: la del compañero cubierto</p>
+                      {/* FIX: no mostrar informacion administrativa de tarifa en kiosko. */}
                     </>
                   )}
                 </div>
