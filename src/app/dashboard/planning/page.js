@@ -61,6 +61,8 @@ export default function PlanningPage() {
   const [saving, setSaving] = useState(false)
   const [savedMeta, setSavedMeta] = useState(null) // weekly_plans row para la semana actual
   const [profile, setProfile] = useState(null)
+  const [branches, setBranches] = useState([])
+  const [selectedBranchId, setSelectedBranchId] = useState('all')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -77,12 +79,18 @@ export default function PlanningPage() {
     setProfile(prof)
     const [{ data: ten }, { data: branchData }] = await Promise.all([
       supabase.from('tenants').select('*').eq('id', prof.tenant_id).single(),
-      supabase.from('branches').select('id,config').eq('tenant_id', prof.tenant_id),
+      supabase.from('branches').select('id,name,config').eq('tenant_id', prof.tenant_id).order('created_at'),
     ])
     // FIX: mixedSchedule por sucursal
     const visibleBranches = prof.role === 'manager' && prof.branch_id
       ? (branchData || []).filter(b => b.id === prof.branch_id)
       : (branchData || [])
+    setBranches(visibleBranches)
+    setSelectedBranchId(cur => {
+      if (prof.role === 'manager' && prof.branch_id) return prof.branch_id
+      if (cur !== 'all' && visibleBranches.some(b => b.id === cur)) return cur
+      return 'all'
+    })
     const mixedEnabled = visibleBranches.length > 0
       ? visibleBranches.some(b => (b.config?.mixedSchedule || ten?.config?.mixedSchedule)?.enabled === true)
       : ten?.config?.mixedSchedule?.enabled === true
@@ -102,6 +110,8 @@ export default function PlanningPage() {
       .eq('tenant_id', prof.tenant_id)
       .eq('start_date', weekStart)
     if (prof.role === 'manager' && prof.branch_id) wpQuery = wpQuery.eq('branch_id', prof.branch_id)
+    else if (selectedBranchId !== 'all') wpQuery = wpQuery.eq('branch_id', selectedBranchId)
+    else wpQuery = wpQuery.is('branch_id', null)
     const { data: wp } = await wpQuery.maybeSingle()
     setSavedMeta(wp || null)
     let empQuery = supabase
@@ -112,6 +122,7 @@ export default function PlanningPage() {
       .eq('is_mixed', true)
       .order('name')
     if (prof.role === 'manager' && prof.branch_id) empQuery = empQuery.eq('branch_id', prof.branch_id)
+    else if (selectedBranchId !== 'all') empQuery = empQuery.eq('branch_id', selectedBranchId)
     const { data: emps } = await empQuery
     setMixedEmps(emps || [])
 
@@ -128,7 +139,7 @@ export default function PlanningPage() {
     })
     setPlans(map)
     setLoading(false)
-  }, [router, weekStart])
+  }, [router, weekStart, selectedBranchId])
 
   useEffect(() => { load() }, [load])
 
@@ -181,7 +192,8 @@ export default function PlanningPage() {
         .from('weekly_plans')
         .upsert({
           tenant_id: profile?.tenant_id,
-          branch_id: profile?.branch_id || null,
+          // FIX: guardar metadata de plan por sucursal seleccionada del perfil.
+          branch_id: (profile?.role === 'manager' ? profile?.branch_id : (selectedBranchId !== 'all' ? selectedBranchId : null)) || null,
           start_date: weekStart,
           end_date: endIso,
           title,
@@ -255,6 +267,7 @@ export default function PlanningPage() {
   if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando planificador...</div>
 
   const dates = weekDates(weekStart)
+  const isManagerBranch = profile?.role === 'manager' && !!profile?.branch_id
 
   return (
     <div className="p-5 md:p-6 max-w-6xl mx-auto">
@@ -273,6 +286,12 @@ export default function PlanningPage() {
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {branches.length > 0 && !isManagerBranch && (
+            <select className="input py-1.5 text-xs" value={selectedBranchId} onChange={e => setSelectedBranchId(e.target.value)}>
+              <option value="all">Todas las sucursales</option>
+              {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          )}
           <button onClick={() => setWeekStart(w => addDaysIso(w, -7))} className="px-3 py-2 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-xs active:bg-dark-600">← Anterior</button>
           <input type="date" className="input py-1.5 text-xs" value={weekStart} onChange={e => setWeekStart(mondayOf(e.target.value))} />
           <button onClick={() => setWeekStart(w => addDaysIso(w, 7))} className="px-3 py-2 bg-dark-700 border border-dark-border rounded-lg text-gray-300 text-xs active:bg-dark-600">Siguiente →</button>
@@ -300,10 +319,11 @@ export default function PlanningPage() {
           </div>
 
           <div className="card overflow-x-auto">
+            {/* FIX: sticky-left solido para que los dias scrolleen por debajo. */}
             <table className="min-w-full text-xs border-separate border-spacing-0">
               <thead>
                 <tr>
-                  <th className={`text-left p-2 font-mono border-b sticky left-0 z-20 min-w-[150px] ${
+                  <th className={`text-left p-2 font-mono border-b sticky left-0 z-30 min-w-[150px] ${
                     isDark
                       ? 'text-gray-500 border-dark-border bg-dark-800'
                       : 'text-gray-600 border-gray-200 bg-white'
@@ -311,7 +331,7 @@ export default function PlanningPage() {
                     style={!isDark ? { boxShadow: '6px 0 8px -4px rgba(0,0,0,0.08)' } : { boxShadow: '6px 0 8px -4px rgba(0,0,0,0.4)' }}>Empleado</th>
                   {dates.map((d, i) => (
                     <th key={d} className={`text-center p-2 font-mono border-b min-w-[90px] ${
-                      isDark ? 'text-gray-500 border-dark-border' : 'text-gray-600 border-gray-200'
+                      isDark ? 'text-gray-500 border-dark-border bg-dark-800' : 'text-gray-600 border-gray-200 bg-white'
                     }`}>
                       <div className="text-brand-400">{DAY_L[DAYS[i]]}</div>
                       <div className={`text-[10px] font-normal ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{d.slice(5)}</div>

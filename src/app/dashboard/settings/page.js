@@ -979,6 +979,22 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
         </div>
       </div>
 
+      {/* FIX: IP va junto a Geolocalizacion porque ambas son seguridad. */}
+      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Red WiFi (2do candado)</p>
+      <div className="card mb-4">
+        <div className="flex items-center justify-between">
+          <div>
+            {cfg.ip
+              ? <p className="text-xs text-brand-400 font-mono">🌐 {cfg.ip}</p>
+              : <p className="text-[10px] text-gray-400">Sin IP registrada — solo GPS</p>}
+          </div>
+          <button onClick={detectIp} className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600">
+            {cfg.ip ? '↻ Actualizar' : <><Radio size={14} className="inline mr-1" />Detectar</>}
+          </button>
+        </div>
+        <p className="text-[9px] text-gray-400 font-mono mt-2">Toca "Detectar" mientras estés conectado al WiFi de esta sucursal.</p>
+      </div>
+
       {/* Time & tolerance */}
       <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Tiempo y tolerancia</p>
       <div className="card mb-4 space-y-3">
@@ -1068,22 +1084,6 @@ function BranchDetail({ branch, origin, tenantSlug, canEditName, onBack, onSaved
           <input className="input text-sm py-2" type="date" value={newRest.date} onChange={e => setNewRest(f => ({ ...f, date: e.target.value }))} />
         </div>
         <button onClick={addRestDay} className="mt-2 w-full py-2 bg-dark-700 border border-dark-border rounded-xl text-xs font-bold text-white active:bg-dark-600">+ Agregar día</button>
-      </div>
-
-      {/* WiFi / IP lock */}
-      <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-2">Red WiFi (2do candado)</p>
-      <div className="card mb-4">
-        <div className="flex items-center justify-between">
-          <div>
-            {cfg.ip
-              ? <p className="text-xs text-brand-400 font-mono">🌐 {cfg.ip}</p>
-              : <p className="text-[10px] text-gray-400">Sin IP registrada — solo GPS</p>}
-          </div>
-          <button onClick={detectIp} className="px-3 py-1.5 bg-dark-700 border border-dark-border rounded-lg text-xs font-semibold text-white active:bg-dark-600">
-            {cfg.ip ? '↻ Actualizar' : <><Radio size={14} className="inline mr-1" />Detectar</>}
-          </button>
-        </div>
-        <p className="text-[9px] text-gray-400 font-mono mt-2">Toca "Detectar" mientras estés conectado al WiFi de esta sucursal.</p>
       </div>
 
       {/* Printing — owner only (manager has no preview anyway) */}

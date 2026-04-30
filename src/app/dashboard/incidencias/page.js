@@ -122,6 +122,8 @@ export default function IncidenciasPage() {
   // Creación manual
   const [showNew, setShowNew] = useState(false)
   const [employees, setEmployees] = useState([])
+  const [branches, setBranches] = useState([])
+  const [selectedBranchId, setSelectedBranchId] = useState('all')
   const [empFilter, setEmpFilter] = useState('')
   const searchParams = useSearchParams()
 
@@ -154,9 +156,25 @@ export default function IncidenciasPage() {
       .eq('status', 'active')
       .order('name')
     if (isManagerBranch) empQuery = empQuery.eq('branch_id', prof.branch_id)
-    const { data: emps } = await empQuery
+    let branchQuery = supabase
+      .from('branches')
+      .select('id,name')
+      .eq('tenant_id', prof.tenant_id)
+      .eq('active', true)
+      .order('created_at')
+    if (isManagerBranch) branchQuery = branchQuery.eq('id', prof.branch_id)
+    const [{ data: emps }, { data: branchData }] = await Promise.all([empQuery, branchQuery])
     setEmployees(emps || [])
+    setBranches(branchData || [])
+    setSelectedBranchId(cur => {
+      if (isManagerBranch) return prof.branch_id || 'all'
+      if (cur !== 'all' && (branchData || []).some(b => b.id === cur)) return cur
+      return cur || 'all'
+    })
     const empIds = (emps || []).map(e => e.id)
+    const branchEmpIds = selectedBranchId !== 'all'
+      ? (emps || []).filter(e => e.branch_id === selectedBranchId).map(e => e.id)
+      : empIds
 
     let q = supabase
       .from('incidencias')
@@ -165,7 +183,9 @@ export default function IncidenciasPage() {
       .order('date_str', { ascending: false })
       .order('created_at', { ascending: false })
     if (filter !== 'all') q = q.eq('status', filter === 'resolved' ? 'resolved' : 'open')
-    if (isManagerBranch) q = empIds.length ? q.in('employee_id', empIds) : null
+    // FIX: filtro de sucursal para admin global usando empleados ya aislados por tenant/role.
+    const scopedEmpIds = (isManagerBranch || selectedBranchId !== 'all') ? branchEmpIds : empIds
+    if (isManagerBranch || selectedBranchId !== 'all') q = scopedEmpIds.length ? q.in('employee_id', scopedEmpIds) : null
     const { data: incs, error } = q ? await q : { data: [], error: null }
     if (error) {
       setIncidencias([])
@@ -173,7 +193,7 @@ export default function IncidenciasPage() {
       setIncidencias(incs || [])
     }
     setLoading(false)
-  }, [router, filter])
+  }, [router, filter, selectedBranchId])
 
   useEffect(() => { load() }, [load])
 
@@ -485,6 +505,7 @@ export default function IncidenciasPage() {
   if (loading) return <div className="p-6 text-gray-500 font-mono text-sm">Cargando incidencias...</div>
 
   const openCount = incidencias.filter(i => i.status === 'open').length
+  const isManagerBranch = profile?.role === 'manager' && !!profile?.branch_id
   const opts = detail ? RESOLUTION_OPTIONS[detail.kind] : null
   const filteredIncidencias = empFilter
     ? incidencias.filter(inc => inc.employee_id === empFilter)
@@ -543,6 +564,16 @@ export default function IncidenciasPage() {
             }`}>{t.label}</button>
         ))}
       </div>
+
+      {branches.length > 0 && !isManagerBranch && (
+        <div className="card mb-4">
+          <label className="label flex items-center gap-1.5"><MapPin size={12} /> Sucursal</label>
+          <select className="input text-sm" value={selectedBranchId} onChange={e => setSelectedBranchId(e.target.value)}>
+            <option value="all">Todas las sucursales</option>
+            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+      )}
 
       {empFilter && (
         <div className="mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-dark-700 border border-dark-border text-xs text-gray-200">

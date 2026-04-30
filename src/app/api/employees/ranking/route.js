@@ -38,37 +38,65 @@ export async function GET(req) {
 
   const url = new URL(req.url)
   const monthParam = url.searchParams.get('month')
+  const branchParam = url.searchParams.get('branch')
   const now = new Date()
   const fallbackMonth = toDateStr(now).slice(0, 7)
   const month = /^\d{4}-\d{2}$/.test(monthParam || '') ? monthParam : fallbackMonth
   const [year, monthNum] = month.split('-').map(Number)
   const monthStart = `${month}-01`
   const monthEnd = toDateStr(new Date(year, monthNum, 0))
+  const isManagerBranch = profile.role === 'manager' && !!profile.branch_id
+  const requestedBranchId = isManagerBranch
+    ? profile.branch_id
+    : (branchParam && branchParam !== 'all' ? branchParam : null)
 
-  const [{ data: shifts, error: shiftsErr }, { data: employees, error: empErr }, { data: incidencias, error: incErr }] = await Promise.all([
+  if (requestedBranchId) {
+    const { data: branch } = await admin
+      .from('branches')
+      .select('id')
+      .eq('id', requestedBranchId)
+      .eq('tenant_id', profile.tenant_id)
+      .maybeSingle()
+    if (!branch) return NextResponse.json({ ok: false, error: 'Sucursal invalida' }, { status: 400 })
+  }
+
+  let employeeQuery = admin
+    .from('employees')
+    .select('id, name, branch_id')
+    .eq('tenant_id', profile.tenant_id)
+    .eq('status', 'active')
+    .eq('has_shift', true)
+  // FIX: ranking respeta sucursal validada contra session/role.
+  if (requestedBranchId) employeeQuery = employeeQuery.eq('branch_id', requestedBranchId)
+
+  const { data: employees, error: empErr } = await employeeQuery
+  if (empErr) {
+    console.error('[employees/ranking] employees error', empErr)
+    return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 })
+  }
+  const empIds = (employees || []).map(e => e.id)
+  if (empIds.length === 0) return NextResponse.json({ ok: true, month, items: [], excluded: 0 })
+
+  const [{ data: shifts, error: shiftsErr }, { data: incidencias, error: incErr }] = await Promise.all([
     admin
       .from('shifts')
       .select('employee_id, date_str, status, classification')
       .eq('tenant_id', profile.tenant_id)
       .gte('date_str', monthStart)
-      .lte('date_str', monthEnd),
-    admin
-      .from('employees')
-      .select('id, name')
-      .eq('tenant_id', profile.tenant_id)
-      .eq('status', 'active')
-      .eq('has_shift', true),
+      .lte('date_str', monthEnd)
+      .in('employee_id', empIds),
     admin
       .from('incidencias')
       .select('employee_id, kind, date_str')
       .eq('tenant_id', profile.tenant_id)
       .gte('date_str', monthStart)
       .lte('date_str', monthEnd)
+      .in('employee_id', empIds)
       .in('kind', ['abandono', 'falta_injustificada']),
   ])
 
-  if (shiftsErr || empErr || incErr) {
-    console.error('[employees/ranking] db error', shiftsErr || empErr || incErr)
+  if (shiftsErr || incErr) {
+    console.error('[employees/ranking] db error', shiftsErr || incErr)
     return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 })
   }
 

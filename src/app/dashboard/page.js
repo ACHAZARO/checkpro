@@ -6,7 +6,7 @@ import { fmtTime, weekRange, isoDate, diffMin, DAYS, countGraveIncidents, hasVac
 import Link from 'next/link'
 import toast from 'react-hot-toast'
 import BottomSheet from '@/components/BottomSheet'
-import { Unlock, Palmtree, Cake, Award, AlertTriangle, Clock, ClipboardList, X, Info, Trophy } from 'lucide-react'
+import { Unlock, Palmtree, Cake, Award, AlertTriangle, Clock, ClipboardList, X, Info, Trophy, Building2 } from 'lucide-react'
 
 function daysUntilBirthday(iso) {
   if (!iso) return null
@@ -136,6 +136,9 @@ export default function DashboardPage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [tenantId, setTenantId] = useState(null)
+  const [profile, setProfile] = useState(null)
+  const [branches, setBranches] = useState([])
+  const [selectedRankingBranch, setSelectedRankingBranch] = useState('all')
   // FIX R6: vacation_periods vivos para poder evaluar hasVacationPending
   // con la tabla real (no contra el array legacy schedule.vacationYearsTaken).
   const [vacPeriods, setVacPeriods] = useState([])
@@ -158,6 +161,7 @@ export default function DashboardPage() {
       const { data: profile } = await supabase.from('profiles').select('tenant_id,role,branch_id').eq('id', session.user.id).single()
       if (!profile?.tenant_id) { setLoading(false); return }
       setTenantId(profile.tenant_id)
+      setProfile(profile)
 
       const today = isoDate(now)
 
@@ -194,7 +198,16 @@ export default function DashboardPage() {
       const { data: graveShifts } = graveShiftsQuery ? await graveShiftsQuery : { data: [] }
 
       // Tenant config for vacation table
-      const { data: tenantData } = await supabase.from('tenants').select('config').eq('id', profile.tenant_id).single()
+      const [{ data: tenantData }, { data: branchData }] = await Promise.all([
+        supabase.from('tenants').select('config').eq('id', profile.tenant_id).single(),
+        supabase.from('branches').select('id,name').eq('tenant_id', profile.tenant_id).eq('active', true).order('created_at'),
+      ])
+      // FIX: selector de sucursal para ranking en Hoy.
+      const visibleBranches = isManagerBranch
+        ? (branchData || []).filter(b => b.id === profile.branch_id)
+        : (branchData || [])
+      setBranches(visibleBranches)
+      setSelectedRankingBranch(isManagerBranch ? (profile.branch_id || 'all') : 'all')
       const vacTable = tenantData?.config?.vacationTable || null
 
       // feat/gerente-libre — turnos de la semana actual para alertas de gerentes libres.
@@ -277,14 +290,17 @@ export default function DashboardPage() {
     try {
       const now = new Date()
       const month = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0')
-      const r = await fetch('/api/employees/ranking?month=' + month, { cache: 'no-store' })
+      const branchQs = selectedRankingBranch && selectedRankingBranch !== 'all'
+        ? '&branch=' + encodeURIComponent(selectedRankingBranch)
+        : ''
+      const r = await fetch('/api/employees/ranking?month=' + month + branchQs, { cache: 'no-store' })
       const j = await r.json()
       if (!r.ok || !j.ok) throw new Error(j.error || 'HTTP ' + r.status)
       setRanking({ loading: false, items: j.items || j.ranking || [], error: null })
     } catch (e) {
       setRanking({ loading: false, items: [], error: e.message || 'error' })
     }
-  }, [])
+  }, [selectedRankingBranch])
 
   useEffect(() => {
     Promise.all([fetchUpcoming(), fetchActive(), fetchExpired(), fetchRanking()])
@@ -309,6 +325,7 @@ export default function DashboardPage() {
   if (!data) return null
 
   const { employees, todayShifts, incidents, graveShifts, vacTable, weekShifts = [] } = data
+  const isRankingManagerFixed = profile?.role === 'manager' && !!profile?.branch_id
   const todayDayKey = DAYS[now.getDay() === 0 ? 6 : now.getDay() - 1]
   const todayScheduleStart = e => e.schedule?.[todayDayKey]?.start || null
 
@@ -619,7 +636,23 @@ export default function DashboardPage() {
         </div>
       ) : (
         <div className="card mb-5">
-          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Award size={12} /> Ranking del mes</p>
+          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider flex items-center gap-1.5"><Award size={12} /> Ranking del mes</p>
+            {branches.length > 0 && (
+              <label className="inline-flex items-center gap-1.5 text-[10px] font-mono text-gray-400">
+                <Building2 size={12} />
+                <select
+                  className="input py-1.5 text-xs"
+                  value={selectedRankingBranch}
+                  onChange={e => setSelectedRankingBranch(e.target.value)}
+                  disabled={isRankingManagerFixed}
+                >
+                  {!isRankingManagerFixed && <option value="all">Todas las sucursales</option>}
+                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
           {ranking.items.length === 0 ? (
             <div className="text-center py-8">
               <div className="flex justify-center mb-2"><Trophy size={28} className="text-gray-500" /></div>

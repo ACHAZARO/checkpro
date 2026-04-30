@@ -52,8 +52,11 @@ export default function EmployeesPage() {
   // FIX 8: periodos vivos por empleado, usados por hasVacationPending().
   const [vacPeriods, setVacPeriods] = useState([])
   const [openIncSet, setOpenIncSet] = useState(new Set())
+  const [art47Set, setArt47Set] = useState(new Set())
   const [loading, setLoading] = useState(true)
   const [tenantId, setTenantId] = useState(null)
+  const [profile, setProfile] = useState(null)
+  const [selectedBranchId, setSelectedBranchId] = useState('all')
   // FIX: mixedSchedule por sucursal
   const [mixedCfg, setMixedCfg] = useState({ enabled: false, maxRotating: null, unlimitedRotating: true })
   const [sheet, setSheet] = useState(null)
@@ -171,6 +174,7 @@ export default function EmployeesPage() {
     const { data: prof } = await supabase.from('profiles').select('tenant_id,role,branch_id').eq('id', session.user.id).single()
     if (!prof?.tenant_id) return
     setTenantId(prof.tenant_id)
+    setProfile(prof)
     // FIX: branch isolation server-side
     const isManagerBranch = prof.role === 'manager' && !!prof.branch_id
     let empQuery = supabase.from('employees').select('*').eq('tenant_id', prof.tenant_id).neq('status', 'deleted').order('employee_code')
@@ -198,14 +202,39 @@ export default function EmployeesPage() {
       vpQuery = empIds.length ? vpQuery.in('employee_id', empIds) : null
       openIncQuery = empIds.length ? openIncQuery.in('employee_id', empIds) : null
     }
-    const [{ data: vpData }, { data: openInc }] = await Promise.all([
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 30)
+    const cutoffStr = cutoff.toISOString().slice(0, 10)
+    let graveQuery = supabase
+      .from('shifts')
+      .select('employee_id,classification')
+      .eq('tenant_id', prof.tenant_id)
+      .eq('status', 'absent')
+      .gte('date_str', cutoffStr)
+      .in('employee_id', empIds.length ? empIds : ['00000000-0000-0000-0000-000000000000'])
+    const [{ data: vpData }, { data: openInc }, { data: graveRows }] = await Promise.all([
       vpQuery ? vpQuery : Promise.resolve({ data: [] }),
       openIncQuery ? openIncQuery : Promise.resolve({ data: [] }),
+      empIds.length ? graveQuery : Promise.resolve({ data: [] }),
     ])
+    const graveCounts = new Map()
+    ;(graveRows || []).forEach(s => {
+      const t = s.classification?.type || s.classification
+      if (t === 'falta_injustificada' || t === 'falta') {
+        graveCounts.set(s.employee_id, (graveCounts.get(s.employee_id) || 0) + 1)
+      }
+    })
     setEmps(empData || [])
     setOpenIncSet(new Set((openInc || []).map(r => r.employee_id)))
+    // FIX: badge Art. 47 en card de empleado con mismo criterio del detalle.
+    setArt47Set(new Set([...graveCounts.entries()].filter(([, n]) => n > 3).map(([id]) => id)))
     // FIX: preferir tabla branches; si vacia fallback al array legacy por si algun tenant viejo no migro
     setBranches((branchData && branchData.length > 0) ? branchData : (tenantData?.config?.branches || []))
+    setSelectedBranchId(cur => {
+      if (isManagerBranch) return prof.branch_id || 'all'
+      if (cur !== 'all' && (branchData || []).some(b => b.id === cur)) return cur
+      return 'all'
+    })
     setVacTable(tenantData?.config?.vacationTable || tenantData?.config?.vacation_table || null)
     setVacPeriods(vpData || [])
     // FIX: mixedSchedule por sucursal
@@ -501,6 +530,11 @@ export default function EmployeesPage() {
   // vacation_periods.
 
   const hasBranches = branches.length > 0
+  const isManagerBranch = profile?.role === 'manager' && !!profile?.branch_id
+  // FIX: filtro de sucursal para admin global en Personal.
+  const visibleEmps = selectedBranchId === 'all'
+    ? emps
+    : emps.filter(e => (e.branch_id || e.schedule?.branch?.id) === selectedBranchId)
 
   return (
     <div className="p-5 md:p-6 max-w-2xl mx-auto">
@@ -533,17 +567,27 @@ export default function EmployeesPage() {
         </div>
       )}
 
+      {hasBranches && !isManagerBranch && (
+        <div className="card mb-4">
+          <label className="label flex items-center gap-1.5"><Building2 size={12} /> Sucursal</label>
+          <select className="input text-sm" value={selectedBranchId} onChange={e => setSelectedBranchId(e.target.value)}>
+            <option value="all">Todas las sucursales</option>
+            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+      )}
+
       {loading ? <p className="text-gray-500 font-mono text-sm">Cargando...</p> : (
         <div className="space-y-3">
-          {emps.length === 0 && (
+          {visibleEmps.length === 0 && (
             <div className="card text-center py-10">
               <div className="flex justify-center mb-3 text-gray-500"><Users size={40} /></div>
               <p className="text-gray-500 text-sm">No hay empleados registrados.</p>
               <button onClick={openAdd} className="mt-3 text-brand-400 text-sm font-semibold">+ Agregar el primero →</button>
             </div>
           )}
-          {emps.map(emp => {
-            const branchName = emp.schedule?.branch?.name || ''
+          {visibleEmps.map(emp => {
+            const branchName = branches.find(b => b.id === (emp.branch_id || emp.schedule?.branch?.id))?.name || emp.schedule?.branch?.name || ''
             const hireDate = (emp.hire_date && String(emp.hire_date).slice(0, 10)) || emp.schedule?.hireDate
             const years = calcYearsWorked(hireDate)
             const vacDays = calcVacationDays(hireDate, vacTable)
@@ -570,7 +614,7 @@ export default function EmployeesPage() {
                       ${emp.can_manage ? 'bg-orange-500/10 text-orange-400 border border-orange-400/20' : 'bg-brand-400/10 text-brand-400 border border-brand-400/20'}`}>
                       {emp.name.split(' ').slice(0, 2).map(w => w[0]).join('')}
                     </div>
-                    {openIncSet.has(emp.id) && (
+                    {(openIncSet.has(emp.id) || art47Set.has(emp.id)) && (
                       <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-[var(--cp-bg)]" />
                     )}
                   </div>

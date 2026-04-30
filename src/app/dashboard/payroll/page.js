@@ -220,6 +220,7 @@ export default function PayrollPage() {
   const [allEmps, setAllEmps] = useState([])
   const [shifts, setShifts] = useState([])
   const [cuts, setCuts] = useState([])
+  const [payrollIncidencias, setPayrollIncidencias] = useState([])
   const [vacPeriods, setVacPeriods] = useState([])
   const [tenantId, setTenantId] = useState(null)
   const [tenantData, setTenantData] = useState(null) // { config, name }
@@ -288,11 +289,20 @@ export default function PayrollPage() {
       .select('id,employee_id,tipo,status,start_date,end_date,prima_pct,entitled_days,compensated_days,compensated_amount,completed_at')
       .eq('tenant_id', prof.tenant_id)
     if (isManagerBranch) vacQuery = empIds.length ? vacQuery.in('employee_id', empIds) : null
-    const { data: vacData } = vacQuery ? await vacQuery : { data: [] }
+    let incQuery = supabase
+      .from('incidencias')
+      .select('id,employee_id,kind,status,date_str')
+      .eq('tenant_id', prof.tenant_id)
+    if (isManagerBranch) incQuery = empIds.length ? incQuery.in('employee_id', empIds) : null
+    const [{ data: vacData }, { data: incData }] = await Promise.all([
+      vacQuery ? vacQuery : Promise.resolve({ data: [] }),
+      incQuery ? incQuery : Promise.resolve({ data: [] }),
+    ])
     setAllEmps(empData || [])
     setShifts(shiftData || [])
     setCuts(cutData || [])
     setVacPeriods(vacData || [])
+    setPayrollIncidencias(incData || [])
     setLoading(false)
   }, [])
 
@@ -336,6 +346,12 @@ export default function PayrollPage() {
     myEmpIds.has(s.employee_id)
   )
   const incidentShifts = weekShifts.filter(s => s.status === 'incident')
+  // FIX: nomina cuenta incidencias reales del periodo desde tabla incidencias.
+  const payrollIncidenciasForWeek = payrollIncidencias.filter(i =>
+    i.date_str >= weekStartStr &&
+    i.date_str <= weekEndStr &&
+    myEmpIds.has(i.employee_id)
+  )
   const hasUnresolved = incidentShifts.length > 0 || openPayrollIncidents > 0
 
   // FIX BUG: solo se permite cerrar el día configurado por la sucursal.
@@ -671,6 +687,8 @@ export default function PayrollPage() {
           const vac = vacationPayForWeek(emp, vacByEmp[emp.id] || [], weekStartStr, weekEndStr)
           const grossWithVac = s.grossPay + vac.totalVacationPay
           const netWithVac = Math.max(0, grossWithVac - s.retardoDesc - s.incidentDesc)
+          const realIncidents = payrollIncidenciasForWeek.filter(i => i.employee_id === emp.id)
+          const totalIncidentCount = s.incidents + realIncidents.length
           return (
             <div key={emp.id} className="card">
               <div className="flex items-start justify-between mb-2">
@@ -698,7 +716,7 @@ export default function PayrollPage() {
               </div>
               <div className="flex gap-1.5 flex-wrap">
                 {s.retardos > 0 && <span className="badge-orange">{s.retardos} retardo{s.retardos > 1 ? 's' : ''}</span>}
-                {s.incidents > 0 && <span className="badge-red">{s.incidents} incidencia{s.incidents > 1 ? 's' : ''}</span>}
+                {totalIncidentCount > 0 && <span className="badge-red">{totalIncidentCount} incidencia{totalIncidentCount > 1 ? 's' : ''}</span>}
                 {s.otHours > 0 && <span className="px-2 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-400 text-[10px] font-semibold">{s.otHours}h extra</span>}
                 {vac.daysInRange > 0 && (
                   <span className="px-2 py-0.5 bg-purple-500/10 border border-purple-500/30 rounded-full text-purple-300 text-[10px] font-semibold">
@@ -710,7 +728,7 @@ export default function PayrollPage() {
                     💰 Compensación ×2 = ${vac.compensationPay.toFixed(0)}
                   </span>
                 )}
-                {s.retardos === 0 && s.incidents === 0 && s.otHours === 0 && vac.daysInRange === 0 && vac.compensationPay === 0 && (
+                {s.retardos === 0 && totalIncidentCount === 0 && s.otHours === 0 && vac.daysInRange === 0 && vac.compensationPay === 0 && (
                   <span className="badge-green">Sin incidencias ✓</span>
                 )}
               </div>
