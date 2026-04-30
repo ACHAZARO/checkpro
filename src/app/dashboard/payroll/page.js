@@ -367,7 +367,17 @@ export default function PayrollPage() {
     : (allBranches.length === 0 ? allEmps : [])
 
   const closingDay = cfg.weekClosingDay || 'dom'
-  const range = weekRange(new Date(), closingDay)
+  // FIX bug ventana gracia: weekRange(refDate, closingDay) devuelve la semana
+  // que TERMINA en el proximo closingDay. Si hoy es closingDay+1 (gracia), eso
+  // calcularia la semana SIGUIENTE (que aun no ocurrio). Ajustamos refDate a
+  // "ayer" cuando estamos en gracia para que apunte al closingDay recien pasado.
+  const todayKeyForRange = dayKey(new Date())
+  const closingNextDay = DAYS[(DAYS.indexOf(closingDay) + 1) % 7]
+  const isGraceDayForRange = todayKeyForRange === closingNextDay && todayKeyForRange !== closingDay
+  const refDate = isGraceDayForRange
+    ? new Date(Date.now() - 24 * 60 * 60 * 1000)
+    : new Date()
+  const range = weekRange(refDate, closingDay)
   const weekStartStr = isoDate(range.start)
   const weekEndStr = isoDate(range.end)
   // Turnos de la semana SOLO de empleados de mi sucursal (anti doble pago
@@ -377,6 +387,25 @@ export default function PayrollPage() {
     s.date_str >= weekStartStr &&
     s.date_str <= weekEndStr &&
     myEmpIds.has(s.employee_id)
+  )
+  // FIX shifts huerfanos: si el gerente cierra el closingDay a media tarde,
+  // los shifts que se crean despues quedan con date_str del closingDay y sin
+  // week_cut_id, fuera de cualquier rango futuro. Rescatamos en el siguiente
+  // cierre todos los shifts de la sucursal con week_cut_id IS NULL y date_str
+  // anterior al weekStartStr (ventana de 30 dias para evitar rescatar shifts
+  // muy viejos por errores historicos).
+  const HUERFANO_LOOKBACK_DAYS = 30
+  const orphanCutoff = (() => {
+    const d = new Date(`${weekStartStr}T12:00:00Z`)
+    d.setDate(d.getDate() - HUERFANO_LOOKBACK_DAYS)
+    return isoDate(d)
+  })()
+  const orphanShifts = shifts.filter(s =>
+    !s.week_cut_id &&
+    s.date_str < weekStartStr &&
+    s.date_str >= orphanCutoff &&
+    myEmpIds.has(s.employee_id) &&
+    ['closed', 'incident', 'absent'].includes(s.status)
   )
   const incidentShifts = weekShifts.filter(s => s.status === 'incident')
   // FIX: nomina cuenta incidencias reales del periodo desde tabla incidencias.
@@ -390,7 +419,7 @@ export default function PayrollPage() {
   // FIX: permitir cierre el día configurado y una ventana de gracia de 24h.
   // dayKey() usa hora local (no UTC) — el gerente cierra cuando es ese día
   // en su zona horaria.
-  const todayKey = dayKey(new Date())
+  const todayKey = todayKeyForRange // FIX: reutilizar el ya calculado para rango.
 
   // Cortes anteriores: filtrar a los que tocan turnos de MI sucursal.
   const cutsForBranch = myBranchId
@@ -407,12 +436,20 @@ export default function PayrollPage() {
       })
     : cuts
   // FIX: bloquear recierre del periodo y habilitar reimpresión del corte existente.
-  const nextClosingDay = DAYS[(DAYS.indexOf(closingDay) + 1) % 7]
+  const nextClosingDay = closingNextDay // FIX: reutilizar el ya calculado.
   const isClosingDayOrNextDay = todayKey === closingDay || todayKey === nextClosingDay
   const currentWeekCut = cutsForBranch.find(c => c.start_date === weekStartStr && c.end_date === weekEndStr) || null
   const weekAlreadyClosed = !!currentWeekCut
-  const isGraceDay = todayKey === nextClosingDay && todayKey !== closingDay
+  const isGraceDay = isGraceDayForRange // FIX: reutilizar el ya calculado.
   const canCloseToday = isClosingDayOrNextDay && !weekAlreadyClosed
+  // FIX shifts pendientes: si cierra el closingDay y hay shifts abiertos del
+  // mismo dia (sin exit_time), advertir antes de cerrar — quedaran huerfanos
+  // y se rescataran en el siguiente corte.
+  const openShiftsToday = shifts.filter(s =>
+    s.date_str === weekEndStr &&
+    myEmpIds.has(s.employee_id) &&
+    s.status === 'open'
+  )
 
   // Agrupa vacation_periods por employee_id para lookup rapido
   const vacByEmp = {}
@@ -506,7 +543,11 @@ export default function PayrollPage() {
       setClosing(false)
       return
     }
-    const uncutShifts = weekShifts.filter(s => !s.week_cut_id)
+    // FIX: rescatar shifts huerfanos previos (cerrados en cortes anteriores
+    // del mismo dia que quedaron sin week_cut_id) para evitar perdidas.
+    const uncutWeek = weekShifts.filter(s => !s.week_cut_id && ['closed', 'incident', 'absent'].includes(s.status))
+    const uncutShifts = [...uncutWeek, ...orphanShifts]
+    const orphanCount = orphanShifts.length
     const { data: cut, error } = await supabase.from('week_cuts').insert({
       tenant_id: tenantId, start_date: startStr, end_date: endStr,
       branch_id: myBranchId,
@@ -528,9 +569,11 @@ export default function PayrollPage() {
     }
     await supabase.from('audit_log').insert({
       tenant_id: tenantId, action: 'WEEK_CUT', employee_name: 'Gerente',
-      detail: `${startStr}→${endStr}`, success: true
+      detail: `${startStr}→${endStr}${orphanCount > 0 ? ` · ${orphanCount} turnos rescatados de cortes previos` : ''}`, success: true
     })
-    toast.success('Semana cerrada exitosamente')
+    toast.success(orphanCount > 0
+      ? `Semana cerrada · ${orphanCount} turnos pendientes de cortes previos rescatados`
+      : 'Semana cerrada exitosamente')
 
     // Fanout: generar archivo semanal en paralelo con el corte.
     // Llama /api/archive/generate-week con cookie de admin (no bloquea el UI del corte).
@@ -786,6 +829,18 @@ export default function PayrollPage() {
       <div className={`card mb-4 ${hasUnresolved || !canCloseToday ? 'opacity-60' : ''}`}>
         <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Corte semanal</p>
         <p className="text-[11px] text-gray-400 font-mono mb-3">Corte de {weekStartStr} a {weekEndStr}</p>
+        {/* FIX info: rescate de turnos huerfanos de cortes previos. */}
+        {orphanShifts.length > 0 && !weekAlreadyClosed && (
+          <div className="px-3 py-2 mb-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-300 text-xs">
+            <strong>{orphanShifts.length} turno{orphanShifts.length > 1 ? 's' : ''} pendiente{orphanShifts.length > 1 ? 's' : ''}</strong> de cortes anteriores se incluirán en este corte (rescate de turnos cerrados después del cierre previo).
+          </div>
+        )}
+        {/* FIX warning: shifts abiertos del closingDay que se quedaran como huerfanos. */}
+        {!weekAlreadyClosed && todayKey === closingDay && openShiftsToday.length > 0 && (
+          <div className="px-3 py-2 mb-3 bg-blue-500/10 border border-blue-500/30 rounded-lg text-blue-300 text-xs">
+            Hay <strong>{openShiftsToday.length} turno{openShiftsToday.length > 1 ? 's' : ''} abierto{openShiftsToday.length > 1 ? 's' : ''}</strong> de hoy ({DAY_FL[closingDay]}). Si los empleados cierran después de este corte, se incluirán automáticamente en el siguiente cierre.
+          </div>
+        )}
         {weekAlreadyClosed && currentWeekCut && (
           <div className="px-3 py-2 mb-3 bg-green-500/10 border border-green-500/20 rounded-lg text-green-400 text-xs font-semibold">
             Semana ya cerrada el {fmtDate(currentWeekCut.created_at)}{currentWeekCut.closed_by_name ? ` por ${currentWeekCut.closed_by_name}` : ''}
