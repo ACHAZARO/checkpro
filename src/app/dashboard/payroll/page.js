@@ -40,176 +40,209 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
   const active = employees.filter(e => e.has_shift)
   let totalNet = 0
   let totalGross = 0
+  let totalDeductions = 0
   let totalVac = 0
 
   const weekStart = cut.start_date
   const weekEnd = cut.end_date
 
-  const rows = active.map(emp => {
+  // FIX: reporte impreso profesional, con columnas reducidas y firmas separadas.
+  const rows = []
+  const incidentRows = []
+  const signatureRows = []
+  const vacLines = []
+
+  active.forEach((emp, idx) => {
     const s = empWeekSummary(emp, weekShifts, employees, coveragePayMode)
     const vac = vacationPayForWeek(emp, (vacByEmp && vacByEmp[emp.id]) || [], weekStart, weekEnd)
-    // Para la UI del reporte, sumamos la paga de vacaciones al neto/bruto.
     const grossWithVac = s.grossPay + vac.totalVacationPay
-    const netWithVac = Math.max(0, grossWithVac - s.retardoDesc - s.incidentDesc)
+    const deductions = s.retardoDesc + s.incidentDesc
+    const netWithVac = Math.max(0, grossWithVac - deductions)
     totalGross += grossWithVac
     totalNet += netWithVac
+    totalDeductions += deductions
     totalVac += vac.totalVacationPay
     const daysWorked = s.shifts.filter(sh => ['closed', 'incident'].includes(sh.status)).length
-    const deductions = s.retardoDesc + s.incidentDesc
 
-    const badges = []
-    if (s.retardos > 0) badges.push(`<span style="background:#fff3cd;color:#856404;padding:1px 5px;border-radius:3px;font-size:7pt">${s.retardos} ret.</span>`)
-    if (s.incidents > 0) badges.push(`<span style="background:#f8d7da;color:#842029;padding:1px 5px;border-radius:3px;font-size:7pt">${s.incidents} inc.</span>`)
-    if (s.faltasInjustificadas > 0) badges.push(`<span style="background:#f8d7da;color:#842029;padding:1px 5px;border-radius:3px;font-size:7pt">${s.faltasInjustificadas} f.inj.</span>`)
-    if (s.otHours > 0) badges.push(`<span style="background:#d1ecf1;color:#0c5460;padding:1px 5px;border-radius:3px;font-size:7pt">${s.otHours}h HE</span>`)
-    if (vac.daysInRange > 0) badges.push(`<span style="background:#e9d8fd;color:#553c9a;padding:1px 5px;border-radius:3px;font-size:7pt">${vac.daysInRange}d vac.</span>`)
-    if (vac.compensationPay > 0) badges.push(`<span style="background:#e9d8fd;color:#553c9a;padding:1px 5px;border-radius:3px;font-size:7pt">comp.</span>`)
+    const notes = []
+    if (s.retardos > 0) notes.push(`${s.retardos} retardo${s.retardos !== 1 ? 's' : ''}`)
+    if (s.incidents > 0) notes.push(`${s.incidents} incidencia${s.incidents !== 1 ? 's' : ''}`)
+    if (s.faltasInjustificadas > 0) notes.push(`${s.faltasInjustificadas} falta${s.faltasInjustificadas !== 1 ? 's' : ''} injustificada${s.faltasInjustificadas !== 1 ? 's' : ''}`)
+    if (vac.daysInRange > 0) notes.push(`${vac.daysInRange} día${vac.daysInRange !== 1 ? 's' : ''} de vacaciones`)
+    if (vac.compensationPay > 0) notes.push('compensación de vacaciones')
 
-    return `<tr>
-      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;font-weight:600">${escapeHtml(emp.name)}</td>
-      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;color:#555">${emp.department ? escapeHtml(emp.department) : '—'}</td>
-      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;text-align:center">${daysWorked}d / ${s.totalH}h${s.otHours > 0 ? `<br/><span style="font-size:7pt;color:#0c5460">+${s.otHours}h HE</span>` : ''}</td>
-      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8pt;text-align:center">${badges.join(' ') || '<span style="color:#198754">✓</span>'}</td>
-      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;text-align:right">$${grossWithVac.toFixed(2)}</td>
-      <td style="border:1px solid #ddd;padding:5px 7px;font-size:8.5pt;text-align:right;color:${deductions > 0 ? '#c60' : '#aaa'}">${deductions > 0 ? '-$' + deductions.toFixed(2) : '—'}</td>
-      <td style="border:1px solid #ddd;padding:5px 7px;font-size:9pt;text-align:right;font-weight:700">$${netWithVac.toFixed(2)}</td>
-      <td style="border:1px solid #ddd;padding:5px 7px;width:80px"></td>
+    rows.push(`<tr class="${idx % 2 === 0 ? 'alt' : ''}">
+      <td class="emp-cell">
+        <div class="emp-name">${escapeHtml(emp.name)}</div>
+        <div class="emp-code">${emp.employee_code ? escapeHtml(emp.employee_code) : ''}</div>
+        ${notes.length ? `<div class="emp-note">${escapeHtml(notes.join(' · '))}</div>` : ''}
+      </td>
+      <td>${emp.department ? escapeHtml(emp.department) : '-'}</td>
+      <td class="center">${daysWorked}d / ${Number(s.totalH || 0).toFixed(2)}h</td>
+      <td class="money">$${monthlyToHourly(emp).toFixed(2)}</td>
+      <td class="center">${Number(s.otHours || 0).toFixed(2)}</td>
+      <td class="money">$${grossWithVac.toFixed(2)}</td>
+      <td class="money">${deductions > 0 ? '-$' + deductions.toFixed(2) : '$0.00'}</td>
+      <td class="money net">$${netWithVac.toFixed(2)}</td>
     </tr>`
-  }).join('')
+    )
 
-  // Signature grid: 3 columns
-  const sigCols = active.map(emp => {
-    const s = empWeekSummary(emp, weekShifts, employees, coveragePayMode)
-    const vac = vacationPayForWeek(emp, (vacByEmp && vacByEmp[emp.id]) || [], weekStart, weekEnd)
-    const grossWithVac = s.grossPay + vac.totalVacationPay
-    const netWithVac = Math.max(0, grossWithVac - s.retardoDesc - s.incidentDesc)
-    return `<div style="padding:8px 4px">
-      <div style="border-top:1px solid #000;padding-top:4px">
-        <div style="font-size:8pt;font-weight:600">${escapeHtml(emp.name)}</div>
-        <div style="font-size:7.5pt;color:#555">${escapeHtml(emp.employee_code)} · Neto: $${netWithVac.toFixed(2)}</div>
-        <div style="font-size:7pt;color:#999;margin-top:2px">Firma de conformidad</div>
+    if (s.retardoDesc > 0) {
+      incidentRows.push(`<tr><td>${escapeHtml(emp.name)}</td><td>Retardos (${s.retardos})</td><td>${escapeHtml(weekStart)} al ${escapeHtml(weekEnd)}</td><td class="money">-$${s.retardoDesc.toFixed(2)}</td></tr>`)
+    }
+    if (s.incidentDesc > 0 || s.incidents > 0 || s.faltasInjustificadas > 0) {
+      incidentRows.push(`<tr><td>${escapeHtml(emp.name)}</td><td>Incidencias${s.faltasInjustificadas > 0 ? ` / faltas (${s.faltasInjustificadas})` : ''}</td><td>${escapeHtml(weekStart)} al ${escapeHtml(weekEnd)}</td><td class="money">${s.incidentDesc > 0 ? '-$' + s.incidentDesc.toFixed(2) : '$0.00'}</td></tr>`)
+    }
+
+    signatureRows.push(`<div class="signature-row">
+      <div>
+        <div class="signature-name">${escapeHtml(emp.name)}</div>
+        <div class="signature-code">${emp.employee_code ? escapeHtml(emp.employee_code) : 'Sin código'} · Neto: $${netWithVac.toFixed(2)}</div>
+      </div>
+      <div class="signature-block">
+        <div class="signature-line"></div>
+        <div class="signature-label">Firma de conformidad</div>
       </div>
     </div>`
-  }).join('')
+    )
 
-  // Desglose de vacaciones y compensaciones que impactan este corte.
-  const vacLines = []
-  for (const emp of active) {
-    const vac = vacationPayForWeek(emp, (vacByEmp && vacByEmp[emp.id]) || [], weekStart, weekEnd)
     for (const d of vac.details) {
       if (d.type === 'tomadas') {
         vacLines.push(`<tr>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt">${escapeHtml(emp.name)}</td>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt">Vacaciones</td>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:center">${d.days}d</td>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:7.5pt;color:#666">${escapeHtml(d.rangeStart)} → ${escapeHtml(d.rangeEnd)}</td>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:right">$${d.normalPay.toFixed(2)}</td>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:right;color:#553c9a">$${d.primaPay.toFixed(2)}<br/><span style="font-size:6.5pt;color:#999">prima ${d.primaPct}%</span></td>
+          <td>${escapeHtml(emp.name)}</td><td>Vacaciones</td><td class="center">${d.days}d</td>
+          <td>${escapeHtml(d.rangeStart)} al ${escapeHtml(d.rangeEnd)}</td>
+          <td class="money">$${d.normalPay.toFixed(2)}</td>
+          <td class="money">$${d.primaPay.toFixed(2)}<br/><span class="muted">prima ${d.primaPct}%</span></td>
         </tr>`)
       } else if (d.type === 'compensadas') {
         vacLines.push(`<tr>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt">${escapeHtml(emp.name)}</td>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt">Compensación</td>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:center">${d.days}d</td>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:7.5pt;color:#666">finalizado ${escapeHtml(d.completedAt)}</td>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:right">—</td>
-          <td style="border:1px solid #eee;padding:4px 6px;font-size:8pt;text-align:right;color:#553c9a">$${d.amount.toFixed(2)}<br/><span style="font-size:6.5pt;color:#999">pago doble</span></td>
+          <td>${escapeHtml(emp.name)}</td><td>Compensación</td><td class="center">${d.days}d</td>
+          <td>Finalizado ${escapeHtml(d.completedAt)}</td><td class="money">$0.00</td>
+          <td class="money">$${d.amount.toFixed(2)}<br/><span class="muted">pago doble</span></td>
         </tr>`)
       }
     }
-  }
+  })
 
   const vacSection = vacLines.length > 0
-    ? `<div style="margin-top:16px">
-        <div style="font-size:9pt;font-weight:bold;margin-bottom:4px;color:#553c9a">🏖 Vacaciones y compensaciones</div>
-        <table style="width:100%;border-collapse:collapse">
-          <thead><tr style="background:#f5f0ff">
-            <th style="border:1px solid #ddd;padding:4px 6px;font-size:8pt;text-align:left">Empleado</th>
-            <th style="border:1px solid #ddd;padding:4px 6px;font-size:8pt;text-align:left">Tipo</th>
-            <th style="border:1px solid #ddd;padding:4px 6px;font-size:8pt">Días</th>
-            <th style="border:1px solid #ddd;padding:4px 6px;font-size:8pt;text-align:left">Período</th>
-            <th style="border:1px solid #ddd;padding:4px 6px;font-size:8pt;text-align:right">Pago base</th>
-            <th style="border:1px solid #ddd;padding:4px 6px;font-size:8pt;text-align:right">Prima / Comp.</th>
+    ? `<section>
+        <h2>Vacaciones y compensaciones</h2>
+        <table class="detail-table">
+          <thead><tr>
+            <th>Empleado</th><th>Tipo</th><th class="center">Días</th><th>Período</th><th class="money">Pago base</th><th class="money">Prima / Comp.</th>
           </tr></thead>
           <tbody>${vacLines.join('')}</tbody>
         </table>
-        <div style="margin-top:4px;font-size:7.5pt;color:#666">Total vacaciones y compensaciones: <b>$${totalVac.toFixed(2)}</b></div>
-       </div>`
+        <div class="section-note">Total vacaciones y compensaciones: <b>$${totalVac.toFixed(2)}</b></div>
+       </section>`
     : ''
+
+  const incidentSection = incidentRows.length > 0
+    ? `<section>
+        <h2>Incidencias aplicadas</h2>
+        <table class="detail-table">
+          <thead><tr><th>Empleado</th><th>Tipo</th><th>Fecha</th><th class="money">Descuento aplicado</th></tr></thead>
+          <tbody>${incidentRows.join('')}</tbody>
+        </table>
+       </section>`
+    : ''
+  const issuedDate = new Date(cut.created_at || Date.now()).toLocaleDateString('es-MX')
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
     <title>Nómina ${escapeHtml(cut.start_date)}</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: Arial, sans-serif; font-size: 9pt; color: #000; }
-      .page { padding: 12mm 14mm; }
+      @page { margin: 12mm; }
+      body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 9pt; color: #1f2937; line-height: 1.35; }
+      .page { padding: 0; }
       table { width: 100%; border-collapse: collapse; }
-      thead tr { background: #f0f0f0; }
-      th { border: 1px solid #ccc; padding: 5px 7px; font-size: 8pt; text-align: left; }
-      tfoot tr { background: #f9f9f9; font-weight: bold; }
-      .sig-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 20px; margin-top: 20px; }
+      th { padding: 7px 8px; border-bottom: 1px solid #d1d5db; color: #4b5563; font-size: 8.5pt; font-weight: 700; text-align: left; }
+      td { padding: 7px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+      tfoot td { border-top: 1px solid #d1d5db; border-bottom: 0; font-weight: 700; }
+      section { margin-top: 18px; }
+      h1 { font-size: 20pt; letter-spacing: 0; line-height: 1.1; }
+      h2 { font-size: 11pt; margin-bottom: 8px; }
+      .header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
+      .brand { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+      .logo { height: 42px; width: auto; object-fit: contain; }
+      .subtitle { margin-top: 5px; color: #4b5563; font-size: 9pt; }
+      .meta { min-width: 170px; text-align: right; color: #4b5563; font-size: 8.5pt; }
+      .meta div { margin-bottom: 2px; }
+      .alt { background: #fafafa; }
+      .emp-cell { width: 25%; }
+      .emp-name { font-weight: 700; color: #111827; }
+      .emp-code, .muted, .section-note { color: #6b7280; font-size: 8pt; }
+      .emp-note { margin-top: 2px; color: #6b7280; font-size: 8pt; }
+      .center { text-align: center; }
+      .money { text-align: right; white-space: nowrap; }
+      .net { font-weight: 800; color: #111827; }
+      .detail-table th, .detail-table td { font-size: 8.5pt; }
+      .signatures { margin-top: 22px; }
+      .signature-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 13px 0; border-bottom: 1px solid #e5e7eb; break-inside: avoid; }
+      .signature-name { font-weight: 700; }
+      .signature-code { margin-top: 2px; color: #6b7280; font-size: 8pt; }
+      .signature-block { width: 48%; text-align: center; }
+      .signature-line { border-bottom: 1px solid #6b7280; height: 18px; }
+      .signature-label { margin-top: 4px; color: #6b7280; font-size: 8pt; }
+      .legend { margin-top: 18px; padding-top: 10px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 8.5pt; line-height: 1.45; }
+      .footer { margin-top: 10px; padding-top: 8px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 8pt; }
       @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
     </style>
   </head><body><div class="page">
 
-    <!-- Header -->
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-      <div style="display:flex;align-items:flex-start;gap:12px">
-        ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="Logo" style="height:44px;width:auto;object-fit:contain;border-radius:4px"/>` : ''}
+    <div class="header">
+      <div class="brand">
+        ${logoUrl ? `<img class="logo" src="${escapeHtml(logoUrl)}" alt="Logo"/>` : ''}
         <div>
-          <div style="font-size:16pt;font-weight:bold">${escapeHtml(branchName || 'Nómina Semanal')}</div>
-          <div style="font-size:9pt;color:#555;margin-top:2px">Reporte de Asistencia y Pago</div>
+          <h1>Nómina semanal</h1>
+          <div class="subtitle">${escapeHtml(branchName || 'Sucursal sin nombre')} · Corte de ${escapeHtml(cut.start_date)} a ${escapeHtml(cut.end_date)}</div>
         </div>
       </div>
-      <div style="text-align:right;font-size:8pt;color:#666">
-        <div><b>Período:</b> ${escapeHtml(cut.start_date)} al ${escapeHtml(cut.end_date)}</div>
-        <div><b>Emitido:</b> ${escapeHtml(new Date(cut.created_at).toLocaleDateString('es-MX'))}</div>
-        <div><b>Por:</b> ${escapeHtml(cut.closed_by_name)}</div>
-        ${cut.notes ? `<div style="color:#888"><i>${escapeHtml(cut.notes)}</i></div>` : ''}
+      <div class="meta">
+        <div><b>Emisión:</b> ${escapeHtml(issuedDate)}</div>
+        <div><b>Gerente:</b> ${escapeHtml(cut.closed_by_name || 'Gerente')}</div>
+        ${cut.notes ? `<div><b>Notas:</b> ${escapeHtml(cut.notes)}</div>` : ''}
       </div>
     </div>
 
-    <!-- Summary table -->
     <table>
       <thead>
         <tr>
           <th>Empleado</th>
-          <th>Dept.</th>
-          <th style="text-align:center">Días / Hrs</th>
-          <th style="text-align:center">Incid.</th>
-          <th style="text-align:right">Bruto</th>
-          <th style="text-align:right">Desc.</th>
-          <th style="text-align:right">NETO</th>
-          <th style="text-align:center">Firma</th>
+          <th>Departamento</th>
+          <th class="center">Días/Horas</th>
+          <th class="money">Tarifa hora</th>
+          <th class="center">HE (h)</th>
+          <th class="money">Bruto</th>
+          <th class="money">Deduc.</th>
+          <th class="money">NETO</th>
         </tr>
       </thead>
-      <tbody>${rows}</tbody>
+      <tbody>${rows.join('')}</tbody>
       <tfoot>
         <tr>
-          <td colspan="4" style="border:1px solid #ccc;padding:5px 7px;font-size:8.5pt">
-            <b>TOTALES</b> · ${active.length} empleado${active.length !== 1 ? 's' : ''}
-            ${totalVac > 0 ? `<span style="color:#553c9a;font-size:7.5pt">· incluye $${totalVac.toFixed(2)} de vacaciones/comp.</span>` : ''}
+          <td colspan="5">
+            TOTALES · ${active.length} empleado${active.length !== 1 ? 's' : ''}
+            ${totalVac > 0 ? `<span class="muted"> · incluye $${totalVac.toFixed(2)} de vacaciones/comp.</span>` : ''}
           </td>
-          <td style="border:1px solid #ccc;padding:5px 7px;text-align:right;font-size:9pt">$${totalGross.toFixed(2)}</td>
-          <td style="border:1px solid #ccc;padding:5px 7px;text-align:right;font-size:9pt;color:#c60">—</td>
-          <td style="border:1px solid #ccc;padding:5px 7px;text-align:right;font-size:10pt;color:#1a7f3c"><b>$${totalNet.toFixed(2)}</b></td>
-          <td style="border:1px solid #ccc"></td>
+          <td class="money">$${totalGross.toFixed(2)}</td>
+          <td class="money">${totalDeductions > 0 ? '-$' + totalDeductions.toFixed(2) : '$0.00'}</td>
+          <td class="money net">$${totalNet.toFixed(2)}</td>
         </tr>
       </tfoot>
     </table>
 
+    ${incidentSection}
     ${vacSection}
 
-    <!-- Signatures -->
-    <div class="sig-grid">${sigCols}</div>
+    <section class="signatures">
+      <h2>Firmas de conformidad</h2>
+      ${signatureRows.join('')}
+    </section>
 
     ${payrollLegend ? `
-    <div style="margin-top:14px;padding:8px 10px;border:1px solid #e0e0e0;border-radius:4px;background:#fafafa">
-      <div style="font-size:6.5pt;color:#666;line-height:1.4">${escapeHtml(payrollLegend)}</div>
-    </div>` : ''}
-    <div style="margin-top:8px;font-size:7pt;color:#bbb;border-top:1px solid #eee;padding-top:6px">
-      CheckPro · ${escapeHtml(branchName || '')} · Semana ${escapeHtml(cut.start_date)} / ${escapeHtml(cut.end_date)} · Documento interno confidencial
-    </div>
+    <div class="legend">${escapeHtml(payrollLegend)}</div>` : ''}
+    <div class="footer">CheckPro · Emitido ${escapeHtml(issuedDate)}</div>
 
   </div></body></html>`
 }
@@ -354,15 +387,15 @@ export default function PayrollPage() {
   )
   const hasUnresolved = incidentShifts.length > 0 || openPayrollIncidents > 0
 
-  // FIX BUG: solo se permite cerrar el día configurado por la sucursal.
+  // FIX: permitir cierre el día configurado y una ventana de gracia de 24h.
   // dayKey() usa hora local (no UTC) — el gerente cierra cuando es ese día
   // en su zona horaria.
   const todayKey = dayKey(new Date())
-  const canCloseToday = todayKey === closingDay
 
   // Cortes anteriores: filtrar a los que tocan turnos de MI sucursal.
   const cutsForBranch = myBranchId
     ? cuts.filter(c => {
+        if (c.branch_id === myBranchId) return true
         if (!c.shift_ids || c.shift_ids.length === 0) return false
         // Un corte "es de mi sucursal" si al menos uno de sus shifts pertenece
         // a un empleado de mi sucursal. Funciona para cortes nuevos (que solo
@@ -373,6 +406,13 @@ export default function PayrollPage() {
         })
       })
     : cuts
+  // FIX: bloquear recierre del periodo y habilitar reimpresión del corte existente.
+  const nextClosingDay = DAYS[(DAYS.indexOf(closingDay) + 1) % 7]
+  const isClosingDayOrNextDay = todayKey === closingDay || todayKey === nextClosingDay
+  const currentWeekCut = cutsForBranch.find(c => c.start_date === weekStartStr && c.end_date === weekEndStr) || null
+  const weekAlreadyClosed = !!currentWeekCut
+  const isGraceDay = todayKey === nextClosingDay && todayKey !== closingDay
+  const canCloseToday = isClosingDayOrNextDay && !weekAlreadyClosed
 
   // Agrupa vacation_periods por employee_id para lookup rapido
   const vacByEmp = {}
@@ -435,9 +475,14 @@ export default function PayrollPage() {
       toast.error(`Hay ${openPayrollIncidents} incidencia(s) abierta(s) en el periodo. Resuelvelas antes de cerrar el corte.`)
       return
     }
-    // FIX BUG: bloquear cierre si hoy no es el dia de corte de la sucursal.
+    // FIX: no permitir recerrar una semana ya cerrada.
+    if (weekAlreadyClosed) {
+      toast.error('Esta semana ya está cerrada. Reimprime el reporte existente.')
+      return
+    }
+    // FIX: bloquear cierre fuera del día de corte o su ventana de gracia.
     if (!canCloseToday) {
-      toast.error(`El corte de esta sucursal solo se puede cerrar los ${DAY_FL[closingDay]}. Hoy es ${DAY_FL[todayKey]}.`)
+      toast.error(`El corte de esta sucursal se puede cerrar los ${DAY_FL[closingDay]} y ${DAY_FL[nextClosingDay]}. Hoy es ${DAY_FL[todayKey]}.`)
       return
     }
     if (!myBranchId) {
@@ -567,10 +612,10 @@ export default function PayrollPage() {
         <div className="page-eyebrow mb-2">Cortes · Semana en curso</div>
         <h1 className="page-title">Nómina</h1>
         <p className="text-[13px] font-mono mt-1.5" style={{ color: 'var(--cp-text-muted)' }}>
-          {isoDate(range.start)} → {isoDate(range.end)}
+          Corte de {weekStartStr} a {weekEndStr}
         </p>
         <p className="text-brand-400/90 text-xs font-mono mt-1 flex items-center gap-1.5">
-          <Building2 size={12} /> {myBranchName || 'Sucursal sin nombre'} · CORTE: {DAY_FL[closingDay]}
+          <Building2 size={12} /> {myBranchName || 'Sucursal sin nombre'} · CORTE: {DAY_FL[closingDay]} / {DAY_FL[nextClosingDay]}
         </p>
       </div>
 
@@ -740,28 +785,46 @@ export default function PayrollPage() {
       {/* ── Corte semanal ─────────────────────────────────────────────────── */}
       <div className={`card mb-4 ${hasUnresolved || !canCloseToday ? 'opacity-60' : ''}`}>
         <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">Corte semanal</p>
+        <p className="text-[11px] text-gray-400 font-mono mb-3">Corte de {weekStartStr} a {weekEndStr}</p>
+        {weekAlreadyClosed && currentWeekCut && (
+          <div className="px-3 py-2 mb-3 bg-green-500/10 border border-green-500/20 rounded-lg text-green-400 text-xs font-semibold">
+            Semana ya cerrada el {fmtDate(currentWeekCut.created_at)}{currentWeekCut.closed_by_name ? ` por ${currentWeekCut.closed_by_name}` : ''}
+          </div>
+        )}
+        {isGraceDay && !weekAlreadyClosed && (
+          <div className="px-3 py-2 mb-3 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-300 text-xs font-semibold">
+            Periodo de gracia activo (24h después del cierre regular). Cierra hoy o se mantendrá abierto.
+          </div>
+        )}
         {hasUnresolved && (
           <div className="px-3 py-2 mb-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-xs font-semibold">
             <span className="inline-flex items-center gap-1.5"><Lock size={12} /> Resuelve todas las incidencias para habilitar el corte</span>
           </div>
         )}
-        {!canCloseToday && !hasUnresolved && (
+        {!isClosingDayOrNextDay && !hasUnresolved && !weekAlreadyClosed && (
           <div className="px-3 py-2 mb-3 bg-orange-500/10 border border-orange-500/20 rounded-lg text-orange-400 text-xs font-semibold">
-            🗓 El corte de <span className="text-white">{myBranchName || 'esta sucursal'}</span> solo se genera los {DAY_FL[closingDay]}. Hoy es {DAY_FL[todayKey]}.
+            El corte de <span className="text-white">{myBranchName || 'esta sucursal'}</span> se puede cerrar los {DAY_FL[closingDay]} y {DAY_FL[nextClosingDay]}. Hoy es {DAY_FL[todayKey]}.
           </div>
         )}
         <div className="mb-3">
           <label className="label">Notas del corte (opcional)</label>
           <input className="input text-sm" placeholder="Observaciones de la semana..."
-            value={cutNote} onChange={e => setCutNote(e.target.value)} disabled={hasUnresolved || !canCloseToday} />
+            value={cutNote} onChange={e => setCutNote(e.target.value)} disabled={hasUnresolved || !canCloseToday || weekAlreadyClosed} />
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button onClick={closeWeek} disabled={closing || hasUnresolved || !canCloseToday}
+          <button onClick={closeWeek} disabled={closing || hasUnresolved || !canCloseToday || weekAlreadyClosed}
             className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed flex-1">
             <span className="inline-flex items-center justify-center gap-1.5">
-              {closing ? <><Loader2 size={14} className="animate-spin" /> Cerrando...</> : !canCloseToday ? <><Lock size={14} /> Disponible los {DAY_FL[closingDay]}</> : <><Printer size={14} /> Cerrar semana e imprimir reporte</>}
+              {closing ? <><Loader2 size={14} className="animate-spin" /> Cerrando...</> : weekAlreadyClosed ? <><Lock size={14} /> Semana ya cerrada</> : !canCloseToday ? <><Lock size={14} /> Disponible {DAY_FL[closingDay]} / {DAY_FL[nextClosingDay]}</> : <><Printer size={14} /> Cerrar semana e imprimir reporte</>}
             </span>
           </button>
+          {weekAlreadyClosed && currentWeekCut && (
+            <button
+              onClick={() => openReport(currentWeekCut)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-dark-700 border border-dark-border rounded-xl text-xs font-semibold text-white active:bg-dark-600 shrink-0">
+              <Printer size={14} /> Reimprimir reporte
+            </button>
+          )}
           {weekShifts.length > 0 && (
             <button
               onClick={() => handleExportPayrollXLS(

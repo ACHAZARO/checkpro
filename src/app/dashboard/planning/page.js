@@ -321,6 +321,59 @@ export default function PlanningPage() {
             </button>
           </div>
 
+          {/* FIX: mobile usa cards por empleado para evitar tabla apretada y scroll horizontal forzado. */}
+          <div className="md:hidden space-y-3">
+            {mixedEmps.map(emp => (
+              <div
+                key={emp.id}
+                className="rounded-2xl border p-4 shadow-sm"
+                style={{
+                  borderColor: isDark ? '#1f2636' : '#e2e8f0',
+                  backgroundColor: isDark ? '#101318' : '#ffffff',
+                }}
+              >
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="min-w-0">
+                    <div className={`font-semibold text-sm truncate ${isDark ? 'text-white' : 'text-gray-900'}`} title={emp.name}>
+                      {emp.name}
+                    </div>
+                    <div className={`text-[11px] font-mono mt-0.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                      {emp.daily_hours || '?'}h/dia {emp.employee_code ? `- ${emp.employee_code}` : ''}
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {dates.map((d, i) => {
+                    const cell = plans[`${emp.id}|${d}`]
+                    const entry = cell?.entry_time_str || ''
+                    return (
+                      <label key={d} className="block min-w-0">
+                        <span className={`block text-[10px] uppercase font-mono ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                          {DAY_L[DAYS[i]]} {d.slice(8)}
+                        </span>
+                        <input
+                          type="time"
+                          className={`mt-1 w-full border rounded-lg px-2.5 py-2.5 text-sm text-center font-mono ${
+                            isDark
+                              ? 'bg-dark-700 border-dark-border text-white'
+                              : 'bg-white border-gray-300 text-gray-900'
+                          }`}
+                          value={entry}
+                          onChange={e => setCell(emp.id, d, e.target.value)}
+                        />
+                        {entry && (
+                          <div className="text-[10px] text-brand-400/80 mt-1 text-center font-mono">
+                            sale {cell.exit_time_str}
+                          </div>
+                        )}
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
           {/* FIX scroll planificador: el padding del .card estaba DENTRO del overflow,
              dejando un gap visible donde las celdas pasaban antes de llegar al sticky.
              Solucion: card visual (border + shadow) en outer wrapper SIN padding;
@@ -328,7 +381,7 @@ export default function PlanningPage() {
              Backgrounds via inline style para no depender de `dark:` modifier (el config
              previo no tenia darkMode:'class', asi que dark: no respondia a html.dark). */}
           <div
-            className="rounded-2xl border shadow-sm"
+            className="hidden md:block rounded-2xl border shadow-sm"
             style={{
               borderColor: isDark ? '#1f2636' : '#e2e8f0',
               backgroundColor: isDark ? '#101318' : '#ffffff',
