@@ -36,7 +36,7 @@ function escapeHtml(s) {
 }
 
 // ── Compact single-page report ───────────────────────────────────────────────
-function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrollLegend, vacByEmp, coveragePayMode) {
+function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrollLegend, vacByEmp, coveragePayMode, periodIncidencias = []) {
   const active = employees.filter(e => e.has_shift)
   let totalNet = 0
   let totalGross = 0
@@ -46,10 +46,9 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
   const weekStart = cut.start_date
   const weekEnd = cut.end_date
 
-  // FIX: reporte impreso profesional, con columnas reducidas y firmas separadas.
+  // FIX: reporte impreso en carta horizontal con incidencias y firma por fila.
   const rows = []
   const incidentRows = []
-  const signatureRows = []
   const vacLines = []
 
   active.forEach((emp, idx) => {
@@ -58,32 +57,39 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     const grossWithVac = s.grossPay + vac.totalVacationPay
     const deductions = s.retardoDesc + s.incidentDesc
     const netWithVac = Math.max(0, grossWithVac - deductions)
+    const realIncidents = (periodIncidencias || []).filter(i => i.employee_id === emp.id)
+    // FIX: mostrar incidencias del periodo por empleado igual que el resumen en pantalla.
+    const incidentParts = []
+    if (s.retardos > 0) incidentParts.push(`${s.retardos} retardo${s.retardos > 1 ? 's' : ''}`)
+    if (s.faltasInjustificadas > 0) incidentParts.push(`${s.faltasInjustificadas} falta${s.faltasInjustificadas > 1 ? 's' : ''} inj.`)
+    if (s.incidents > 0) incidentParts.push(`${s.incidents} incidencia${s.incidents > 1 ? 's' : ''}`)
+    if (realIncidents.length > 0) incidentParts.push(`${realIncidents.length} incidencia${realIncidents.length > 1 ? 's' : ''}${realIncidents.some(i => i.status === 'open') ? ' abierta' + (realIncidents.length > 1 ? 's' : '') : ''}`)
+    if (s.otHours > 0) incidentParts.push(`${Number(s.otHours || 0).toFixed(2)}h extra`)
+    if (vac.daysInRange > 0) incidentParts.push(`${vac.daysInRange}d vacaciones`)
+    const incidentText = incidentParts.length ? incidentParts.join(' | ') : 'Sin novedad'
     totalGross += grossWithVac
     totalNet += netWithVac
     totalDeductions += deductions
     totalVac += vac.totalVacationPay
     const daysWorked = s.shifts.filter(sh => ['closed', 'incident'].includes(sh.status)).length
 
-    const notes = []
-    if (s.retardos > 0) notes.push(`${s.retardos} retardo${s.retardos !== 1 ? 's' : ''}`)
-    if (s.incidents > 0) notes.push(`${s.incidents} incidencia${s.incidents !== 1 ? 's' : ''}`)
-    if (s.faltasInjustificadas > 0) notes.push(`${s.faltasInjustificadas} falta${s.faltasInjustificadas !== 1 ? 's' : ''} injustificada${s.faltasInjustificadas !== 1 ? 's' : ''}`)
-    if (vac.daysInRange > 0) notes.push(`${vac.daysInRange} día${vac.daysInRange !== 1 ? 's' : ''} de vacaciones`)
-    if (vac.compensationPay > 0) notes.push('compensación de vacaciones')
-
     rows.push(`<tr class="${idx % 2 === 0 ? 'alt' : ''}">
       <td class="emp-cell">
         <div class="emp-name">${escapeHtml(emp.name)}</div>
         <div class="emp-code">${emp.employee_code ? escapeHtml(emp.employee_code) : ''}</div>
-        ${notes.length ? `<div class="emp-note">${escapeHtml(notes.join(' · '))}</div>` : ''}
       </td>
       <td>${emp.department ? escapeHtml(emp.department) : '-'}</td>
       <td class="center">${daysWorked}d / ${Number(s.totalH || 0).toFixed(2)}h</td>
       <td class="money">$${monthlyToHourly(emp).toFixed(2)}</td>
       <td class="center">${Number(s.otHours || 0).toFixed(2)}</td>
+      <td class="incidents-cell ${incidentParts.length ? '' : 'empty'}">${escapeHtml(incidentText)}</td>
       <td class="money">$${grossWithVac.toFixed(2)}</td>
       <td class="money">${deductions > 0 ? '-$' + deductions.toFixed(2) : '$0.00'}</td>
       <td class="money net">$${netWithVac.toFixed(2)}</td>
+      <td class="signature-cell">
+        <div class="sig-line"></div>
+        <div class="sig-caption">Firma de conformidad</div>
+      </td>
     </tr>`
     )
 
@@ -93,18 +99,6 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     if (s.incidentDesc > 0 || s.incidents > 0 || s.faltasInjustificadas > 0) {
       incidentRows.push(`<tr><td>${escapeHtml(emp.name)}</td><td>Incidencias${s.faltasInjustificadas > 0 ? ` / faltas (${s.faltasInjustificadas})` : ''}</td><td>${escapeHtml(weekStart)} al ${escapeHtml(weekEnd)}</td><td class="money">${s.incidentDesc > 0 ? '-$' + s.incidentDesc.toFixed(2) : '$0.00'}</td></tr>`)
     }
-
-    signatureRows.push(`<div class="signature-row">
-      <div class="signature-info">
-        <div class="signature-name">${escapeHtml(emp.name)}</div>
-        <div class="signature-code">${emp.employee_code ? escapeHtml(emp.employee_code) : 'Sin código'} · Neto: $${netWithVac.toFixed(2)}</div>
-      </div>
-      <div class="signature-block">
-        <div class="signature-line">&nbsp;</div>
-        <div class="signature-label">Nombre y firma de conformidad</div>
-      </div>
-    </div>`
-    )
 
     for (const d of vac.details) {
       if (d.type === 'tomadas') {
@@ -152,13 +146,16 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     <title>Nómina ${escapeHtml(cut.start_date)}</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
-      /* FIX: forzar tamaño carta (estándar México) y márgenes consistentes. */
-      @page { size: letter; margin: 12mm; }
+      /* FIX: imprimir en hoja carta horizontal para dar espacio a incidencias y firma por empleado. */
+      @page { size: letter landscape; margin: 10mm; }
       html, body { width: 100%; }
-      body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 9pt; color: #1f2937; line-height: 1.35; background: #fff; }
-      .page { padding: 14mm 12mm; max-width: 215.9mm; margin: 0 auto; }
+      body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 9.5pt; color: #1f2937; line-height: 1.32; background: #fff; }
+      .page { padding: 10mm; max-width: 279.4mm; margin: 0 auto; }
       @media print {
         .page { padding: 0; max-width: none; }
+        thead { display: table-header-group; }
+        tfoot { display: table-footer-group; }
+        .payroll-table > tfoot { display: table-row-group; }
       }
       table { width: 100%; border-collapse: collapse; }
       th { padding: 7px 8px; border-bottom: 1px solid #d1d5db; color: #4b5563; font-size: 8.5pt; font-weight: 700; text-align: left; }
@@ -167,36 +164,42 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
       section { margin-top: 18px; }
       h1 { font-size: 20pt; letter-spacing: 0; line-height: 1.1; }
       h2 { font-size: 11pt; margin-bottom: 8px; }
-      .header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
+      .page-table { width: 100%; }
+      .page-table > thead > tr > td,
+      .page-table > tbody > tr > td,
+      .page-table > tfoot > tr > td { padding: 0; border: 0; }
+      .page-header { padding-bottom: 8px; }
+      .page-body { padding: 4px 0 8px; }
+      .page-footer { padding-top: 8px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 8.5pt; line-height: 1.4; }
+      .footer-meta { margin-top: 4px; display: flex; justify-content: space-between; color: #9ca3af; font-size: 8pt; }
+      .page-number::after { content: "Pagina " counter(page) " de " counter(pages); }
+      .header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 10px; }
       .brand { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
       .logo { height: 42px; width: auto; object-fit: contain; }
       .subtitle { margin-top: 5px; color: #4b5563; font-size: 9pt; }
       .meta { min-width: 170px; text-align: right; color: #4b5563; font-size: 8.5pt; }
       .meta div { margin-bottom: 2px; }
       .alt { background: #fafafa; }
-      .emp-cell { width: 25%; }
+      .emp-cell { width: 18%; }
       .emp-name { font-weight: 700; color: #111827; }
       .emp-code, .muted, .section-note { color: #6b7280; font-size: 8pt; }
       .emp-note { margin-top: 2px; color: #6b7280; font-size: 8pt; }
+      .incidents-cell { min-width: 115px; max-width: 150px; color: #374151; font-size: 8.5pt; line-height: 1.25; }
+      .incidents-cell.empty { color: #9ca3af; }
       .center { text-align: center; }
       .money { text-align: right; white-space: nowrap; }
       .net { font-weight: 800; color: #111827; }
       .detail-table th, .detail-table td { font-size: 8.5pt; }
-      .signatures { margin-top: 22px; }
-      /* FIX: linea de firma a la derecha, info del empleado a la izquierda, alineadas en la misma base. */
-      .signature-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 18px 0 8px; border-bottom: 1px solid #f1f5f9; break-inside: avoid; page-break-inside: avoid; }
-      .signature-info { flex: 0 0 auto; max-width: 48%; }
-      .signature-name { font-weight: 700; font-size: 9.5pt; }
-      .signature-code { margin-top: 2px; color: #6b7280; font-size: 8pt; }
-      .signature-block { flex: 1 1 auto; max-width: 48%; }
-      .signature-line { border-bottom: 1px solid #1f2937; height: 1px; margin-bottom: 4px; }
-      .signature-label { color: #6b7280; font-size: 7.5pt; text-align: center; }
-      .legend { margin-top: 18px; padding-top: 10px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 8.5pt; line-height: 1.45; }
-      .footer { margin-top: 10px; padding-top: 8px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 8pt; }
+      .signature-cell { min-width: 130px; height: 32px; padding-left: 10px; vertical-align: bottom; }
+      .sig-line { width: 100%; height: 18px; border-bottom: 1px solid #1f2937; }
+      .sig-caption { margin-top: 2px; color: #6b7280; font-size: 7pt; text-align: center; }
       @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
     </style>
   </head><body><div class="page">
+  <table class="page-table">
+    <thead><tr><td>
 
+    <div class="page-header">
     <div class="header">
       <div class="brand">
         ${logoUrl ? `<img class="logo" src="${escapeHtml(logoUrl)}" alt="Logo"/>` : ''}
@@ -211,8 +214,12 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
         ${cut.notes ? `<div><b>Notas:</b> ${escapeHtml(cut.notes)}</div>` : ''}
       </div>
     </div>
+    </div>
 
-    <table>
+    </td></tr></thead>
+    <tbody><tr><td><div class="page-body">
+
+    <table class="payroll-table">
       <thead>
         <tr>
           <th>Empleado</th>
@@ -220,21 +227,24 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
           <th class="center">Días/Horas</th>
           <th class="money">Tarifa hora</th>
           <th class="center">HE (h)</th>
+          <th>Incidencias</th>
           <th class="money">Bruto</th>
           <th class="money">Deduc.</th>
           <th class="money">NETO</th>
+          <th>Firma</th>
         </tr>
       </thead>
       <tbody>${rows.join('')}</tbody>
       <tfoot>
         <tr>
-          <td colspan="5">
+          <td colspan="6">
             TOTALES · ${active.length} empleado${active.length !== 1 ? 's' : ''}
             ${totalVac > 0 ? `<span class="muted"> · incluye $${totalVac.toFixed(2)} de vacaciones/comp.</span>` : ''}
           </td>
           <td class="money">$${totalGross.toFixed(2)}</td>
           <td class="money">${totalDeductions > 0 ? '-$' + totalDeductions.toFixed(2) : '$0.00'}</td>
           <td class="money net">$${totalNet.toFixed(2)}</td>
+          <td></td>
         </tr>
       </tfoot>
     </table>
@@ -242,14 +252,15 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     ${incidentSection}
     ${vacSection}
 
-    <section class="signatures">
-      <h2>Firmas de conformidad</h2>
-      ${signatureRows.join('')}
-    </section>
+    </div></td></tr></tbody>
+    <tfoot><tr><td>
+      <div class="page-footer">
+        ${payrollLegend ? `<div>${escapeHtml(payrollLegend)}</div>` : ''}
+        <div class="footer-meta"><span>CheckPro - Emitido ${escapeHtml(issuedDate)}</span><span class="page-number"></span></div>
+      </div>
+    </td></tr></tfoot>
+  </table>
 
-    ${payrollLegend ? `
-    <div class="legend">${escapeHtml(payrollLegend)}</div>` : ''}
-    <div class="footer">CheckPro · Emitido ${escapeHtml(issuedDate)}</div>
 
   </div></body></html>`
 }
@@ -617,13 +628,20 @@ export default function PayrollPage() {
       setClosing(false)
       return
     }
-    setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered'))
+    // FIX: pasar incidencias reales del periodo para que el reporte impreso coincida con el resumen.
+    setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered', payrollIncidenciasForWeek))
     setClosing(false)
   }
 
   function openReport(cut) {
     const ws = shifts.filter(s => cut.shift_ids?.includes(s.id))
-    setPrintHTML(buildReportHTML(cut, ws, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered'))
+    // FIX: filtrar incidencias por el rango del corte reimpreso, no por la semana actual.
+    const cutIncidencias = payrollIncidencias.filter(i =>
+      i.date_str >= cut.start_date &&
+      i.date_str <= cut.end_date &&
+      myEmpIds.has(i.employee_id)
+    )
+    setPrintHTML(buildReportHTML(cut, ws, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered', cutIncidencias))
   }
 
   // ── Exportar XLS del corte ───────────────────────────────────────────────
@@ -944,7 +962,7 @@ export default function PayrollPage() {
       {/* FIX: imprimir SOLO el iframe (no la pagina padre con los botones).
           Tambien ofrecer "abrir en nueva pestaña" como fallback robusto. */}
       {printHTML && (
-        <div className="fixed inset-0 z-[500] bg-white flex flex-col">
+        <div className="fixed inset-0 z-[500] bg-white flex flex-col overflow-hidden">
           <div className="flex gap-3 items-center p-3 bg-dark-900 border-b border-dark-border shrink-0 flex-wrap">
             <button onClick={() => {
               // Abrir nueva ventana con solo el reporte y mandar a imprimir.
@@ -972,8 +990,13 @@ export default function PayrollPage() {
               <X size={16} /> Cerrar
             </button>
             <span className="text-xs text-gray-500 font-mono hidden md:block">Vista previa · presiona Imprimir para abrir el diálogo en hoja carta</span>
+            {/* FIX: advertir en mobile que la vista previa horizontal usa scroll interno. */}
+            <span className="text-[11px] leading-snug text-gray-400 font-mono md:hidden basis-full">Vista previa optimizada para hoja carta horizontal. Usa Imprimir para guardar PDF.</span>
           </div>
-          <iframe ref={printIframeRef} srcDoc={printHTML} className="flex-1 border-0 w-full bg-white" title="Reporte semanal" />
+          {/* FIX: scroll interno evita que el iframe se salga del viewport en pantallas portrait. */}
+          <div className="flex-1 min-h-0 overflow-auto bg-white">
+            <iframe ref={printIframeRef} srcDoc={printHTML} className="block border-0 bg-white w-[279.4mm] max-w-none h-full min-h-full" title="Reporte semanal" />
+          </div>
         </div>
       )}
     </div>
