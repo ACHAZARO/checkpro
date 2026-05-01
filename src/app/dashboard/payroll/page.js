@@ -95,13 +95,13 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     }
 
     signatureRows.push(`<div class="signature-row">
-      <div>
+      <div class="signature-info">
         <div class="signature-name">${escapeHtml(emp.name)}</div>
         <div class="signature-code">${emp.employee_code ? escapeHtml(emp.employee_code) : 'Sin código'} · Neto: $${netWithVac.toFixed(2)}</div>
       </div>
       <div class="signature-block">
-        <div class="signature-line"></div>
-        <div class="signature-label">Firma de conformidad</div>
+        <div class="signature-line">&nbsp;</div>
+        <div class="signature-label">Nombre y firma de conformidad</div>
       </div>
     </div>`
     )
@@ -183,12 +183,14 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
       .net { font-weight: 800; color: #111827; }
       .detail-table th, .detail-table td { font-size: 8.5pt; }
       .signatures { margin-top: 22px; }
-      .signature-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 13px 0; border-bottom: 1px solid #e5e7eb; break-inside: avoid; }
-      .signature-name { font-weight: 700; }
+      /* FIX: linea de firma a la derecha, info del empleado a la izquierda, alineadas en la misma base. */
+      .signature-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 18px 0 8px; border-bottom: 1px solid #f1f5f9; break-inside: avoid; page-break-inside: avoid; }
+      .signature-info { flex: 0 0 auto; max-width: 48%; }
+      .signature-name { font-weight: 700; font-size: 9.5pt; }
       .signature-code { margin-top: 2px; color: #6b7280; font-size: 8pt; }
-      .signature-block { width: 48%; text-align: center; }
-      .signature-line { border-bottom: 1px solid #6b7280; height: 18px; }
-      .signature-label { margin-top: 4px; color: #6b7280; font-size: 8pt; }
+      .signature-block { flex: 1 1 auto; max-width: 48%; }
+      .signature-line { border-bottom: 1px solid #1f2937; height: 1px; margin-bottom: 4px; }
+      .signature-label { color: #6b7280; font-size: 7.5pt; text-align: center; }
       .legend { margin-top: 18px; padding-top: 10px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 8.5pt; line-height: 1.45; }
       .footer { margin-top: 10px; padding-top: 8px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 8pt; }
       @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
@@ -939,14 +941,28 @@ export default function PayrollPage() {
       )}
 
       {/* ── Print modal ────────────────────────────────────────────────────── */}
-      {/* FIX: imprimir SOLO el iframe (no la pagina padre con los botones). */}
+      {/* FIX: imprimir SOLO el iframe (no la pagina padre con los botones).
+          Tambien ofrecer "abrir en nueva pestaña" como fallback robusto. */}
       {printHTML && (
         <div className="fixed inset-0 z-[500] bg-white flex flex-col">
-          <div className="flex gap-3 items-center p-3 bg-dark-900 border-b border-dark-border shrink-0">
+          <div className="flex gap-3 items-center p-3 bg-dark-900 border-b border-dark-border shrink-0 flex-wrap">
             <button onClick={() => {
-              const w = printIframeRef.current?.contentWindow
-              if (!w) return
-              try { w.focus(); w.print() } catch (e) { console.error('print error', e) }
+              // Abrir nueva ventana con solo el reporte y mandar a imprimir.
+              // Mas robusto que iframe.contentWindow.print() que en algunos
+              // navegadores imprime la pagina padre.
+              const w = window.open('', '_blank', 'width=900,height=1100')
+              if (!w) {
+                toast.error('Permite ventanas emergentes para imprimir.')
+                return
+              }
+              w.document.open()
+              w.document.write(printHTML)
+              w.document.close()
+              const trigger = () => {
+                try { w.focus(); w.print() } catch (e) { console.error(e) }
+              }
+              if (w.document.readyState === 'complete') trigger()
+              else w.addEventListener('load', trigger)
             }}
               className="flex items-center gap-2 px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl">
               <Printer size={16} /> Imprimir / Guardar PDF
@@ -955,7 +971,7 @@ export default function PayrollPage() {
               className="flex items-center gap-2 px-4 py-2 bg-dark-700 border border-dark-border text-white text-sm font-semibold rounded-xl">
               <X size={16} /> Cerrar
             </button>
-            <span className="text-xs text-gray-500 font-mono hidden md:block">Todos los empleados en una sola hoja</span>
+            <span className="text-xs text-gray-500 font-mono hidden md:block">Vista previa · presiona Imprimir para abrir el diálogo en hoja carta</span>
           </div>
           <iframe ref={printIframeRef} srcDoc={printHTML} className="flex-1 border-0 w-full bg-white" title="Reporte semanal" />
         </div>
