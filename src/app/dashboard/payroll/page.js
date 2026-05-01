@@ -36,7 +36,7 @@ function escapeHtml(s) {
 }
 
 // ── Compact single-page report ───────────────────────────────────────────────
-function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrollLegend, vacByEmp, coveragePayMode, closedByNameFallback = 'Gerente') {
+function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrollLegend, vacByEmp, coveragePayMode, periodIncidencias = [], closedByNameFallback = 'Gerente') {
   const active = employees.filter(e => e.has_shift)
   let totalNet = 0
   let totalGross = 0
@@ -55,11 +55,36 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     const s = empWeekSummary(emp, weekShifts, employees, coveragePayMode)
     const vac = vacationPayForWeek(emp, (vacByEmp && vacByEmp[emp.id]) || [], weekStart, weekEnd)
     const grossWithVac = s.grossPay + vac.totalVacationPay
-    const deductions = s.retardoDesc + s.incidentDesc
+    // FIX: contar faltas reales del empleado fusionando shifts (classification.type)
+    // con la tabla incidencias (kind=falta). Se deduplica por date_str para no
+    // contar dos veces el mismo dia cuando ambos sistemas registran la falta.
+    const empIncFaltas = (periodIncidencias || []).filter(i =>
+      i.employee_id === emp.id &&
+      (i.kind === 'falta' || i.kind === 'falta_injustificada')
+    )
+    const faltaDays = new Set()
+    s.shifts.forEach(sh => {
+      const t = sh.classification?.type
+      if (t === 'falta_injustificada' || t === 'falta') faltaDays.add(sh.date_str)
+    })
+    empIncFaltas.forEach(i => faltaDays.add(i.date_str))
+    const faltasReales = faltaDays.size
+    // Descuento por falta no contado en s.incidentDesc cuando viene de incidencias resueltas:
+    // si la falta solo existe en la tabla incidencias (no en shifts), agregar descuento manual.
+    const incidentFaltaDays = new Set(empIncFaltas.map(i => i.date_str))
+    const shiftFaltaDays = new Set()
+    s.shifts.forEach(sh => {
+      const t = sh.classification?.type
+      if (t === 'falta_injustificada' || t === 'falta') shiftFaltaDays.add(sh.date_str)
+    })
+    const incOnlyFaltas = [...incidentFaltaDays].filter(d => !shiftFaltaDays.has(d)).length
+    const hr = Math.max(0, Number(monthlyToHourly(emp)) || 0)
+    const extraFaltaDesc = incOnlyFaltas * hr * 8
+    const deductions = s.retardoDesc + s.incidentDesc + extraFaltaDesc
     const netWithVac = Math.max(0, grossWithVac - deductions)
     // FIX: la celda firmable solo muestra faltas injustificadas y retardos reconocibles por el empleado.
     const incidentParts = []
-    if (s.faltasInjustificadas > 0) incidentParts.push(`${s.faltasInjustificadas} falta${s.faltasInjustificadas > 1 ? 's' : ''} injustificada${s.faltasInjustificadas > 1 ? 's' : ''}`)
+    if (faltasReales > 0) incidentParts.push(`${faltasReales} falta${faltasReales > 1 ? 's' : ''} injustificada${faltasReales > 1 ? 's' : ''}`)
     if (s.retardos > 0) incidentParts.push(`${s.retardos} retardo${s.retardos > 1 ? 's' : ''}`)
     const incidentText = incidentParts.length ? incidentParts.join(', ') : 'Sin novedad'
     totalGross += grossWithVac
@@ -91,8 +116,9 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     if (s.retardoDesc > 0) {
       incidentRows.push(`<tr><td>${escapeHtml(emp.name)}</td><td>Retardos (${s.retardos})</td><td>${escapeHtml(weekStart)} al ${escapeHtml(weekEnd)}</td><td class="money">-$${s.retardoDesc.toFixed(2)}</td></tr>`)
     }
-    if (s.incidentDesc > 0 || s.incidents > 0 || s.faltasInjustificadas > 0) {
-      incidentRows.push(`<tr><td>${escapeHtml(emp.name)}</td><td>Incidencias${s.faltasInjustificadas > 0 ? ` / faltas (${s.faltasInjustificadas})` : ''}</td><td>${escapeHtml(weekStart)} al ${escapeHtml(weekEnd)}</td><td class="money">${s.incidentDesc > 0 ? '-$' + s.incidentDesc.toFixed(2) : '$0.00'}</td></tr>`)
+    const totalFaltaDesc = s.incidentDesc + extraFaltaDesc
+    if (totalFaltaDesc > 0 || faltasReales > 0) {
+      incidentRows.push(`<tr><td>${escapeHtml(emp.name)}</td><td>Faltas injustificadas (${faltasReales})</td><td>${escapeHtml(weekStart)} al ${escapeHtml(weekEnd)}</td><td class="money">${totalFaltaDesc > 0 ? '-$' + totalFaltaDesc.toFixed(2) : '$0.00'}</td></tr>`)
     }
 
     for (const d of vac.details) {
@@ -136,8 +162,10 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
        </section>`
     : ''
   const issuedDate = new Date(cut.created_at || Date.now()).toLocaleDateString('es-MX')
-  // FIX: cortes legacy sin closed_by_name usan el perfil actual como respaldo al imprimir.
-  const managerName = cut.closed_by_name || closedByNameFallback || 'Gerente'
+  // FIX: cortes legacy sin closed_by_name (o con el literal 'Gerente' del fallback historico) usan el perfil actual al reimprimir.
+  const storedName = (cut.closed_by_name || '').trim()
+  const isPlaceholderName = !storedName || /^gerente$/i.test(storedName)
+  const managerName = isPlaceholderName ? (closedByNameFallback || 'Gerente') : storedName
   // FIX: contador de pagina va fixed fuera del tfoot repetido para evitar Pagina 0 de 0 en Chromium.
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
@@ -172,8 +200,11 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
       .footer-meta { margin-top: 4px; display: flex; justify-content: space-between; color: #9ca3af; font-size: 8pt; }
       .fixed-page-number { display: none; }
       .header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 10px; }
-      .brand { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
-      .logo { height: 42px; width: auto; object-fit: contain; }
+      .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+      /* FIX: el logo siempre ocupa el mismo cuadrado (48x48) para que el header no salte segun haya o no logo. */
+      .logo-slot { width: 48px; height: 48px; flex-shrink: 0; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #f3f4f6; border: 1px solid #e5e7eb; }
+      .logo-slot img { width: 100%; height: 100%; object-fit: contain; display: block; }
+      .logo-slot .logo-fallback { color: #9ca3af; font-size: 9pt; font-weight: 700; letter-spacing: 0.5px; }
       .subtitle { margin-top: 5px; color: #4b5563; font-size: 9pt; }
       .meta { min-width: 170px; text-align: right; color: #4b5563; font-size: 8.5pt; }
       .meta div { margin-bottom: 2px; }
@@ -213,7 +244,11 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     <div class="page-header">
     <div class="header">
       <div class="brand">
-        ${logoUrl ? `<img class="logo" src="${escapeHtml(logoUrl)}" alt="Logo"/>` : ''}
+        <div class="logo-slot">
+          ${logoUrl
+            ? `<img src="${escapeHtml(logoUrl)}" alt="Logo"/>`
+            : `<span class="logo-fallback">${escapeHtml((branchName || 'CP').slice(0, 2).toUpperCase())}</span>`}
+        </div>
         <div>
           <h1>Nómina semanal</h1>
           <div class="subtitle">${escapeHtml(branchName || 'Sucursal sin nombre')} · Corte de ${escapeHtml(cut.start_date)} a ${escapeHtml(cut.end_date)}</div>
@@ -644,15 +679,21 @@ export default function PayrollPage() {
       setClosing(false)
       return
     }
-    // FIX: pasar fallback del nombre real por si el corte recargado viene sin closed_by_name.
-    setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered', currentUserName))
+    // FIX: pasar incidencias del periodo + fallback del nombre real para corte recien cerrado.
+    setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered', payrollIncidenciasForWeek, currentUserName))
     setClosing(false)
   }
 
   function openReport(cut) {
     const ws = shifts.filter(s => cut.shift_ids?.includes(s.id))
+    // FIX: filtrar incidencias por el rango del corte reimpreso.
+    const cutIncidencias = payrollIncidencias.filter(i =>
+      i.date_str >= cut.start_date &&
+      i.date_str <= cut.end_date &&
+      myEmpIds.has(i.employee_id)
+    )
     // FIX: reimpresiones legacy usan el nombre del perfil actual si el corte no lo guardo.
-    setPrintHTML(buildReportHTML(cut, ws, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered', currentUserName))
+    setPrintHTML(buildReportHTML(cut, ws, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered', cutIncidencias, currentUserName))
   }
 
   // ── Exportar XLS del corte ───────────────────────────────────────────────
