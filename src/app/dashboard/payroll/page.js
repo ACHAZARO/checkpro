@@ -40,8 +40,8 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
   const active = employees.filter(e => e.has_shift)
   let totalNet = 0
   let totalGross = 0
-  let totalDeductions = 0
   let totalVac = 0
+  let totalCoverage = 0
 
   const weekStart = cut.start_date
   const weekEnd = cut.end_date
@@ -54,46 +54,36 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
   active.forEach((emp, idx) => {
     const s = empWeekSummary(emp, weekShifts, employees, coveragePayMode)
     const vac = vacationPayForWeek(emp, (vacByEmp && vacByEmp[emp.id]) || [], weekStart, weekEnd)
+    // FIX LFT: el bruto ya refleja SOLO lo realmente devengado (horas trabajadas
+    // + faltas justificadas con goce + vacaciones + horas extra + coberturas).
+    // Las faltas injustificadas NO se devengan (no descuentan, simplemente no
+    // suman). NETO = Bruto, sin restar penalizaciones.
     const grossWithVac = s.grossPay + vac.totalVacationPay
-    // FIX: contar faltas reales del empleado fusionando shifts (classification.type)
-    // con la tabla incidencias (kind=falta). Se deduplica por date_str para no
-    // contar dos veces el mismo dia cuando ambos sistemas registran la falta.
-    const empIncFaltas = (periodIncidencias || []).filter(i =>
-      i.employee_id === emp.id &&
-      (i.kind === 'falta' || i.kind === 'falta_injustificada')
-    )
-    const faltaDays = new Set()
-    s.shifts.forEach(sh => {
-      const t = sh.classification?.type
-      if (t === 'falta_injustificada' || t === 'falta') faltaDays.add(sh.date_str)
-    })
-    empIncFaltas.forEach(i => faltaDays.add(i.date_str))
-    const faltasReales = faltaDays.size
-    // Descuento por falta no contado en s.incidentDesc cuando viene de incidencias resueltas:
-    // si la falta solo existe en la tabla incidencias (no en shifts), agregar descuento manual.
-    const incidentFaltaDays = new Set(empIncFaltas.map(i => i.date_str))
-    const shiftFaltaDays = new Set()
-    s.shifts.forEach(sh => {
-      const t = sh.classification?.type
-      if (t === 'falta_injustificada' || t === 'falta') shiftFaltaDays.add(sh.date_str)
-    })
-    const incOnlyFaltas = [...incidentFaltaDays].filter(d => !shiftFaltaDays.has(d)).length
-    const hr = Math.max(0, Number(monthlyToHourly(emp)) || 0)
-    const extraFaltaDesc = incOnlyFaltas * hr * 8
-    const deductions = s.retardoDesc + s.incidentDesc + extraFaltaDesc
-    const netWithVac = Math.max(0, grossWithVac - deductions)
+    const netWithVac = grossWithVac
+    // Horas en las que este empleado cubrio a otro (covering_employee_id === emp.id).
+    // Se suman a "Extras (h)" junto con las horas extra propias para visibilidad.
+    const coverageHours = (weekShifts || [])
+      .filter(sh => sh.covering_employee_id === emp.id && ['closed', 'incident'].includes(sh.status))
+      .reduce((acc, sh) => acc + Math.max(0, Number(sh.duration_hours || 0)), 0)
+    const extrasHoras = (Number(s.otHours) || 0) + coverageHours
+    // Conteo informativo de faltas injustificadas reales (shifts clasificados como falta_injustificada).
+    const faltasInjustReales = s.faltasInjustificadas || 0
     // FIX: la celda firmable solo muestra faltas injustificadas y retardos reconocibles por el empleado.
     const incidentParts = []
-    if (faltasReales > 0) incidentParts.push(`${faltasReales} falta${faltasReales > 1 ? 's' : ''} injustificada${faltasReales > 1 ? 's' : ''}`)
+    if (faltasInjustReales > 0) incidentParts.push(`${faltasInjustReales} falta${faltasInjustReales > 1 ? 's' : ''} injustificada${faltasInjustReales > 1 ? 's' : ''}`)
     if (s.retardos > 0) incidentParts.push(`${s.retardos} retardo${s.retardos > 1 ? 's' : ''}`)
     const incidentText = incidentParts.length ? incidentParts.join(', ') : 'Sin novedad'
     totalGross += grossWithVac
     totalNet += netWithVac
-    totalDeductions += deductions
     totalVac += vac.totalVacationPay
+    totalCoverage += coverageHours
     const daysWorked = s.shifts.filter(sh => ['closed', 'incident'].includes(sh.status)).length
 
-    // FIX: quitar Departamento y mantener columnas alineadas con TOTALES.
+    // FIX: quitar columnas Departamento y Descuentos. Las faltas no descuentan
+    // bajo LFT (no devengan), por eso NETO = Bruto y la columna Descuentos sale.
+    const extrasNote = coverageHours > 0
+      ? `<div class="emp-code">incl. ${coverageHours.toFixed(2)}h cobertura</div>`
+      : ''
     rows.push(`<tr class="${idx % 2 === 0 ? 'alt' : ''}">
       <td class="emp-cell">
         <div class="emp-name">${escapeHtml(emp.name)}</div>
@@ -101,10 +91,9 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
       </td>
       <td class="center">${daysWorked}d / ${Number(s.totalH || 0).toFixed(2)}h</td>
       <td class="money">$${monthlyToHourly(emp).toFixed(2)}</td>
-      <td class="center">${Number(s.otHours || 0).toFixed(2)}</td>
+      <td class="center">${extrasHoras.toFixed(2)}${extrasNote}</td>
       <td class="incidents-cell ${incidentParts.length ? '' : 'empty'}">${escapeHtml(incidentText)}</td>
       <td class="money">$${grossWithVac.toFixed(2)}</td>
-      <td class="money">${deductions > 0 ? '-$' + deductions.toFixed(2) : '$0.00'}</td>
       <td class="money net">$${netWithVac.toFixed(2)}</td>
       <td class="signature-cell">
         <div class="sig-line"></div>
@@ -113,12 +102,13 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     </tr>`
     )
 
-    if (s.retardoDesc > 0) {
-      incidentRows.push(`<tr><td>${escapeHtml(emp.name)}</td><td>Retardos (${s.retardos})</td><td>${escapeHtml(weekStart)} al ${escapeHtml(weekEnd)}</td><td class="money">-$${s.retardoDesc.toFixed(2)}</td></tr>`)
+    // FIX LFT: la seccion informativa abajo lista faltas y retardos como referencia,
+    // sin columna de pesos, porque NO se descuentan al empleado.
+    if (faltasInjustReales > 0) {
+      incidentRows.push(`<tr><td>${escapeHtml(emp.name)}</td><td>Faltas injustificadas</td><td class="center">${faltasInjustReales}</td><td>${escapeHtml(weekStart)} al ${escapeHtml(weekEnd)}</td></tr>`)
     }
-    const totalFaltaDesc = s.incidentDesc + extraFaltaDesc
-    if (totalFaltaDesc > 0 || faltasReales > 0) {
-      incidentRows.push(`<tr><td>${escapeHtml(emp.name)}</td><td>Faltas injustificadas (${faltasReales})</td><td>${escapeHtml(weekStart)} al ${escapeHtml(weekEnd)}</td><td class="money">${totalFaltaDesc > 0 ? '-$' + totalFaltaDesc.toFixed(2) : '$0.00'}</td></tr>`)
+    if (s.retardos > 0) {
+      incidentRows.push(`<tr><td>${escapeHtml(emp.name)}</td><td>Retardos</td><td class="center">${s.retardos}</td><td>${escapeHtml(weekStart)} al ${escapeHtml(weekEnd)}</td></tr>`)
     }
 
     for (const d of vac.details) {
@@ -154,9 +144,9 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
 
   const incidentSection = incidentRows.length > 0
     ? `<section>
-        <h2>Incidencias aplicadas</h2>
+        <h2>Faltas y retardos del período <span class="muted">(referencia · no descuentan)</span></h2>
         <table class="detail-table">
-          <thead><tr><th>Empleado</th><th>Tipo</th><th>Fecha</th><th class="money">Descuento aplicado</th></tr></thead>
+          <thead><tr><th>Empleado</th><th>Tipo</th><th class="center">Cantidad</th><th>Período</th></tr></thead>
           <tbody>${incidentRows.join('')}</tbody>
         </table>
        </section>`
@@ -274,7 +264,6 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
           <th class="center">Extras (h)</th>
           <th>Incidencias</th>
           <th class="money">Bruto</th>
-          <th class="money">Descuentos</th>
           <th class="money">NETO</th>
           <th>Firma</th>
         </tr>
@@ -285,9 +274,9 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
           <td colspan="5">
             TOTALES · ${active.length} empleado${active.length !== 1 ? 's' : ''}
             ${totalVac > 0 ? `<span class="muted"> · incluye $${totalVac.toFixed(2)} de vacaciones/comp.</span>` : ''}
+            ${totalCoverage > 0 ? `<span class="muted"> · ${totalCoverage.toFixed(2)}h de cobertura</span>` : ''}
           </td>
           <td class="money">$${totalGross.toFixed(2)}</td>
-          <td class="money">${totalDeductions > 0 ? '-$' + totalDeductions.toFixed(2) : '$0.00'}</td>
           <td class="money net">$${totalNet.toFixed(2)}</td>
           <td></td>
         </tr>
