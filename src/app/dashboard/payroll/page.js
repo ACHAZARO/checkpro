@@ -36,7 +36,7 @@ function escapeHtml(s) {
 }
 
 // ── Compact single-page report ───────────────────────────────────────────────
-function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrollLegend, vacByEmp, coveragePayMode, periodIncidencias = []) {
+function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrollLegend, vacByEmp, coveragePayMode, closedByNameFallback = 'Gerente') {
   const active = employees.filter(e => e.has_shift)
   let totalNet = 0
   let totalGross = 0
@@ -57,28 +57,23 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     const grossWithVac = s.grossPay + vac.totalVacationPay
     const deductions = s.retardoDesc + s.incidentDesc
     const netWithVac = Math.max(0, grossWithVac - deductions)
-    const realIncidents = (periodIncidencias || []).filter(i => i.employee_id === emp.id)
-    // FIX: mostrar incidencias del periodo por empleado igual que el resumen en pantalla.
+    // FIX: la celda firmable solo muestra faltas injustificadas y retardos reconocibles por el empleado.
     const incidentParts = []
+    if (s.faltasInjustificadas > 0) incidentParts.push(`${s.faltasInjustificadas} falta${s.faltasInjustificadas > 1 ? 's' : ''} injustificada${s.faltasInjustificadas > 1 ? 's' : ''}`)
     if (s.retardos > 0) incidentParts.push(`${s.retardos} retardo${s.retardos > 1 ? 's' : ''}`)
-    if (s.faltasInjustificadas > 0) incidentParts.push(`${s.faltasInjustificadas} falta${s.faltasInjustificadas > 1 ? 's' : ''} inj.`)
-    if (s.incidents > 0) incidentParts.push(`${s.incidents} incidencia${s.incidents > 1 ? 's' : ''}`)
-    if (realIncidents.length > 0) incidentParts.push(`${realIncidents.length} incidencia${realIncidents.length > 1 ? 's' : ''}${realIncidents.some(i => i.status === 'open') ? ' abierta' + (realIncidents.length > 1 ? 's' : '') : ''}`)
-    if (s.otHours > 0) incidentParts.push(`${Number(s.otHours || 0).toFixed(2)}h extra`)
-    if (vac.daysInRange > 0) incidentParts.push(`${vac.daysInRange}d vacaciones`)
-    const incidentText = incidentParts.length ? incidentParts.join(' | ') : 'Sin novedad'
+    const incidentText = incidentParts.length ? incidentParts.join(', ') : 'Sin novedad'
     totalGross += grossWithVac
     totalNet += netWithVac
     totalDeductions += deductions
     totalVac += vac.totalVacationPay
     const daysWorked = s.shifts.filter(sh => ['closed', 'incident'].includes(sh.status)).length
 
+    // FIX: quitar Departamento y mantener columnas alineadas con TOTALES.
     rows.push(`<tr class="${idx % 2 === 0 ? 'alt' : ''}">
       <td class="emp-cell">
         <div class="emp-name">${escapeHtml(emp.name)}</div>
         <div class="emp-code">${emp.employee_code ? escapeHtml(emp.employee_code) : ''}</div>
       </td>
-      <td>${emp.department ? escapeHtml(emp.department) : '-'}</td>
       <td class="center">${daysWorked}d / ${Number(s.totalH || 0).toFixed(2)}h</td>
       <td class="money">$${monthlyToHourly(emp).toFixed(2)}</td>
       <td class="center">${Number(s.otHours || 0).toFixed(2)}</td>
@@ -141,6 +136,9 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
        </section>`
     : ''
   const issuedDate = new Date(cut.created_at || Date.now()).toLocaleDateString('es-MX')
+  // FIX: cortes legacy sin closed_by_name usan el perfil actual como respaldo al imprimir.
+  const managerName = cut.closed_by_name || closedByNameFallback || 'Gerente'
+  // FIX: contador de pagina va fixed fuera del tfoot repetido para evitar Pagina 0 de 0 en Chromium.
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
     <title>Nómina ${escapeHtml(cut.start_date)}</title>
@@ -172,7 +170,7 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
       .page-body { padding: 4px 0 8px; }
       .page-footer { padding-top: 8px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 8.5pt; line-height: 1.4; }
       .footer-meta { margin-top: 4px; display: flex; justify-content: space-between; color: #9ca3af; font-size: 8pt; }
-      .page-number::after { content: "Pagina " counter(page) " de " counter(pages); }
+      .fixed-page-number { display: none; }
       .header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 10px; }
       .brand { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
       .logo { height: 42px; width: auto; object-fit: contain; }
@@ -193,7 +191,20 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
       .signature-cell { min-width: 130px; height: 32px; padding-left: 10px; vertical-align: bottom; }
       .sig-line { width: 100%; height: 18px; border-bottom: 1px solid #1f2937; }
       .sig-caption { margin-top: 2px; color: #6b7280; font-size: 7pt; text-align: center; }
-      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+      @media print {
+        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        /* FIX: Chromium imprime counter(pages) como 0 dentro de tfoot repetido; fixed funciona por hoja. */
+        .fixed-page-number {
+          display: block;
+          position: fixed;
+          right: 10mm;
+          bottom: 5mm;
+          z-index: 9999;
+          color: #9ca3af;
+          font-size: 8pt;
+        }
+        .fixed-page-number::after { content: "Pagina " counter(page) " de " counter(pages); }
+      }
     </style>
   </head><body><div class="page">
   <table class="page-table">
@@ -210,7 +221,7 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
       </div>
       <div class="meta">
         <div><b>Emisión:</b> ${escapeHtml(issuedDate)}</div>
-        <div><b>Gerente:</b> ${escapeHtml(cut.closed_by_name || 'Gerente')}</div>
+        <div><b>Gerente:</b> ${escapeHtml(managerName)}</div>
         ${cut.notes ? `<div><b>Notas:</b> ${escapeHtml(cut.notes)}</div>` : ''}
       </div>
     </div>
@@ -223,13 +234,12 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
       <thead>
         <tr>
           <th>Empleado</th>
-          <th>Departamento</th>
           <th class="center">Días/Horas</th>
           <th class="money">Tarifa hora</th>
-          <th class="center">HE (h)</th>
+          <th class="center">Extras (h)</th>
           <th>Incidencias</th>
           <th class="money">Bruto</th>
-          <th class="money">Deduc.</th>
+          <th class="money">Descuentos</th>
           <th class="money">NETO</th>
           <th>Firma</th>
         </tr>
@@ -237,7 +247,7 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
       <tbody>${rows.join('')}</tbody>
       <tfoot>
         <tr>
-          <td colspan="6">
+          <td colspan="5">
             TOTALES · ${active.length} empleado${active.length !== 1 ? 's' : ''}
             ${totalVac > 0 ? `<span class="muted"> · incluye $${totalVac.toFixed(2)} de vacaciones/comp.</span>` : ''}
           </td>
@@ -256,11 +266,12 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     <tfoot><tr><td>
       <div class="page-footer">
         ${payrollLegend ? `<div>${escapeHtml(payrollLegend)}</div>` : ''}
-        <div class="footer-meta"><span>CheckPro - Emitido ${escapeHtml(issuedDate)}</span><span class="page-number"></span></div>
+        <div class="footer-meta"><span>CheckPro - Emitido ${escapeHtml(issuedDate)}</span></div>
       </div>
     </td></tr></tfoot>
   </table>
 
+  <div class="fixed-page-number"></div>
 
   </div></body></html>`
 }
@@ -275,6 +286,7 @@ export default function PayrollPage() {
   const [vacPeriods, setVacPeriods] = useState([])
   const [tenantId, setTenantId] = useState(null)
   const [tenantData, setTenantData] = useState(null) // { config, name }
+  const [currentUserName, setCurrentUserName] = useState('Gerente')
   // Rol + lista completa de sucursales + sucursal actualmente seleccionada.
   // - Gerente (role='manager'): queda FIJADO a su prof.branch_id, sin selector.
   // - Propietario (role='owner'|'super_admin'): puede cambiar la sucursal con
@@ -296,8 +308,11 @@ export default function PayrollPage() {
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) return
-    const { data: prof } = await supabase.from('profiles').select('tenant_id,branch_id,role').eq('id', session.user.id).single()
+    const { data: prof } = await supabase.from('profiles').select('tenant_id,branch_id,role,name').eq('id', session.user.id).single()
     if (!prof?.tenant_id) return
+    // FIX: usar el nombre real del perfil para guardar quien cierra el corte.
+    const closerName = prof.name || session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email || 'Gerente'
+    setCurrentUserName(closerName)
     setTenantId(prof.tenant_id)
     setRole(prof.role || 'manager')
     const { data: tenant } = await supabase.from('tenants').select('config,name').eq('id', prof.tenant_id).single()
@@ -577,7 +592,8 @@ export default function PayrollPage() {
     const { data: cut, error } = await supabase.from('week_cuts').insert({
       tenant_id: tenantId, start_date: startStr, end_date: endStr,
       branch_id: myBranchId,
-      closed_by_name: 'Gerente', notes: cutNote, paid: true,
+      // FIX: guardar el nombre real del usuario que cierra el corte.
+      closed_by_name: currentUserName, notes: cutNote, paid: true,
       shift_ids: uncutShifts.map(s => s.id)
     }).select().single()
     if (error) { toast.error('Error al cerrar semana'); setClosing(false); return }
@@ -628,20 +644,15 @@ export default function PayrollPage() {
       setClosing(false)
       return
     }
-    // FIX: pasar incidencias reales del periodo para que el reporte impreso coincida con el resumen.
-    setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered', payrollIncidenciasForWeek))
+    // FIX: pasar fallback del nombre real por si el corte recargado viene sin closed_by_name.
+    setPrintHTML(buildReportHTML(fresh, uncutShifts, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered', currentUserName))
     setClosing(false)
   }
 
   function openReport(cut) {
     const ws = shifts.filter(s => cut.shift_ids?.includes(s.id))
-    // FIX: filtrar incidencias por el rango del corte reimpreso, no por la semana actual.
-    const cutIncidencias = payrollIncidencias.filter(i =>
-      i.date_str >= cut.start_date &&
-      i.date_str <= cut.end_date &&
-      myEmpIds.has(i.employee_id)
-    )
-    setPrintHTML(buildReportHTML(cut, ws, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered', cutIncidencias))
+    // FIX: reimpresiones legacy usan el nombre del perfil actual si el corte no lo guardo.
+    setPrintHTML(buildReportHTML(cut, ws, emps, cfg?.branchName, cfg?.logoUrl, cfg?.payrollLegend, vacByEmp, cfg?.coveragePayMode ?? 'covered', currentUserName))
   }
 
   // ── Exportar XLS del corte ───────────────────────────────────────────────
@@ -916,7 +927,8 @@ export default function PayrollPage() {
           {weekShifts.length > 0 && (
             <button
               onClick={() => handleExportPayrollXLS(
-                { start_date: weekStartStr, end_date: weekEndStr, closed_by_name: 'Gerente', notes: cutNote },
+                // FIX: export temporal tambien muestra el nombre real del usuario actual.
+                { start_date: weekStartStr, end_date: weekEndStr, closed_by_name: currentUserName, notes: cutNote },
                 weekShifts
               )}
               disabled={exportingXLS}
