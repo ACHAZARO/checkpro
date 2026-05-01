@@ -2,7 +2,7 @@
 // src/app/dashboard/payroll/page.js
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
-import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate, dayKey, DAY_FL, vacationPayForWeek } from '@/lib/utils'
+import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate, dayKey, DAYS, DAY_FL, vacationPayForWeek } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import { Building2, Lock, AlertTriangle, Printer, FileSpreadsheet, Loader2, X, Check, Minus, DollarSign, Flag } from 'lucide-react'
 
