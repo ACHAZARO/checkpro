@@ -1,6 +1,6 @@
 'use client'
 // src/app/dashboard/payroll/page.js
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
 import { isoDate, weekRange, empWeekSummary, monthlyToHourly, fmtTime, fmtDate, dayKey, DAYS, DAY_FL, vacationPayForWeek } from '@/lib/utils'
 import toast from 'react-hot-toast'
@@ -152,9 +152,14 @@ function buildReportHTML(cut, weekShifts, employees, branchName, logoUrl, payrol
     <title>Nómina ${escapeHtml(cut.start_date)}</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
-      @page { margin: 12mm; }
-      body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 9pt; color: #1f2937; line-height: 1.35; }
-      .page { padding: 0; }
+      /* FIX: forzar tamaño carta (estándar México) y márgenes consistentes. */
+      @page { size: letter; margin: 12mm; }
+      html, body { width: 100%; }
+      body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 9pt; color: #1f2937; line-height: 1.35; background: #fff; }
+      .page { padding: 14mm 12mm; max-width: 215.9mm; margin: 0 auto; }
+      @media print {
+        .page { padding: 0; max-width: none; }
+      }
       table { width: 100%; border-collapse: collapse; }
       th { padding: 7px 8px; border-bottom: 1px solid #d1d5db; color: #4b5563; font-size: 8.5pt; font-weight: 700; text-align: left; }
       td { padding: 7px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
@@ -269,6 +274,7 @@ export default function PayrollPage() {
   const [cutNote, setCutNote] = useState('')
   const [closing, setClosing] = useState(false)
   const [printHTML, setPrintHTML] = useState(null)
+  const printIframeRef = useRef(null) // FIX: imprimir el iframe, no la pagina padre.
   const [resolvingId, setResolvingId] = useState(null)
   const [exportingXLS, setExportingXLS] = useState(false)
   const [openPayrollIncidents, setOpenPayrollIncidents] = useState(0)
@@ -933,10 +939,15 @@ export default function PayrollPage() {
       )}
 
       {/* ── Print modal ────────────────────────────────────────────────────── */}
+      {/* FIX: imprimir SOLO el iframe (no la pagina padre con los botones). */}
       {printHTML && (
         <div className="fixed inset-0 z-[500] bg-white flex flex-col">
-          <div className="flex gap-3 items-center p-3 bg-dark-900 border-b border-dark-border shrink-0 no-print">
-            <button onClick={() => window.print()}
+          <div className="flex gap-3 items-center p-3 bg-dark-900 border-b border-dark-border shrink-0">
+            <button onClick={() => {
+              const w = printIframeRef.current?.contentWindow
+              if (!w) return
+              try { w.focus(); w.print() } catch (e) { console.error('print error', e) }
+            }}
               className="flex items-center gap-2 px-4 py-2 bg-brand-400 text-black text-sm font-bold rounded-xl">
               <Printer size={16} /> Imprimir / Guardar PDF
             </button>
@@ -946,7 +957,7 @@ export default function PayrollPage() {
             </button>
             <span className="text-xs text-gray-500 font-mono hidden md:block">Todos los empleados en una sola hoja</span>
           </div>
-          <iframe srcDoc={printHTML} className="flex-1 border-0 w-full" title="Reporte semanal" />
+          <iframe ref={printIframeRef} srcDoc={printHTML} className="flex-1 border-0 w-full bg-white" title="Reporte semanal" />
         </div>
       )}
     </div>
